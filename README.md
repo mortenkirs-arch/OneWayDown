@@ -20,6 +20,10 @@ survive longer and get replaced sooner.
 The Foreman upgrade hires a foreman who walks the site barking orders: the crew swings
 faster while they're alive (and faster still near them), but monsters can kill them too.
 
+The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
+fast), guards (patrol and fight monsters on their own) and a demolitionist (plants charges
+on the toughest blocks).
+
 The Crew page (`C`) tracks every miner's blocks mined, gold earned, monsters fought off,
 times saved and time on the job, and its Graveyard tab remembers the fallen. Enemies only act
 while you are on the dig site.

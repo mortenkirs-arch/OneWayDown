@@ -7,6 +7,16 @@ import random
 
 from .config import GRID
 
+# Crew roles. Diggers mine blocks; the rest are specialist hires from the Crew menu.
+ROLES = {
+    "miner":         dict(hp=1.0, speed=1.0, height=0),
+    "driller":       dict(hp=2.0, speed=0.65, height=2),   # stocky, slow, hits blocks rapidly
+    "guard":         dict(hp=1.6, speed=1.1, height=3),    # patrols and fights monsters
+    "demolitionist": dict(hp=1.0, speed=1.0, height=0),    # plants charges on tough blocks
+    "foreman":       dict(hp=1.0, speed=0.8, height=4),    # walks the site barking orders
+}
+DIGGERS = ("miner", "driller")
+CRIT_ANIM_SECS = 0.6          # a critical strike's slam-and-recoil animation
 MINER_MAX_HP = 10.0           # before Hard Hats (see upgrades.miner_max_hp)
 
 SKIN_TONES = [(255, 224, 196), (241, 194, 155), (224, 172, 125), (198, 134, 90),
@@ -72,6 +82,7 @@ class Miner:
         self.target = None
         self.swing = random.uniform(0, 0.5)
         self.anim = 0.0          # pickaxe animation 0..1
+        self.crit = 0.0          # seconds left of the critical-strike slam animation
         self.facing = 1
         self.max_hp = MINER_MAX_HP
         self.hp = self.max_hp
@@ -83,14 +94,22 @@ class Miner:
         self.inspecting = None   # foreman: the miner currently being supervised
         self.walk_timer = 0.0    # foreman: seconds until moving on to someone else
         self.bark_timer = 2.0    # foreman: seconds until the next shouted order
-        if role == "foreman":    # foremen are a little taller, and always have a mustache
-            self.height = 4
-            if self.facial is None:
-                self.facial = "mustache"
+        self.task = "idle"       # guard / demolitionist: what they're up to (see World)
+        self.task_timer = random.uniform(4.0, 8.0)
+        self.goal = None         # guard / demolitionist: (x, y) they're heading for, or a target
+        self.charge_cell = None  # demolitionist: the block they're about to blow
+        if ROLES[role]["height"]:
+            self.height = ROLES[role]["height"]
+        if role == "foreman" and self.facial is None:   # foremen always have a mustache
+            self.facial = "mustache"
 
     @property
     def is_foreman(self):
         return self.role == "foreman"
+
+    @property
+    def digs(self):
+        return self.role in DIGGERS
 
     def to_dict(self):
         return {**self.look(), "role": self.role, "stats": dict(self.stats)}

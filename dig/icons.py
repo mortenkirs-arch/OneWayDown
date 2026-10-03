@@ -100,6 +100,26 @@ def draw_icon(surf, kind, c, s, col):
             pygame.draw.line(surf, col, (x0, y + dy * s), (x0 + ln * s, y + dy * s), 3)
             pygame.draw.arc(surf, col, (x0 + ln * s - s * 0.2, y + dy * s - s * 0.35, s * 0.35, s * 0.35),
                             -math.pi / 2, math.pi, 3)
+    elif kind == "jackhammer":
+        pygame.draw.line(surf, col, (x - s * 0.55, y - s * 0.7), (x + s * 0.55, y - s * 0.7), 4)
+        pygame.draw.rect(surf, col, (x - s * 0.3, y - s * 0.6, s * 0.6, s * 0.75), border_radius=3)
+        pygame.draw.rect(surf, dark, (x - s * 0.3, y - s * 0.35, s * 0.6, s * 0.15))
+        pygame.draw.line(surf, col, (x, y + s * 0.15), (x, y + s * 0.8), 3)
+        for d in (-1, 1):   # it's rattling
+            pygame.draw.line(surf, col, (x + d * s * 0.5, y + s * 0.35), (x + d * s * 0.75, y + s * 0.2), 2)
+    elif kind == "lantern":
+        pygame.draw.arc(surf, col, (x - s * 0.3, y - s * 0.95, s * 0.6, s * 0.5), 0, math.pi, 2)
+        pygame.draw.rect(surf, col, (x - s * 0.45, y - s * 0.6, s * 0.9, s * 0.15))
+        pygame.draw.rect(surf, col, (x - s * 0.38, y - s * 0.45, s * 0.76, s * 1.0), 2, border_radius=3)
+        pygame.draw.circle(surf, (255, 225, 130), (x, y + s * 0.05), max(2, s * 0.22))
+        pygame.draw.rect(surf, col, (x - s * 0.45, y + s * 0.55, s * 0.9, s * 0.15))
+    elif kind == "tnt":
+        for i, dy in enumerate((0.35, 0.0, -0.35)):   # sideways sticks, stacked
+            pygame.draw.rect(surf, col, (x - s * 0.7 + (i % 2) * s * 0.1, y + dy * s - s * 0.15, s * 1.3, s * 0.3),
+                             border_radius=3)
+        pygame.draw.line(surf, dark, (x - s * 0.15, y - s * 0.55), (x - s * 0.15, y + s * 0.55), 2)
+        pygame.draw.line(surf, col, (x + s * 0.6, y - s * 0.4), (x + s * 0.8, y - s * 0.75), 2)
+        pygame.draw.circle(surf, (255, 200, 80), (x + s * 0.82, y - s * 0.8), max(2, s * 0.13))
     elif kind == "moon":
         pygame.draw.circle(surf, col, c, s * 0.7)
         pygame.draw.circle(surf, dark, (x + s * 0.3, y - s * 0.2), s * 0.6)

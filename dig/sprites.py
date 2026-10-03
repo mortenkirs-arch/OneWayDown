@@ -8,9 +8,14 @@ from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
 from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
 from .enemies import FLY_ALTITUDE, TELEGRAPH_SECS, TRANSFORM_SECS
 from .iso import iso, origin_at
-from .miners import LOOK_FIELDS
+from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
 
 HI_VIS = (255, 140, 30)
+HELMETS = {"miner": (240, 200, 40), "foreman": (245, 245, 250), "driller": (240, 130, 40),
+           "guard": (62, 68, 86), "demolitionist": (200, 50, 45)}
+STEEL, DIAMOND = (190, 190, 200), (110, 235, 245)   # pick head colour, before / after Diamond Tips
+CRIT_SLAM = 0.3     # share of the crit animation spent slamming down (the rest is the recoil)
+CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the shoulder
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24}
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
 SPIDER_BODY = (58, 48, 70)
@@ -92,13 +97,20 @@ def _draw_mohawk(surf, m, head):
                                        (hx + 2, top - 1), (hx + 4, top - 5), (hx + 6, top)])
 
 
-def draw_miner(surf, fonts, m, rise, t):
+def pick_head_color(diamond_lv):
+    """Steel turning to diamond blue as Diamond Tips levels up (fully blue at its max, 10)."""
+    return _lerp(STEEL, DIAMOND, min(1.0, diamond_lv / 10))
+
+
+def draw_miner(surf, fonts, m, rise, t, pick_level=0):
     fx, fy = _feet(m, rise)
     if m.state == "down":
         draw_grave(surf, fonts, fx, fy, m.respawn)
         return
     grabbed = m.state == "grabbed"
     lift = m.height
+    timer = getattr(m, "crit", 0.0)
+    crit = 1 - timer / CRIT_ANIM_SECS if timer > 0 and not grabbed else None   # 0..1 through a crit
     pygame.draw.ellipse(surf, (16, 12, 20), (fx - 11, fy - 4, 22, 8))
     if grabbed:
         fx += struggle_shake(t)
@@ -106,47 +118,145 @@ def draw_miner(surf, fonts, m, rise, t):
         pygame.draw.line(surf, (60, 50, 40), (fx - 3, fy - 9), (fx - 3 + kick, fy - 1), 3)
         pygame.draw.line(surf, (60, 50, 40), (fx + 3, fy - 9), (fx + 3 - kick, fy - 1), 3)
         bob = 0
+    elif crit is not None and crit > CRIT_SLAM:   # recoil: the whole miner bounces off the impact
+        bob = math.sin((crit - CRIT_SLAM) / (1 - CRIT_SLAM) * math.pi) * 7
+    elif getattr(m, "task", "") == "planting":    # demolitionist kneeling over a charge
+        bob = -6
     else:
         bob = abs(math.sin(t * 10)) * 2 if m.anim == 0 else 0
-    body = pygame.Rect(fx - 7, fy - 26 - bob - lift, 14, 18 + lift)
+    role = getattr(m, "role", "miner")
+    foreman = role == "foreman"
+    width = 18 if role in ("driller", "guard") else 14   # drillers and guards are built broad
+    body = pygame.Rect(fx - width // 2, fy - 26 - bob - lift, width, 18 + lift + min(0, bob))
     head = (fx, int(fy - 32 - bob - lift))
     _draw_hair_back(surf, m, head)
-    foreman = getattr(m, "role", "miner") == "foreman"
     pygame.draw.rect(surf, m.shirt, body, border_radius=4)
-    if foreman:   # hi-vis vest with a reflective stripe, open at the front
-        vest = pygame.Rect(fx - 7, body.y + 1, 14, body.h - 9)
-        pygame.draw.rect(surf, HI_VIS, vest, border_radius=3)
-        pygame.draw.rect(surf, (255, 245, 200), (vest.x, vest.centery, vest.w, 3))
-        pygame.draw.line(surf, m.shirt, (fx, vest.y), (fx, vest.y + 6), 2)
-    pygame.draw.rect(surf, (60, 50, 40), (fx - 7, fy - 10 - bob, 14, 8), border_radius=2)
+    _draw_outfit(surf, m, role, body, fx)
+    pygame.draw.rect(surf, (60, 50, 40), (fx - width // 2, fy - 10 - max(0, bob), width, 8), border_radius=2)
     # choked purple / venom green / drained pale, depending on who has hold of them
     tint = m.attacker.spec["tint"] if grabbed and m.attacker else m.skin
     skin = _lerp(m.skin, tint, 1 - m.hp / m.max_hp) if grabbed else m.skin
     pygame.draw.circle(surf, skin, head, 7)
     _draw_face(surf, m, head, grabbed)
-    helmet = (245, 245, 250) if foreman else (240, 200, 40)   # the boss wears white
-    pygame.draw.ellipse(surf, helmet, (head[0] - 9, head[1] - 10, 18, 9))
+    if role == "driller" and not grabbed:   # safety goggles
+        for d in (-3, 3):
+            pygame.draw.circle(surf, (150, 200, 230), (head[0] + d + m.facing, head[1] - 1), 2)
+        pygame.draw.line(surf, (60, 60, 70), (head[0] - 7, head[1] - 1), (head[0] + 7, head[1] - 1), 1)
+    pygame.draw.ellipse(surf, HELMETS.get(role, HELMETS["miner"]), (head[0] - 9, head[1] - 10, 18, 9))
     if foreman:
         pygame.draw.line(surf, HI_VIS, (head[0] - 6, head[1] - 7), (head[0] + 6, head[1] - 7), 2)
-    pygame.draw.circle(surf, (255, 250, 200), (head[0] + 5 * m.facing, head[1] - 6), 2)
+    lamp = (head[0] + 5 * m.facing, head[1] - 6)
+    if role == "guard":   # a proper lantern on the helmet, glowing
+        pygame.draw.circle(surf, (255, 220, 120), lamp, 4)
+        pygame.draw.circle(surf, (255, 255, 230), lamp, 2)
+    else:
+        pygame.draw.circle(surf, (255, 250, 200), lamp, 2)
     if m.style == "mohawk":
         _draw_mohawk(surf, m, head)
     if foreman:
         _draw_clipboard(surf, m, fx, fy - bob - lift, skin, grabbed, t)
+    elif role == "driller":
+        _draw_jackhammer(surf, m, fx, fy - max(0, bob), grabbed, t)
+    elif role == "demolitionist":
+        _draw_charge_stick(surf, m, fx, fy - bob - lift, skin, grabbed, t)
     else:
-        # pickaxe: normal swing, or flailing wildly while grabbed
+        # pickaxe: normal swing, flailing wildly while grabbed, or a crit's overhead slam
         # (rests raised in front of the miner so it doesn't hide their face)
-        ang = math.sin(t * 16) * 1.4 if grabbed else (0.35 + m.anim * 2.0) * m.facing
         hx, hy = fx + 7 * m.facing, fy - 20 - bob - lift
+        head_col = pick_head_color(pick_level)
+        if grabbed:
+            ang = math.sin(t * 16) * 1.4
+        elif crit is not None and crit <= CRIT_SLAM:   # slam: from behind the head down into the block
+            q = crit / CRIT_SLAM
+            ang = (CRIT_WINDUP + (2.4 - CRIT_WINDUP) * q) * m.facing
+            for k in range(1, 4):   # motion trail along the arc
+                ta = (CRIT_WINDUP + (2.4 - CRIT_WINDUP) * max(0.0, q - k * 0.12)) * m.facing
+                tx, ty = hx + math.sin(ta) * 20, hy - math.cos(ta) * 20
+                pygame.draw.line(surf, _lerp((255, 220, 150), (60, 50, 70), k / 4), (hx, hy), (tx, ty), 2)
+        elif crit is not None:   # stuck in the block, shuddering
+            ang = (2.3 + math.sin(crit * 70) * 0.12 * (1 - crit)) * m.facing
+        else:
+            ang = (0.35 + m.anim * 2.0) * m.facing
         ex, ey = hx + math.sin(ang) * 18, hy - math.cos(ang) * 18
         pygame.draw.line(surf, (120, 82, 44), (hx, hy), (ex, ey), 3)
-        perp = (math.cos(ang) * 8, math.sin(ang) * 8)
-        pygame.draw.line(surf, (190, 190, 200), (ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]), 3)
+        if role == "guard":   # a guard swings a shovel, not a pick
+            d = (math.sin(ang), -math.cos(ang))
+            p = (math.cos(ang) * 4, math.sin(ang) * 4)
+            blade = [(ex - p[0], ey - p[1]), (ex + p[0], ey + p[1]),
+                     (ex + p[0] + d[0] * 8, ey + p[1] + d[1] * 8), (ex - p[0] + d[0] * 8, ey - p[1] + d[1] * 8)]
+            pygame.draw.polygon(surf, (150, 150, 160), blade)
+            pygame.draw.polygon(surf, (90, 90, 100), blade, 1)
+            tips = ()
+        else:
+            perp = (math.cos(ang) * 8, math.sin(ang) * 8)
+            tips = ((ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]))
+            pygame.draw.line(surf, head_col, tips[0], tips[1], 3)
+        if pick_level >= 5:   # diamond tips glint
+            for i, (gx, gy) in enumerate(tips):
+                if math.sin(t * 5 + i * 2.1 + m.x * 3) > 0.75:
+                    pygame.draw.circle(surf, (255, 255, 255), (int(gx), int(gy)), 2)
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 46 - lift, m.hp / m.max_hp, 26)
     if grabbed and int(t * 4) % 2 == 0:
         img = fonts[26].render("!!", True, BAD)
         surf.blit(img, img.get_rect(midbottom=(fx, fy - 50 - lift)))
+
+
+def _draw_outfit(surf, m, role, body, fx):
+    """Role clothing over the shirt."""
+    if role == "foreman":   # hi-vis vest with a reflective stripe, open at the front
+        vest = pygame.Rect(body.x, body.y + 1, body.w, body.h - 9)
+        pygame.draw.rect(surf, HI_VIS, vest, border_radius=3)
+        pygame.draw.rect(surf, (255, 245, 200), (vest.x, vest.centery, vest.w, 3))
+        pygame.draw.line(surf, m.shirt, (fx, vest.y), (fx, vest.y + 6), 2)
+    elif role == "driller":   # heavy work jacket, shirt collar showing
+        jacket = pygame.Rect(body.x, body.y + 3, body.w, body.h - 11)
+        pygame.draw.rect(surf, (125, 85, 50), jacket, border_radius=4)
+        pygame.draw.line(surf, (90, 60, 35), (fx, jacket.y), (fx, jacket.bottom), 1)
+        pygame.draw.rect(surf, (200, 200, 205), (jacket.x, jacket.centery + 2, jacket.w, 2))
+    elif role == "guard":   # navy uniform with a gold badge and a belt
+        coat = pygame.Rect(body.x, body.y, body.w, body.h - 8)
+        pygame.draw.rect(surf, (52, 62, 100), coat, border_radius=4)
+        pygame.draw.circle(surf, (255, 205, 70), (fx - 4 * m.facing, coat.y + 6), 2)
+        pygame.draw.line(surf, (30, 30, 40), (coat.x, coat.bottom - 2), (coat.right - 1, coat.bottom - 2), 2)
+    elif role == "demolitionist":   # leather vest with a bandolier of dynamite
+        vest = pygame.Rect(body.x, body.y + 1, body.w, body.h - 9)
+        pygame.draw.rect(surf, (115, 75, 45), vest, border_radius=3)
+        pygame.draw.line(surf, m.shirt, (fx, vest.y), (fx, vest.bottom), 3)
+        for i in range(3):   # sticks along a strap from shoulder to hip
+            sx, sy = vest.x + 2 + i * 4, vest.y + 2 + i * 3
+            pygame.draw.rect(surf, (210, 40, 40), (sx, sy, 3, 5))
+
+
+def _draw_jackhammer(surf, m, fx, base, grabbed, t):
+    """A pneumatic drill held upright in front; rattles and sparks while drilling."""
+    f = m.facing
+    drilling = m.anim > 0.3 and not grabbed
+    jx = fx + 9 * f + (math.sin(t * 90) * 1.2 if drilling else 0) + (struggle_shake(t) if grabbed else 0)
+    top = base - 26 + (math.sin(t * 70) * 1 if drilling else 0)
+    pygame.draw.line(surf, (40, 40, 48), (jx - 5, top), (jx + 5, top), 3)            # T-handle
+    pygame.draw.rect(surf, (120, 122, 132), (jx - 3, top + 1, 7, 13), border_radius=2)  # motor body
+    pygame.draw.rect(surf, (230, 150, 50), (jx - 3, top + 5, 7, 3))                   # warning band
+    pygame.draw.line(surf, (200, 200, 210), (jx, top + 14), (jx, base - 1), 2)        # chisel bit
+    if drilling and math.sin(t * 40) > 0.3:
+        pygame.draw.circle(surf, (255, 230, 140), (int(jx + math.sin(t * 77) * 3), int(base - 1)), 1)
+
+
+def _draw_charge_stick(surf, m, fx, top, skin, grabbed, t):
+    """A demolitionist holds a stick of dynamite; kneeling, it goes down onto the block."""
+    f = m.facing
+    planting = getattr(m, "task", "") == "planting"
+    if grabbed:
+        cx, cy = fx + 8 * f + math.sin(t * 16) * 5, top - 28
+    elif planting:
+        cx, cy = fx + 9 * f, top - 4
+    else:
+        cx, cy = fx + 8 * f, top - 17
+    pygame.draw.rect(surf, (210, 40, 40), (cx - 2, cy - 5, 5, 10), border_radius=2)
+    pygame.draw.line(surf, (70, 58, 46), (cx, cy - 5), (cx + 2 * f, cy - 9), 1)
+    if planting and int(t * 12) % 2:
+        pygame.draw.circle(surf, (255, 220, 120), (int(cx + 2 * f), int(cy - 9)), 2)
+    pygame.draw.circle(surf, skin, (int(cx), int(cy + 3)), 2)
 
 
 def _draw_clipboard(surf, m, fx, top, skin, grabbed, t):
@@ -186,11 +296,11 @@ class _Portrait:
         self.respawn = 0.0
 
 
-def draw_portrait(surf, fonts, look, center, dead=False):
+def draw_portrait(surf, fonts, look, center, dead=False, pick_level=0):
     """A miner standing still, for the Crew page. The dead are shown faded and in greyscale."""
     img = pygame.Surface((64, 72), pygame.SRCALPHA)
     with origin_at((32, 64)):
-        draw_miner(img, fonts, _Portrait(look), 0, 0.0)
+        draw_miner(img, fonts, _Portrait(look), 0, 0.0, pick_level)
     if dead:
         img = pygame.transform.grayscale(img)
         img.set_alpha(170)

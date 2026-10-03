@@ -10,10 +10,11 @@ STICK_STAGGER = (0, 3, -2, 2)  # sideways offset of each stacked stick, so the p
 
 
 class Bomb:
-    def __init__(self, cell, radius):
+    def __init__(self, cell, radius, owner=None):
         self.cell = cell
         self.radius = radius          # 1 = 3x3, 2 = 5x5, 3 = 7x7
-        self.age = 0.0
+        self.owner = owner            # demolitionist who planted it (None = your thrown Dynamite)
+        self.age = THROW_SECS if owner else 0.0   # planted charges skip the throw: fuse is already lit
 
     @property
     def landed(self):

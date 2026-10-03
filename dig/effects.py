@@ -2,6 +2,11 @@
 import math
 import random
 
+CRIT_BURST_SECS = 0.3    # critical-strike impact starburst
+QUAKE_SPEED = 6.0        # tiles/s a Seismic Strikes wave travels across the board
+QUAKE_RADIUS = 2.6       # tiles the wave reaches before fading out
+QUAKE_SECS = QUAKE_RADIUS / QUAKE_SPEED + 0.25
+
 
 class Particle:
     def __init__(self, x, y, color, big=False):

@@ -10,8 +10,8 @@ from ..enemies import ENEMY_START_DEPTH, max_enemies
 from ..iso import origin_at
 from ..render import draw_board, draw_flying_coins, pick_block
 from ..sprites import pick_enemy
-from ..ui import Button, draw_coin, draw_panel, draw_text
-from ..upgrades import BRANCHES, UPGRADES, enemy_hit_floor, next_milestone
+from ..ui import Button, draw_callout, draw_coin, draw_glow, draw_panel, draw_pointer, draw_text
+from ..upgrades import BRANCHES, UPGRADE_BY_KEY, UPGRADES, enemy_hit_floor, next_milestone
 from ..util import fmt
 from .base import Scene
 
@@ -61,6 +61,7 @@ class PlayScene(Scene):
             draw_board(surf, w, self.fonts, hover=block, hover_enemy=enemy)
         self.draw_hud(surf, mouse)
         draw_flying_coins(surf, w.coins)   # over the HUD, so they visibly drop into the counter
+        self.draw_first_hire_guide(surf, w)
         if w.notice:
             self.draw_notice(surf, w)
 
@@ -80,6 +81,18 @@ class PlayScene(Scene):
         bar = pygame.Rect(34, 126, 384, 8)
         pygame.draw.rect(surf, (20, 16, 28), bar, border_radius=4)
         pygame.draw.rect(surf, (240, 150, 90), (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=4)
+
+    def draw_first_hire_guide(self, surf, w):
+        """New game, no miners yet: once the first miner is affordable, point at the Upgrades button."""
+        if w.lv("miners") > 0 or w.gold < w.cost(UPGRADE_BY_KEY["miners"]):
+            return
+        t = time.time()
+        btn = self.buttons[0].rect
+        draw_glow(surf, btn, t)
+        draw_pointer(surf, (btn.left - 10, btn.centery), "right", t)
+        draw_callout(surf, self.fonts, [("You can afford your first miner!", GOLD),
+                                        ("Open Upgrades (U) to hire them", TEXT)],
+                     (btn.left - 60, btn.centery + 6), "midright")
 
     def draw_notice(self, surf, w):
         """Banner when a depth milestone opens up new upgrades."""
@@ -116,12 +129,12 @@ class PlayScene(Scene):
             pygame.draw.circle(surf, BAD, badge, 12)
             draw_text(surf, f, str(affordable), 22, TEXT, badge, "center")
 
-        crew = w.workers()
-        down = sum(1 for m in crew if m.state == "down")
-        boss = next((m for m in w.miners if m.is_foreman), None)
-        boss_text = ("" if not boss else "  + foreman" if boss.state != "down" else "  (foreman dead)")
-        stats = [(f"Miners: {len(crew) - down}/{len(crew)}" + (f"  ({down} dead)" if down else "") + boss_text,
-                  BAD if down or (boss and boss.state == "down") else TEXT),
+        down = sum(1 for m in w.miners if m.state == "down")
+        specialists = sum(1 for m in w.miners if m.role != "miner")
+        crew_text = f"Crew: {len(w.miners) - down}/{len(w.miners)}" + (f"  ({down} dead)" if down else "")
+        if specialists:
+            crew_text += f"  incl. {specialists} specialist{'s' if specialists != 1 else ''}"
+        stats = [(crew_text, BAD if down else TEXT),
                  (f"Pick dmg: {fmt(w.miner_hit_damage())}", TEXT),
                  (f"Click dmg: {fmt(w.click_hit_damage())}  (blocks)", TEXT),
                  (f"Monster dmg: {fmt(w.monster_hit_damage())}  (min {enemy_hit_floor(w.lv('executioner')):.0%})",

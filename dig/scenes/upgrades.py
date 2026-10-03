@@ -9,7 +9,7 @@ from ..config import GOLD, GOOD, BAD, H, MUTED, TEXT, W
 from ..effects import CoinFly, Particle
 from ..icons import draw_icon
 from ..render import draw_flying_coins
-from ..ui import Button, draw_gold, draw_panel, draw_text, wrap_text
+from ..ui import Button, draw_callout, draw_glow, draw_gold, draw_panel, draw_pointer, draw_text, wrap_text
 from ..upgrades import BRANCHES, TABS, UPGRADES, UPGRADES_BY_TAB, UPGRADE_BY_KEY, is_maxed, is_unlocked
 from ..util import fmt, shade
 from .base import Scene
@@ -193,6 +193,29 @@ class UpgradeScene(Scene):
         draw_text(s, f, "Click: select   Right-click / Enter: buy   1-5 / Tab: switch menu", 20, MUTED,
                   (PANEL_RECT.centerx, PANEL_RECT.bottom + 22), "center")
         draw_flying_coins(s, self.coins)
+        self.draw_first_hire_guide(s, t)
+
+    def draw_first_hire_guide(self, s, t):
+        """No miners yet and one is affordable: lead the way to Crew > Hire Miner > Buy."""
+        w = self.world
+        hire = UPGRADE_BY_KEY["miners"]
+        if w.lv("miners") > 0 or not w.can_buy(hire):
+            return
+        f = self.fonts
+        if self.tab != "crew":
+            tab = self.tab_rects["crew"]
+            draw_glow(s, tab, t)
+            draw_pointer(s, (tab.centerx, tab.bottom + 6), "up", t)
+            draw_callout(s, f, [("Your first miner is in the Crew menu", GOLD)], (tab.centerx + 40, tab.bottom + 52),
+                         "midtop")
+            return
+        x, y = self.node_pos["miners"]
+        draw_pointer(s, (x - 46, y), "right", t)
+        if self.selected != "miners":
+            draw_callout(s, f, [("Click Hire Miner", GOLD)], (x - 100, y), "midright")
+            return
+        draw_callout(s, f, [("Hire your first miner!", GOLD), ("Press Buy", TEXT)], (x - 100, y), "midright")
+        draw_glow(s, self.buy_button.rect, t)
 
     # ----- drawing helpers ------------------------------------------------
     def draw_tabs(self, s, mouse):
@@ -227,10 +250,15 @@ class UpgradeScene(Scene):
         for up in ups:
             child = self.node_pos[up["key"]]
             color = BRANCHES[up["branch"]]["color"]
+            open_ = self.world.available(up)   # the upgrade this path leads to can actually be bought
             for req_key, req_lv in up["requires"]:
                 pts = bezier(self.node_pos[req_key], child)
                 have = self.world.levels[req_key]
-                if have >= req_lv:
+                if have >= req_lv and not open_:
+                    # this requirement is done, but the upgrade is still locked (depth milestone or
+                    # another prerequisite): a lit line, but no glow or flowing dots
+                    pygame.draw.lines(s, shade(color, 0.75), False, pts, 3)
+                elif have >= req_lv:
                     pygame.draw.lines(s, shade(color, 0.35), False, pts, 10)
                     pygame.draw.lines(s, color, False, pts, 4)
                     for k in range(3):   # dots flowing along unlocked paths

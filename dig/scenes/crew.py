@@ -13,6 +13,8 @@ from ..util import fmt, shade
 from .base import Scene
 
 TABS = [("crew", "Active crew"), ("graveyard", "Graveyard")]
+ROLE_BADGES = {"foreman": ("FOREMAN", HI_VIS), "driller": ("DRILLER", (235, 160, 70)),
+               "guard": ("GUARD", (120, 150, 220)), "demolitionist": ("DEMOLITION", (225, 80, 70))}
 TAB_W, TAB_H, TAB_Y = 230, 46, 84
 LIST_TOP, LIST_BOTTOM = 196, H - 72
 ROW_H = 62
@@ -70,8 +72,9 @@ class CrewScene(Scene):
         col, desc = self.sort[self.tab]
         if col:
             rows.sort(key=lambda r: self.value(r, col), reverse=desc)
-        if self.tab == "crew":   # the foreman always heads the list
-            rows.sort(key=lambda r: r["role"] != "foreman")
+        if self.tab == "crew":   # the foreman heads the list, then the specialists, then the miners
+            order = {"foreman": 0, "guard": 1, "demolitionist": 2, "driller": 3}
+            rows.sort(key=lambda r: order.get(r["role"], 4))
         return rows
 
     @staticmethod
@@ -204,20 +207,28 @@ class CrewScene(Scene):
             pygame.draw.rect(s, (46, 40, 62) if hover else PANEL, rect, border_radius=8)
             pygame.draw.rect(s, PANEL_EDGE, rect, 1, border_radius=8)
             fallen = dead or row.get("miner") is not None and row["miner"].state == "down"
-            draw_portrait(s, f, row["look"], (rect.x + 38, rect.centery - 2), dead=fallen)
+            draw_portrait(s, f, row["look"], (rect.x + 38, rect.centery - 2), dead=fallen,
+                          pick_level=self.world.lv("diamond"))
             name = draw_text(s, f, row["name"], 28, MUTED if dead else TEXT, (100, rect.centery - 8), "midleft")
             tag_right = name.right
-            if row["role"] == "foreman":   # FOREMAN badge after the name
-                pill = pygame.Rect(name.right + 8, name.centery - 8, 70, 16)
-                pygame.draw.rect(s, shade(HI_VIS, 0.6) if dead else HI_VIS, pill, border_radius=8)
-                draw_text(s, f, "FOREMAN", 16, (40, 24, 10), pill.center, "center")
+            if row["role"] in ROLE_BADGES:   # role badge after the name
+                text, color = ROLE_BADGES[row["role"]]
+                label = f[16].render(text, True, (30, 20, 10))
+                pill = pygame.Rect(name.right + 8, name.centery - 8, label.get_width() + 14, 16)
+                pygame.draw.rect(s, shade(color, 0.6) if dead else color, pill, border_radius=8)
+                s.blit(label, label.get_rect(center=pill.center))
                 tag_right = pill.right
             if row["stats"]["gold"] == best_gold and best_gold > 0 and len(rows) > 1:   # top earner
                 draw_icon(s, "crown", (tag_right + 16, name.centery - 1), 9, GOLD)
             self.draw_status(s, row, rect)
             st = row["stats"]
             # the foreman doesn't dig: show the orders they've barked in the blocks column instead
-            work = f"{st.get('orders', 0)} orders" if row["role"] == "foreman" else fmt(st["blocks"])
+            if row["role"] == "foreman":
+                work = f"{st.get('orders', 0)} orders"
+            elif row["role"] == "guard":
+                work = "-"
+            else:
+                work = fmt(st["blocks"])
             cells = [work, None, str(st["monsters"]), str(st["saved"]), fmt_time(row["time"]), f"{row['depth']}m"]
             for (key, _, _, x), text in zip(COLUMNS, cells):
                 if key == "gold":
@@ -250,6 +261,16 @@ class CrewScene(Scene):
         elif m.is_foreman:
             label = f"Supervising {m.inspecting.name}" if m.inspecting else "Barking orders"
             color = HI_VIS
+        elif m.role == "guard":
+            fighting = m.task == "fighting" and m.goal in self.world.enemies
+            label = f"Fighting a {m.goal.spec['name']}" if fighting else "On patrol"
+            color = ROLE_BADGES["guard"][1]
+        elif m.role == "demolitionist":
+            label = {"walking": "Heading to a tough block", "planting": "Planting a charge!",
+                     "taking cover": "Taking cover"}.get(m.task, "Waiting for the next job")
+            color = ROLE_BADGES["demolitionist"][1]
+        elif m.role == "driller":
+            label, color = "Drilling", ROLE_BADGES["driller"][1]
         else:
             label, color = "Working", GOOD
         draw_text(s, f, label, 24, color, (x, y - 9), "midleft")

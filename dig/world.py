@@ -6,16 +6,18 @@ import time
 from .blocks import BLOCKS, Block, generate_layer
 from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, W
 from .dynamite import EXPLOSION_SECS, Bomb
-from .effects import CoinFly, Floater, Particle, Smoke
+from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, CoinFly, Floater, Particle,
+                      Smoke)
 from .enemies import (ENEMY_START_DEPTH, ENEMY_TYPES, Enemy, choose_kind, edge_cells, max_enemies,
                       spawn_interval)
 from .iso import iso
-from .miners import Miner, base_name, new_stats, numbered_name
+from .miners import CRIT_ANIM_SECS, ROLES, Miner, base_name, new_stats, numbered_name
 from .sprites import bomb_fuse_tip, enemy_anchor
 from .upgrades import (BRANCHES, UPGRADES, bounty_mult, click_damage, depth_reached, dynamite_interval,
                        enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, miner_regen, miner_strike, monster_damage, ore_damage_mult, ore_mult,
-                       respawn_secs, second_wind_boost, swing_time, upgrade_cost, value_mult, walk_speed)
+                       demo_interval, respawn_secs, second_wind_boost, swing_time, upgrade_cost, value_mult,
+                       walk_speed)
 from .util import fmt
 
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1))
@@ -27,7 +29,17 @@ FOREMAN_STAND_OFF = 0.7  # how close the foreman walks up to the miner they're s
 FOREMAN_BARKS = ["Faster!", "Put your backs into it!", "That ore won't dig itself!", "Break's over!",
                  "Mind the monsters!", "Deeper!", "Swing, swing, swing!", "Good work, {name}!",
                  "Is that a nap, {name}?", "Gold doesn't wait!"]
-MAX_FLYING_COINS = 40   # cap on coins in the air at once (late game breaks blocks very fast)
+DRILL_HITS_PER_SWING = 7.5   # a driller lands this many small hits in the time a miner swings once...
+DRILL_SHARE = 0.25           # ...each worth this much of a miner's hit: ~1.9x a miner's digging
+GUARD_SWING = 0.7            # seconds between a guard's shovel blows
+GUARD_SHARE = 0.14           # each blow takes this share of a monster's max health (~5s to fell one alone)
+GUARD_RUSH = 1.4             # guards break into a run when there's a monster to fight
+GUARD_REACH = 0.45           # how close a guard gets before swinging
+CHARGE_SPLASH_SHARE = 0.35   # a demolitionist's charge destroys its target and takes this share
+CHARGE_SPLASH_PER_LV = 0.05  # (+ this per level) of max health off the blocks around it
+MAX_FLYING_COINS = 40
+SAVE_VERSION = 2         # bump when the save format changes meaning (see from_dict migrations)
+   # cap on coins in the air at once (late game breaks blocks very fast)
 
 
 def is_ore(block):
@@ -65,6 +77,8 @@ class World:
         self.shake_power = 0.0                                  # max shake offset in px
         self.flash = 0.0                                        # white flash seconds left
         self.coins = []                                         # earned coins flying to the HUD counter
+        self.crit_bursts = []                                   # [x, y, age] critical-strike impact flashes
+        self.quakes = []                                        # [x, y, age, cells dusted] Seismic Strike waves
         self.gold_bump = 0.0                                    # HUD counter pulse when coins land
         self.notice = None                                      # [text, seconds left] milestone banner
         self.new_unlocks = set()                                # upgrades opened up by depth, not yet looked at
@@ -77,7 +91,17 @@ class World:
         return miner_count(self.lv("miners")) + self.lv("nightshift")
 
     def workers(self):
+        """Everyone the foreman supervises (the whole crew apart from the foreman)."""
         return [m for m in self.miners if not m.is_foreman]
+
+    def diggers(self):
+        """Crew who mine blocks: miners and drillers."""
+        return [m for m in self.miners if m.digs]
+
+    def wanted_crew(self):
+        """How many of each role the upgrades call for."""
+        return {"miner": self.crew_size(), "driller": self.lv("driller"), "guard": self.lv("guard"),
+                "demolitionist": 1 if self.lv("demolition") else 0, "foreman": 1 if self.lv("foreman") else 0}
 
     def foreman(self):
         """The foreman on site and alive, or None (their bonuses only apply while they are)."""
@@ -85,7 +109,7 @@ class World:
 
     def miner_hit_damage(self):
         """Miner damage to blocks (before the Diamond Tips bonus on ore)."""
-        team = 1 + 0.03 * self.lv("teamwork") * len(self.workers())
+        team = 1 + 0.03 * self.lv("teamwork") * len(self.diggers())
         return miner_damage(self.lv("power")) * team * masterwork_mult(self.lv("masterwork"))
 
     def miner_swing_time(self):
@@ -126,24 +150,24 @@ class World:
         return self.gps_cached
 
     def sync_miners(self, announce=False):
-        max_hp = miner_max_hp(self.lv("hardhats"))
         for m in self.miners:   # Hard Hats: raise max hp, keeping each miner's current share
+            max_hp = self.max_hp_for(m.role)
             if m.max_hp != max_hp:
                 m.hp *= max_hp / m.max_hp
                 m.max_hp = max_hp
-        while len(self.workers()) < self.crew_size():
-            miner = self.recruit()
-            self.miners.append(miner)
-            if announce:
-                px, py = self.entity_screen(miner, 60)
-                self.floaters.append(Floater(f"{miner.name} joins the crew!", px, py, GOOD, life=2.0, size=24))
-        if self.lv("foreman") and not any(m.is_foreman for m in self.miners):
-            boss = self.recruit("foreman")
-            self.miners.append(boss)
-            if announce:
-                px, py = self.entity_screen(boss, 60)
-                self.floaters.append(Floater(f"Foreman {boss.name} arrives on site!", px, py, GOLD,
-                                             life=2.4, size=26))
+        for role, wanted in self.wanted_crew().items():
+            while sum(1 for m in self.miners if m.role == role) < wanted:
+                miner = self.recruit(role)
+                self.miners.append(miner)
+                if announce:
+                    px, py = self.entity_screen(miner, 60)
+                    text = (f"{miner.name} joins the crew!" if role == "miner"
+                            else f"{role.capitalize()} {miner.name} arrives on site!")
+                    self.floaters.append(Floater(text, px, py, GOOD if role == "miner" else GOLD,
+                                                 life=2.2, size=24))
+
+    def max_hp_for(self, role):
+        return miner_max_hp(self.lv("hardhats")) * ROLES[role]["hp"]
 
     def recruit(self, role="miner"):
         """A brand-new miner. Shares a fallen miner's name? They become 'Gus II', 'Gus III', ..."""
@@ -151,7 +175,7 @@ class World:
         fallen = sum(1 for g in self.graveyard if base_name(g["name"]) == miner.name)
         if fallen:
             miner.name = numbered_name(miner.name, fallen)
-        miner.max_hp = miner.hp = miner_max_hp(self.lv("hardhats"))
+        miner.max_hp = miner.hp = self.max_hp_for(role)
         miner.stats = new_stats(self.depth, self.clock)
         return miner
 
@@ -411,13 +435,28 @@ class World:
         crit = random.random() < 0.05 * self.lv("crit")
         if crit:
             dmg *= 3
-            px, py = self.cell_screen(cell)
-            self.floaters.append(Floater("CRIT!", px, py - 30, (255, 150, 90), life=0.7, size=22))
+            self.crit_effects(cell, miner)
         below = self.next.get(cell)
         if below and self.lv("deepstrike"):   # Deep Strike: crack the block underneath (never breaks it)
             below.hp = max(below.max_hp * 0.05, below.hp - dmg * 0.1 * self.lv("deepstrike"))
         if self.damage(cell, dmg, by=miner) and crit and self.lv("quake"):
             self.splash(cell, dmg * 0.25 * self.lv("quake"), BRANCHES["tools"]["color"], by=miner)
+
+    def crit_effects(self, cell, miner):
+        """The look of a critical strike: the miner's overhead slam, an impact starburst, and with
+        Seismic Strikes an earthquake wave rippling out across the board."""
+        px, py = self.cell_screen(cell)
+        if miner:
+            miner.crit = CRIT_ANIM_SECS
+        self.crit_bursts.append([px, py, 0.0])
+        self.floaters.append(Floater("CRIT!", px, py - 78, (255, 150, 90), life=0.9, size=32))   # clear of the slam
+        for _ in range(16):
+            color = random.choice([(255, 230, 150), (255, 160, 70), (255, 255, 255)])
+            self.particles.append(Particle(px, py, color, big=True))
+        if self.lv("quake"):
+            self.quakes.append([cell[0] + 0.5, cell[1] + 0.5, 0.0, set()])
+            if self.shake < 0.15:   # a small jolt (dynamite's bigger shake wins if both happen)
+                self.shake, self.shake_power = 0.15, 3
 
     def player_hit(self, cell, sparks=6, ring_color=(255, 255, 255), manual=False):
         """A click on a block - yours (manual) or the Auto-Tapper's."""
@@ -452,11 +491,14 @@ class World:
         dmg = self.click_hit_damage() * 10
         z = self.column_height(cx, cy) + self.rise
         px, py = iso(cx + 0.5, cy + 0.5, z)
-        size = 46 + 26 * radius
+        charge = bomb.owner is not None   # a demolitionist's planted charge: smaller and targeted
+        size = 36 if charge else 46 + 26 * radius
         self.explosions.append([px, py - 10, 0.0, size])
-        self.shake, self.shake_power = 0.35 + 0.1 * radius, 5 + 3 * radius
-        self.flash = 0.12
-        self.floaters.append(Floater("BOOM!", px, py - 40, (255, 120, 60), life=1.3, size=44 + 10 * radius))
+        if self.shake < 0.25:
+            self.shake, self.shake_power = (0.2, 4) if charge else (0.35 + 0.1 * radius, 5 + 3 * radius)
+        self.flash = 0.06 if charge else 0.12
+        self.floaters.append(Floater("BOOM!", px, py - 40, (255, 120, 60), life=1.3,
+                                     size=34 if charge else 44 + 10 * radius))
         self.rings.append([px, py, 0.0, 120 * radius, (255, 150, 60)])
         self.rings.append([px, py, 0.0, 70 * radius, (255, 240, 200)])
         for _ in range(30 * radius):   # embers and debris
@@ -466,8 +508,22 @@ class World:
             self.smoke.append(Smoke(px, py - 14, size=8 + 4 * radius))
         for e in list(self.enemies):   # dynamite hurts monsters caught in the blast too
             if e.targetable and max(abs(e.x - (cx + 0.5)), abs(e.y - (cy + 0.5))) <= radius + 0.6:
-                self.hit_enemy(e, self.monster_hit_damage() * 3)
+                if charge:
+                    self.hit_enemy(e, e.max_hp * 0.25, floor=False, by=bomb.owner)
+                else:
+                    self.hit_enemy(e, self.monster_hit_damage() * 3)
         depth = self.depth
+        if charge:   # target destroyed outright, neighbours cracked by a share of their health
+            splash = CHARGE_SPLASH_SHARE + CHARGE_SPLASH_PER_LV * self.lv("demolition")
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    block = self.current.get((cx + dx, cy + dy))
+                    if self.depth != depth:
+                        return
+                    if block:
+                        share = 1.0 if (dx, dy) == (0, 0) else splash
+                        self.damage((cx + dx, cy + dy), block.max_hp * share + 1e-9, sparks=2, by=bomb.owner)
+            return
         for dx in range(-radius, radius + 1):
             for dy in range(-radius, radius + 1):
                 if self.depth != depth:
@@ -561,7 +617,7 @@ class World:
             if dist > 0.03:
                 boss.facing = 1 if (dx - dy) >= 0 else -1
             if dist > FOREMAN_STAND_OFF:   # stroll over (a bit slower than the crew)
-                step = min(dist - FOREMAN_STAND_OFF, speed * 0.8 * dt)
+                step = min(dist - FOREMAN_STAND_OFF, speed * dt)
                 boss.x += dx / dist * step
                 boss.y += dy / dist * step
         boss.bark_timer -= dt
@@ -574,6 +630,93 @@ class World:
                 line = line.format(name=boss.inspecting.name if boss.inspecting else "everyone")
             px, py = self.entity_screen(boss, 62 + boss.height)
             self.floaters.append(Floater(line, px, py, (255, 255, 255), life=1.8, size=20))
+
+    # ----- specialists ------------------------------------------------------
+    def driller_hit(self, cell, driller):
+        """One rattle of the jackhammer: a slice of a miner's hit (Diamond Tips still applies)."""
+        block = self.current.get(cell)
+        if not block:
+            return
+        dmg = self.miner_hit_damage() * DRILL_SHARE
+        if is_ore(block):
+            dmg *= ore_damage_mult(self.lv("diamond"))
+        if random.random() < 0.3:   # dust and chips flying off the bit
+            px, py = self.cell_screen(cell)
+            chip = random.choice([(160, 140, 120), (200, 190, 170)])
+            self.particles.append(Particle(px + random.uniform(-6, 6), py, chip))
+        self.damage(cell, dmg, sparks=0, by=driller)
+
+    def walk_to(self, m, gx, gy, speed, dt, stop=0.05):
+        """Step towards (gx, gy). Returns True once within `stop` tiles."""
+        dx, dy = gx - m.x, gy - m.y
+        dist = math.hypot(dx, dy)
+        if dist > 0.03:
+            m.facing = 1 if (dx - dy) >= 0 else -1
+        if dist <= stop + 1e-3:   # (tolerance: stepping exactly to `stop` can leave a float hair short)
+            return True
+        step = min(dist - stop, speed * dt)
+        m.x = min(GRID - 0.05, max(0.05, m.x + dx / dist * step))
+        m.y = min(GRID - 0.05, max(0.05, m.y + dy / dist * step))
+        return False
+
+    def update_guard(self, guard, dt, speed):
+        """Fight the nearest monster - anyone being grabbed first - otherwise patrol around the crew."""
+        guard.anim = max(0.0, guard.anim - dt * 4)
+        threats = [e for e in self.enemies if e.targetable]
+        if threats:
+            target = min(threats, key=lambda e: (e.state != "attacking",
+                                                 math.hypot(e.x - guard.x, e.y - guard.y)))
+            guard.task, guard.goal = "fighting", target
+            if self.walk_to(guard, target.x, target.y, speed * GUARD_RUSH, dt, stop=GUARD_REACH):
+                guard.swing -= dt
+                if guard.swing <= 0:
+                    guard.swing = GUARD_SWING
+                    self.guard_strike(guard, target)
+            return
+        guard.task_timer -= dt
+        if guard.task != "patrol" or guard.task_timer <= 0 or guard.goal is None:
+            crew = [m for m in self.workers() if m is not guard and m.state != "down"]
+            near = random.choice(crew) if crew else guard
+            guard.task, guard.task_timer = "patrol", random.uniform(4.0, 8.0)
+            guard.goal = (min(GRID - 0.5, max(0.5, near.x + random.uniform(-1.5, 1.5))),
+                          min(GRID - 0.5, max(0.5, near.y + random.uniform(-1.5, 1.5))))
+        self.walk_to(guard, *guard.goal, speed * 0.6, dt)
+
+    def guard_strike(self, guard, enemy):
+        if not enemy or enemy not in self.enemies or not enemy.targetable:
+            return
+        guard.anim = 1.0
+        self.hit_enemy(enemy, enemy.max_hp * GUARD_SHARE, floor=False, ring=(120, 150, 220), by=guard)
+
+    def update_demolitionist(self, demo, dt, speed):
+        """Every so often: pick the toughest block, walk over, plant a charge, run for cover."""
+        demo.anim = max(0.0, demo.anim - dt * 2)
+        if demo.task == "idle":
+            demo.task_timer -= dt
+            if demo.task_timer <= 0 and self.current:
+                toughness = lambda c: self.current[c].hp * (1.5 if is_ore(self.current[c]) else 1)
+                demo.task, demo.charge_cell = "walking", max(self.current, key=toughness)
+            elif isinstance(demo.goal, tuple):
+                self.walk_to(demo, *demo.goal, speed * 0.5, dt)
+        elif demo.task == "walking":
+            if demo.charge_cell not in self.current:   # broken by someone else first
+                demo.task, demo.task_timer = "idle", 1.0
+            elif self.walk_to(demo, demo.charge_cell[0] + 0.5, demo.charge_cell[1] + 0.5, speed, dt):
+                demo.task, demo.task_timer = "planting", 0.9
+        elif demo.task == "planting":   # kneeling over the charge
+            demo.task_timer -= dt
+            demo.anim = 1.0
+            if demo.task_timer <= 0:
+                self.bombs.append(Bomb(demo.charge_cell, 1, owner=demo))
+                px, py = self.cell_screen(demo.charge_cell)
+                self.floaters.append(Floater("Fire in the hole!", px, py - 60, (255, 170, 80), life=1.4, size=22))
+                away = random.uniform(0, math.tau)   # run for cover
+                demo.goal = (min(GRID - 0.5, max(0.5, demo.x + math.cos(away) * 2.5)),
+                             min(GRID - 0.5, max(0.5, demo.y + math.sin(away) * 2.5)))
+                demo.task, demo.task_timer = "taking cover", demo_interval(self.lv("demolition"))
+        elif demo.task == "taking cover":
+            if self.walk_to(demo, *demo.goal, speed * 1.3, dt):
+                demo.task, demo.goal = "idle", None
 
     # ----- update ---------------------------------------------------------
     def update(self, dt, combat=True):
@@ -598,15 +741,21 @@ class World:
                 if random.random() < dt * 5:   # panicked sweat
                     px, py = self.entity_screen(m, 36)
                     self.particles.append(Particle(px, py, (150, 200, 255)))
-                if combat and self.lv("defense"):   # Self Defense: swing at the attacker
+                if combat and m.role == "guard":   # guards always fight back, and hard
+                    m.swing -= dt
+                    if m.swing <= 0:
+                        m.swing += GUARD_SWING
+                        self.guard_strike(m, m.attacker)
+                elif combat and self.lv("defense"):   # Self Defense: swing at the attacker
                     m.swing -= dt
                     if m.swing <= 0:
                         m.swing += swing
                         self.miner_strike(m)
                 continue
             m.hp = min(m.max_hp, m.hp + regen * dt)
-            if m.is_foreman:
-                self.update_foreman(m, dt, speed)
+            if not m.digs:   # specialists with their own jobs
+                {"foreman": self.update_foreman, "guard": self.update_guard,
+                 "demolitionist": self.update_demolitionist}[m.role](m, dt, speed * ROLES[m.role]["speed"])
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
                 continue
             my_swing = swing   # pep talk: miners near the foreman swing faster still
@@ -615,15 +764,22 @@ class World:
             if m.target is None or m.target not in self.current:
                 m.target = self.pick_target(m)
             m.anim = max(0.0, m.anim - dt * 4)
+            m.crit = max(0.0, m.crit - dt)
             if m.target:
                 tx, ty = m.target[0] + 0.5, m.target[1] + 0.5
                 dx, dy = tx - m.x, ty - m.y
                 dist = math.hypot(dx, dy)
                 if dist > 0.05:
-                    step = min(dist, speed * dt)
+                    step = min(dist, speed * ROLES[m.role]["speed"] * dt)
                     m.x += dx / dist * step
                     m.y += dy / dist * step
                     m.facing = 1 if (dx - dy) >= 0 else -1
+                elif m.role == "driller":   # jackhammer: many small hits, no crits
+                    m.swing -= dt
+                    m.anim = 0.6
+                    while m.swing <= 0 and m.target in self.current:
+                        m.swing += my_swing / DRILL_HITS_PER_SWING
+                        self.driller_hit(m.target, m)
                 else:
                     m.swing -= dt
                     if m.swing <= 0:
@@ -677,6 +833,20 @@ class World:
         self.smoke = [s for s in self.smoke if s.life > 0]
         self.shake = max(0.0, self.shake - dt)
         self.flash = max(0.0, self.flash - dt)
+        for b in self.crit_bursts:
+            b[2] += dt
+        self.crit_bursts = [b for b in self.crit_bursts if b[2] < CRIT_BURST_SECS]
+        for q in self.quakes:
+            q[2] += dt
+            front = q[2] * QUAKE_SPEED
+            for cell in self.current:   # kick up dust as the wave front rolls over each block
+                if cell not in q[3] and math.hypot(cell[0] + 0.5 - q[0], cell[1] + 0.5 - q[1]) <= front:
+                    q[3].add(cell)
+                    if front <= QUAKE_RADIUS:
+                        px, py = self.cell_screen(cell)
+                        for _ in range(2):
+                            self.particles.append(Particle(px, py, random.choice([(150, 120, 90), (110, 88, 66)])))
+        self.quakes = [q for q in self.quakes if q[2] < QUAKE_SECS]
         for c in self.coins:
             c.update(dt)
             if c.arrived:
@@ -700,6 +870,7 @@ class World:
         return dict(gold=self.gold, depth=self.depth, levels=self.levels,
                     total_blocks=self.total_blocks, current=pack(self.current),
                     next=pack(self.next), saved_at=time.time(), gps=self.gold_per_sec(),
+                    version=SAVE_VERSION,
                     crew=[m.to_dict() for m in self.miners], graveyard=self.graveyard,
                     clock=self.clock, grid=GRID)
 
@@ -709,6 +880,8 @@ class World:
         w.gold = d["gold"]
         w.depth = d["depth"]
         w.levels.update({k: v for k, v in d["levels"].items() if k in w.levels})
+        if d.get("version", 1) < 2:   # v1: Hire Miner level 0 meant one miner; now it means none
+            w.levels["miners"] += 1
         w.total_blocks = d.get("total_blocks", 0)
         w.clock = d.get("clock", 0.0)
         w.graveyard = d.get("graveyard", [])
@@ -723,7 +896,7 @@ class World:
         w.miners = []
         w.sync_miners()
         saved_crew = d.get("crew", [])   # older saves have no crew: keep random looks
-        for role in ("miner", "foreman"):   # match by role: the foreman can sit anywhere in the list
+        for role in ROLES:   # match by role: specialists can sit anywhere in the list
             ours = [m for m in w.miners if m.role == role]
             theirs = [c for c in saved_crew if c.get("role", "miner") == role]
             for miner, data in zip(ours, theirs):

@@ -6,8 +6,9 @@ import time
 import pygame
 
 from .blocks import BLOCKS
-from .config import GRID, W
+from .config import GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
+from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
 from .iso import cube_faces, draw_cube, iso, point_in_poly
 from .sprites import draw_bomb, draw_enemy, draw_miner
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
@@ -58,7 +59,7 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     for (x, y), b in w.next.items():
         items.append((x + y, 0, "block", (x, y, 1 + r, b, 1)))
     for (x, y), b in w.current.items():
-        items.append((x + y, 1, "block", (x, y, 2 + r, b, 0)))
+        items.append((x + y, 1, "block", (x, y, 2 + r + quake_lift(w, x + 0.5, y + 0.5), b, 0)))
     miner_key = {}
     for m in w.miners:
         miner_key[id(m)] = m.x + m.y - 0.5
@@ -89,14 +90,16 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                 if hover and hover[0] == (x, y):
                     for name, poly in faces.items():
                         pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
-        elif kind == "miner":
-            draw_miner(surf, fonts, data, r, t)
+        elif kind == "miner":   # rides the quake heave with the block underfoot
+            draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
         else:
             draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
     draw_blast_zones(surf, w, t)
+    draw_quake_waves(surf, w)
+    draw_crit_bursts(surf, w)
     for rx, ry, age, max_r, color in w.rings:
         q = age / 0.4
         rad = max(2, int(max_r * q))
@@ -132,6 +135,57 @@ def draw_flying_coins(surf, coins):
         pygame.draw.ellipse(surf, COIN, rect)
         if squash > 0.5:
             pygame.draw.circle(surf, COIN_SHINE, (rect.centerx - 1, rect.centery - 2), max(1, r // 3))
+
+
+def quake_lift(world, x, y):
+    """How far (in blocks) a Seismic Strikes wave is heaving the ground at grid point (x, y) right now.
+    The wave front rolls outward; ground it passes pops up and settles, strongest near the epicentre."""
+    lift = 0.0
+    for qx, qy, age, _ in world.quakes:
+        d = math.hypot(x - qx, y - qy)
+        if d > QUAKE_RADIUS:
+            continue
+        behind = age * QUAKE_SPEED - d          # how far the front has travelled past this point
+        if 0 <= behind < 1.2:
+            strength = (1 - d / QUAKE_RADIUS) ** 0.7
+            lift += math.sin(behind / 1.2 * math.pi) * 0.3 * strength
+    return lift
+
+
+def draw_quake_waves(surf, world):
+    """Dusty rings spreading across the board from each Seismic Strikes crit."""
+    if not world.quakes:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for qx, qy, age, _ in world.quakes:
+        cx, cy = iso(qx, qy, 2 + world.rise)
+        for lag, width in ((0.0, 5), (0.45, 3)):   # leading ring and a fainter one behind it
+            rad = age * QUAKE_SPEED - lag
+            if not 0 < rad <= QUAKE_RADIUS:
+                continue
+            fade = 1 - rad / QUAKE_RADIUS
+            rect = pygame.Rect(0, 0, rad * TILE_W * 1.42, rad * TILE_H * 1.42)   # a circle on the iso ground
+            rect.center = (cx, cy)
+            pygame.draw.ellipse(overlay, (215, 180, 130, int(200 * fade)), rect, width)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_crit_bursts(surf, world):
+    """Star-shaped flash where a critical strike lands."""
+    for x, y, age in world.crit_bursts:
+        p = age / CRIT_BURST_SECS
+        outer, inner = 10 + 34 * p, 4 + 9 * p
+        size = int(outer * 2 + 4)
+        star = pygame.Surface((size, size), pygame.SRCALPHA)
+        c = size / 2
+        pts = []
+        for i in range(16):
+            r = outer if i % 2 == 0 else inner
+            a = i / 16 * math.tau + p * 0.6
+            pts.append((c + math.cos(a) * r, c + math.sin(a) * r * 0.75))
+        pygame.draw.polygon(star, (255, 170, 70, int(220 * (1 - p))), pts)
+        pygame.draw.circle(star, (255, 255, 235, int(255 * (1 - p))), (c, c), max(2, int(inner * 1.2)))
+        surf.blit(star, (x - c, y - c))
 
 
 def draw_blast_zones(surf, world, t):

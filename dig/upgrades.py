@@ -9,9 +9,10 @@ from .util import fmt
 
 # ----- stat formulas -------------------------------------------------------
 # Crew
-def miner_count(lv): return 1 + lv
+def miner_count(lv): return lv   # you start with no miners: every one is hired
 def walk_speed(lv): return 1.6 * (1 + 0.15 * lv)
 def second_wind_boost(lv): return 0.2 * lv            # extra swing speed for 8s after clearing a layer
+def demo_interval(lv): return max(8, 26 - 3 * lv)      # seconds between a demolitionist's charges
 # Tools
 def miner_damage(lv): return (1 + lv) * 1.08 ** lv
 def swing_time(lv): return max(0.15, 0.9 * 0.92 ** lv)
@@ -52,8 +53,9 @@ def _up(key, name, branch, icon, pos, requires, base, growth, max_lv, desc, effe
 
 UPGRADES = [
     # ----- Crew ---------------------------------------------------------------
-    _up("miners", "Hire Miner", "crew", "miner", (1.5, 0), [], 30, 2.1, 15,
-        "Another miner joins the dig.", lambda l: f"{miner_count(l)} miners hired"),
+    _up("miners", "Hire Miner", "crew", "miner", (1.5, 0), [], 30, 2.1, 16,
+        "Another miner joins the dig.",
+        lambda l: f"{miner_count(l)} miner{'s' if miner_count(l) != 1 else ''} hired"),
     _up("boots", "Mining Boots", "crew", "boot", (0.5, 1), [("miners", 1)], 25, 1.6, 15,
         "Miners walk between blocks faster.", lambda l: f"{walk_speed(l):.1f} tiles / s"),
     _up("teamwork", "Teamwork", "crew", "team", (0.5, 2), [("boots", 2)], 400, 2.0, 10,
@@ -67,6 +69,16 @@ UPGRADES = [
     _up("secondwind", "Second Wind", "crew", "wind", (2.5, 2), [("treasure", 1)], 500, 2.0, 5,
         "Clearing a layer gives the crew a burst of speed.",
         lambda l: f"+{round(100 * second_wind_boost(l))}% swing speed for 8s"),
+    _up("driller", "Hire Driller", "crew", "jackhammer", (1.5, 1), [("miners", 2)], 800, 2.2, 5,
+        "A stocky driller with a jackhammer: double health and slow on their feet, but hammers through "
+        "blocks almost twice as fast as a miner.", lambda l: f"{l} driller{'s' if l != 1 else ''}"),
+    _up("guard", "Hire Guard", "crew", "lantern", (1.5, 2), [("driller", 1)], 3000, 2.4, 4,
+        "A burly guard who patrols the dig and fights monsters on their own, rushing to anyone being grabbed.",
+        lambda l: f"{l} guard{'s' if l != 1 else ''}"),
+    _up("demolition", "Demolitionist", "crew", "tnt", (1.5, 3), [("guard", 1)], 10000, 2.6, 5,
+        "Hire a demolitionist who plants charges on the toughest blocks: the target is destroyed outright "
+        "and its neighbours cracked.",
+        lambda l: "no demolitionist" if l == 0 else f"a charge every {demo_interval(l)}s"),
     _up("nightshift", "Night Shift", "crew", "moon", (1.5, 4), [("foreman", 1), ("secondwind", 1)],
         8000, 2.8, 5, "Extra miners on top of the ones you hire.", lambda l: f"+{l} miners"),
 
@@ -148,6 +160,7 @@ UPGRADES = [
 UNLOCK_DEPTH = {
     # Crew
     "miners": 0, "boots": 2, "treasure": 4, "teamwork": 8, "secondwind": 10, "foreman": 16, "nightshift": 28,
+    "driller": 5, "guard": 11, "demolition": 18,
     # Tools
     "power": 0, "speed": 1, "diamond": 3, "crit": 6, "deepstrike": 9, "quake": 14, "masterwork": 25,
     # Hands
@@ -158,8 +171,12 @@ UNLOCK_DEPTH = {
     "slayer": 1, "executioner": 2, "defense": 3, "smite": 6, "hardhats": 6, "firstaid": 10, "cleave": 12,
     "laststand": 24,
 }
+# A special price for an upgrade's very first level (its normal curve starts after it).
+FIRST_LEVEL_PRICE = {"miners": 10}
 for _u in UPGRADES:
     _u["depth"] = UNLOCK_DEPTH[_u["key"]]
+    if _u["key"] in FIRST_LEVEL_PRICE:
+        _u["first"] = FIRST_LEVEL_PRICE[_u["key"]]
 UPGRADE_BY_KEY = {u["key"]: u for u in UPGRADES}
 UPGRADES_BY_TAB = {tab: [u for u in UPGRADES if u["branch"] == tab] for tab in TABS}
 
@@ -176,6 +193,10 @@ COST_INFLATION = 1.04
 def upgrade_cost(up, levels):
     """Price of the next level of `up`, given the current levels of every upgrade."""
     level = levels[up["key"]]
+    if "first" in up:   # e.g. your first miner: a cheap kick-off, then the usual curve from `base`
+        if level == 0:
+            return up["first"]
+        level -= 1
     if level == 0:
         return up["base"]
     ramp = up.get("ramp", COST_RAMP)

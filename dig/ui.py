@@ -1,4 +1,6 @@
 """Reusable UI widgets and text helpers."""
+import math
+
 import pygame
 
 from .config import MUTED, PANEL, PANEL_EDGE, TEXT
@@ -36,6 +38,43 @@ def draw_gold(surf, fonts, text, size, color, pos, anchor="topleft"):
     rect = label.get_rect(**{anchor: pos})
     surf.blit(label, rect)
     return rect
+
+
+def draw_pointer(surf, tip, direction, t, color=COIN):
+    """A bouncing arrow whose point sits at `tip`, pointing "up", "down", "left" or "right"."""
+    dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[direction]
+    bounce = abs(math.sin(t * 6)) * 8
+    tx, ty = tip[0] - dx * bounce, tip[1] - dy * bounce
+    px, py = -dy, dx                                    # perpendicular
+    head = [(tx, ty), (tx - dx * 16 + px * 11, ty - dy * 16 + py * 11),
+            (tx - dx * 16 - px * 11, ty - dy * 16 - py * 11)]
+    shaft = [(tx - dx * 14 + px * 4, ty - dy * 14 + py * 4), (tx - dx * 34 + px * 4, ty - dy * 34 + py * 4),
+             (tx - dx * 34 - px * 4, ty - dy * 34 - py * 4), (tx - dx * 14 - px * 4, ty - dy * 14 - py * 4)]
+    for poly in (shaft, head):
+        pygame.draw.polygon(surf, (40, 30, 10), [(x + 2, y + 2) for x, y in poly])   # drop shadow
+        pygame.draw.polygon(surf, color, poly)
+
+
+def draw_callout(surf, fonts, lines, pos, anchor="center", size=24):
+    """A gold-bordered hint box. `lines` is a list of (text, colour)."""
+    imgs = [fonts[size].render(text, True, color) for text, color in lines]
+    w = max(i.get_width() for i in imgs) + 28
+    h = sum(i.get_height() for i in imgs) + 18
+    box = pygame.Rect(0, 0, w, h)
+    setattr(box, anchor, pos)
+    pygame.draw.rect(surf, PANEL, box, border_radius=10)
+    pygame.draw.rect(surf, COIN, box, 2, border_radius=10)
+    y = box.y + 9
+    for img in imgs:
+        surf.blit(img, img.get_rect(midtop=(box.centerx, y)))
+        y += img.get_height()
+    return box
+
+
+def draw_glow(surf, rect, t, color=COIN):
+    """Pulsing outline drawing the eye to a button or tab."""
+    grow = 3 + int(3 * (0.5 + 0.5 * math.sin(t * 6)))
+    pygame.draw.rect(surf, color, rect.inflate(grow * 2, grow * 2), 3, border_radius=12)
 
 
 class Button:
