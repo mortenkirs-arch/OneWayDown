@@ -32,12 +32,13 @@ def value_scale(depth):
 
 
 class Block:
-    __slots__ = ("kind", "hp", "max_hp", "value", "chest")
+    __slots__ = ("kind", "hp", "max_hp", "value", "chest", "artifact")
 
-    def __init__(self, kind, depth, hp=None, chest=False):
+    def __init__(self, kind, depth, hp=None, chest=False, artifact=False):
         spec = BLOCKS[kind]
         self.kind = kind
         self.chest = chest   # Buried Treasure: bursts open with gold when the block breaks
+        self.artifact = artifact   # hides an artifact (which one is decided when it breaks)
         self.max_hp = spec["hp"] * hp_scale(depth)
         self.hp = self.max_hp if hp is None else hp
         self.value = spec["value"] * value_scale(depth)

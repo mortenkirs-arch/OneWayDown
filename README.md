@@ -28,14 +28,45 @@ Ballista). The Crew menu's middle path hires specialists: drillers (tough, slow,
 fast), guards (patrol and fight monsters on their own) and a demolitionist (plants charges
 on the toughest blocks).
 
-The Crew page (`C`) tracks every miner's blocks mined, gold earned, monsters fought off,
-times saved and time on the job, and its Graveyard tab remembers the fallen. Enemies only act
-while you are on the dig site.
+Your crew get better the longer they survive. Every crew member earns experience doing their
+job - diggers by breaking blocks, guards (and miners fighting back) by hitting monsters, the
+demolitionist through what their charges destroy, the foreman by barking orders - and levels
+up to a master at level 10, by which point they're twice as good at it (diggers hit twice as
+hard, guards strike twice as hard, the demolitionist sets charges twice as often, the foreman's
+pep talk is twice as strong). The first levels come within a few minutes; the last take the
+best part of an hour. A replacement starts over, so keeping veterans alive pays.
+
+The Crew page (`C`) tracks every miner's level and experience, blocks mined, gold earned,
+monsters fought off, times saved and time on the job, and its Graveyard tab remembers the
+fallen. Enemies only act while you are on the dig site.
 
 Waves arrive every 35s at depth 1, speeding up steadily to every 20s by depth 10 (and
 staying at 20s after that). Each wave tops the board up to the enemy cap - 1 enemy at
 depth 1, +1 every 3 levels, up to 8 - so enemies you leave alive count toward the next
 wave. Tuning lives at the top of `dig/enemies.py`.
+
+Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
+Vampire Lord (30m) and the Lich (40m), then round again, tougher each time. A boss stalks your
+crew, winds up and slams the ground around it (get your miners out of the red), and calls in
+minions; ordinary waves pause while it's on the board. Each has a trick of its own:
+
+- **Zombie King** rallies the zombies near him (faster, and they take half damage), so pick
+  them off away from him; below half health he rages and slams far more often.
+- **Broodmother** lays egg sacs that hatch into spiders unless you break them, and her slams
+  leave webs that slow your crew.
+- **Vampire Lord** scatters into a swarm of bats (nothing can hit him), flies to a crew member
+  and feeds on them to heal - hit him hard to make him let go.
+- **Lich** curses a crew member: click them to lift it before it bursts and hurts everyone
+  nearby (Spirit Lantern weakens the burst). Each of his wisps shields him, so kill them first.
+
+You can't dig past a boss's layer until it falls, but if it isn't beaten within 150 seconds it
+retreats and the dig goes on. Bosses shrug off most "share of max health" damage, so clicking
+them is what counts.
+
+Artifacts are rare finds, each a permanent bonus. Now and then a new layer hides one in a block
+with a violet glint (anyone breaking it finds it for you), and each boss drops its own trophy
+the first time it's beaten. The Artifacts page (`A`) shows what you've found and what's still
+out there; the list lives in `dig/artifacts.py`.
 
 ## Run
 
@@ -53,6 +84,7 @@ uv run main.py
 | Left-click an enemy | Attack it (uses monster damage from the Combat menu) |
 | `U` | Open / close the upgrades (pauses the game) |
 | `C` | Open / close the Crew page and graveyard (pauses the game) |
+| `A` | Open / close the Artifacts page (pauses the game) |
 | `1`-`5` / `Tab` in upgrades | Switch upgrade menu |
 | Right-click / `Enter` in upgrades | Buy the selected upgrade |
 | `Esc` | Back / main menu |

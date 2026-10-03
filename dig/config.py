@@ -43,7 +43,6 @@ GOLD_HUD_COIN = (52, 44)      # where the HUD's gold coin sits; earned coins fly
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_PATH = os.path.join(PROJECT_ROOT, "savegame.json")
 AUTOSAVE_SECS = 10
-OFFLINE_CAP_SECS = 8 * 3600
 
 BG_TOP = (28, 22, 40)
 BG_BOTTOM = (10, 8, 16)

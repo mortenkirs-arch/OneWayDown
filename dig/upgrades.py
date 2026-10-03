@@ -20,7 +20,7 @@ def ore_damage_mult(lv): return 1 + 0.25 * lv         # Diamond Tips, vs ore blo
 def masterwork_mult(lv): return 1.5 ** lv
 def streak_bonus(lv): return 0.02 * lv                # Hot Streak: extra damage per consecutive hit
 def vein_share(lv): return 0.15 * lv                  # Vein Follower: crack connected ore by this share
-def whetstone_boost(lv): return 0.2 * lv              # Whetstone: sharpened picks hit this much harder
+def whetstone_boost(lv): return 0.2 + 0.1 * lv if lv else 0.0   # Whetstone: sharpened picks hit this much harder
 # Hands (your clicks on BLOCKS)
 def click_damage(lv): return (2 + 2 * lv) * 1.1 ** lv
 def dynamite_interval(lv): return max(4, 16 - 2 * lv)
@@ -32,7 +32,7 @@ def slam_mult(lv): return 3 + 2 * lv                  # Charged Slam: x click da
 def value_mult(lv): return 1.2 ** lv
 def ore_mult(lv): return 1 + 0.25 * lv
 def bounty_mult(lv): return 1 + 0.5 * lv
-def offline_share(lv): return 0.5 + 0.1 * lv
+def dust_share(lv): return 0.2 * lv                  # Gold Dust: gold per click, as a share of the damage's worth
 def midas_mult(lv): return 1 + 0.1 * lv
 def clear_share(lv): return 0.25 + 0.05 * lv          # share of a cleared layer paid as a bonus
 def milestone_mult(lv): return 2 + 0.2 * lv           # milestone (every 5m) bonus multiplier
@@ -117,7 +117,7 @@ UPGRADES = [
         "A miner breaking ore cracks all the same ore connected to it.",
         lambda l: f"{round(100 * vein_share(l))}% to connected ore"),
     _up("whetstone", "Whetstone", "tools", "whetstone", (1.5, 3), [("vein", 1)], 6000, 2.4, 5,
-        "A sharpening wheel on site: miners take turns sharpening, and hit harder for 20s after.",
+        "A sharpening wheel on site: miners take turns sharpening, and hit harder for 45s after.",
         lambda l: f"+{round(100 * whetstone_boost(l))}% dmg when sharp"),
     _up("masterwork", "Masterwork", "tools", "anvil", (1.5, 4), [("quake", 1), ("deepstrike", 1)],
         6000, 2.6, 5, "Masterfully forged picks for the whole crew.",
@@ -142,7 +142,8 @@ UPGRADES = [
         "Every so often a block turns to gold for a few seconds. Click it for a jackpot!",
         lambda l: "none" if l == 0 else f"every {golden_interval(l)}s, worth {golden_payout(l)}x"),
     _up("slam", "Charged Slam", "hands", "slam", (1.5, 3), [("goldblock", 1)], 4000, 2.4, 5,
-        "Hold the mouse anywhere on the dig to charge, release for a huge slam that shakes the blocks around.",
+        "Hold the mouse anywhere on the dig to charge, release for a huge slam that shakes the blocks "
+        "and monsters around.",
         lambda l: f"up to {slam_mult(l)}x click dmg"),
     _up("golden", "Golden Touch", "hands", "touch", (2.5, 1), [("click", 2)], 60, 1.7, 10,
         "Your own clicks on blocks earn gold as you dig.", lambda l: f"{5 * l}% of block value / click"),
@@ -160,8 +161,9 @@ UPGRADES = [
         "Broken blocks may drop a nugget worth 25x.", lambda l: f"{2 * l}% nugget chance"),
     _up("bounty", "Bounty Hunter", "fortune", "skull", (2.5, 1), [("value", 1)], 100, 1.7, 10,
         "Monsters pay out bigger bounties.", lambda l: f"x{bounty_mult(l):.1f} bounties"),
-    _up("pockets", "Deep Pockets", "fortune", "bag", (2.5, 2), [("bounty", 1)], 400, 2.2, 5,
-        "Your crew earns more while you're away.", lambda l: f"{round(100 * offline_share(l))}% offline income"),
+    _up("golddust", "Gold Dust", "fortune", "bag", (2.5, 2), [("bounty", 1)], 400, 2.2, 5,
+        "Every click shakes loose gold: a share of what the damage it deals is worth, on blocks and monsters.",
+        lambda l: f"{round(100 * dust_share(l))}% of damage dealt as gold"),
     _up("surveyor", "Surveyor's Contract", "fortune", "scroll", (1.5, 1), [("value", 1)], 400, 2.0, 5,
         "Bigger bonuses for clearing layers, and for milestones.",
         lambda l: f"{round(100 * clear_share(l))}% clear bonus, x{milestone_mult(l):.1f} milestones"),
@@ -171,7 +173,7 @@ UPGRADES = [
     _up("vault", "Gold Vault", "fortune", "vault", (1.5, 3), [("chests", 1)], 9000, 2.5, 5,
         "Earn interest on your banked gold every minute (capped by your income).",
         lambda l: f"{round(100 * vault_rate(l))}% interest / minute"),
-    _up("midas", "Midas Touch", "fortune", "sun", (1.5, 4), [("goldrush", 1), ("pockets", 1)],
+    _up("midas", "Midas Touch", "fortune", "sun", (1.5, 4), [("goldrush", 1), ("golddust", 1)],
         15000, 2.6, 5, "Every source of gold pays more.", lambda l: f"x{midas_mult(l):.1f} all gold"),
 
     # ----- Combat -------------------------------------------------------------
@@ -222,7 +224,7 @@ UNLOCK_DEPTH = {
     # Hands
     "click": 0, "golden": 2, "shockwave": 4, "steady": 7, "autotap": 10, "dynamite": 18, "bigbombs": 30,
     # Fortune
-    "value": 0, "bounty": 3, "prospector": 5, "double": 9, "pockets": 12, "goldrush": 20, "midas": 32,
+    "value": 0, "bounty": 3, "prospector": 5, "double": 9, "golddust": 12, "goldrush": 20, "midas": 32,
     # Combat (monsters show up from depth 1)
     "slayer": 1, "executioner": 2, "defense": 3, "smite": 6, "hardhats": 6, "firstaid": 10, "cleave": 12,
     "laststand": 24,

@@ -6,8 +6,8 @@ import pygame
 
 from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
 from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
-from .enemies import FLY_ALTITUDE, TELEGRAPH_SECS, TRANSFORM_SECS
-from .iso import iso, origin_at
+from .enemies import ENEMY_TYPES, FLY_ALTITUDE, TELEGRAPH_SECS, TRANSFORM_SECS
+from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
 
 HI_VIS = (255, 140, 30)
@@ -16,7 +16,9 @@ HELMETS = {"miner": (240, 200, 40), "foreman": (245, 245, 250), "driller": (240,
 STEEL, DIAMOND = (190, 190, 200), (110, 235, 245)   # pick head colour, before / after Diamond Tips
 CRIT_SLAM = 0.3     # share of the crit animation spent slamming down (the rest is the recoil)
 CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the shoulder
-ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24}
+ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24,
+                    "zombieking": 54, "broodmother": 46, "vampirelord": 50, "lich": 50, "eggsac": 18}
+BOSS_CANVAS = (120, 200)   # a boss is drawn at normal size on this canvas, then scaled up
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
 SPIDER_BODY = (58, 48, 70)
 BAT_BODY, BAT_WING, BAT_EDGE = (58, 44, 70), (82, 60, 100), (36, 26, 46)
@@ -33,11 +35,12 @@ def _feet(e, rise):
     return int(fx), int(fy)
 
 
-def _hp_bar(surf, cx, top, frac, width=32):
+def _hp_bar(surf, cx, top, frac, color, width=32):
+    """Health bar in team colour: green for the crew, red for monsters."""
     bar = pygame.Rect(0, 0, width, 5)
     bar.midbottom = (cx, top)
     pygame.draw.rect(surf, (20, 16, 24), bar.inflate(2, 2))
-    pygame.draw.rect(surf, GOOD if frac > 0.5 else BAD, (bar.x, bar.y, int(bar.w * max(0, frac)), bar.h))
+    pygame.draw.rect(surf, color, (bar.x, bar.y, int(bar.w * max(0, frac)), bar.h))
 
 
 def struggle_shake(t, phase=0.0):
@@ -203,7 +206,7 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
                 if math.sin(t * 5 + i * 2.1 + m.x * 3) > 0.75:
                     pygame.draw.circle(surf, (255, 255, 255), (int(gx), int(gy)), 2)
     if m.hp < m.max_hp:
-        _hp_bar(surf, fx, fy - 46 - lift, m.hp / m.max_hp, 26)
+        _hp_bar(surf, fx, fy - 46 - lift, m.hp / m.max_hp, GOOD, 26)
     if grabbed and int(t * 4) % 2 == 0:
         img = fonts[26].render("!!", True, BAD)
         surf.blit(img, img.get_rect(midbottom=(fx, fy - 50 - lift)))
@@ -420,6 +423,15 @@ def _fly_bob(e):
 
 def enemy_anchor(e, rise, t):
     """Centre of the enemy's body on screen; used for clicking and effects."""
+    ax, ay = _base_anchor(e, rise, t)
+    scale = e.spec.get("scale")
+    if scale:   # bosses are drawn scaled up around their feet
+        fx, fy = _feet(e, rise)
+        return fx + (ax - fx) * scale, fy + (ay - fy) * scale
+    return ax, ay
+
+
+def _base_anchor(e, rise, t):
     if e.state == "attacking" and e.victim:
         style = e.spec["grab"]
         if style == "head":
@@ -452,12 +464,70 @@ def pick_enemy(world, pos, t):
 
 
 def draw_enemy(surf, e, rise, t, hovered=False):
+    scale = e.spec.get("scale")
+    if scale:
+        _draw_boss(surf, e, rise, t, hovered, scale)
+    else:
+        _draw_enemy(surf, e, rise, t, hovered)
+
+
+def _draw_enemy(surf, e, rise, t, hovered):
     if e.state == "emerging":
         _draw_entrance(surf, e, rise, t)
     elif e.state == "transforming":
         _draw_transform(surf, e, rise, t)
     else:
         DRAWERS[e.kind](surf, e, rise, t, hovered)
+
+
+def _draw_boss(surf, e, rise, t, hovered, scale):
+    """A boss: its monster's sprite drawn on a canvas around its feet, scaled up, with a crown on top."""
+    fx, fy = _feet(e, rise)
+    cw, ch = BOSS_CANVAS
+    ax, ay = cw // 2, ch - 24                     # where the feet sit on the canvas
+    if e.state != "emerging" or e.entrance_progress() >= 0:   # menacing shadow pooling under it
+        pulse = 0.5 + 0.5 * math.sin(t * 4)
+        rx, ry = 34 * scale * 0.5, 12 * scale * 0.5
+        aura = pygame.Surface((int(rx * 2 + 8), int(ry * 2 + 8)), pygame.SRCALPHA)
+        pygame.draw.ellipse(aura, (150, 20, 30, int(70 + 50 * pulse)), aura.get_rect().inflate(-8, -8))
+        surf.blit(aura, (fx - aura.get_width() / 2, fy - aura.get_height() / 2))
+    if e.mode == "bats":   # the Vampire Lord as a swarm of bats, flitting around where he is
+        _draw_bat_swarm(surf, e, rise, t)
+        return
+    canvas = pygame.Surface((cw, ch), pygame.SRCALPHA)
+    ox, oy = current_origin()
+    with origin_at((ox + ax - fx, oy + ay - fy)):
+        _draw_enemy(canvas, e, rise, t, hovered)
+    big = pygame.transform.scale(canvas, (int(cw * scale), int(ch * scale)))
+    tint = (255, 150, 140) if e.enraged else e.spec.get("boss_tint")
+    if tint:
+        big.fill(tint, special_flags=pygame.BLEND_RGB_MULT)
+    surf.blit(big, (fx - ax * scale, fy - ay * scale))
+    if e.state != "emerging":
+        bx, by = enemy_anchor(e, rise, t)
+        _draw_crown(surf, bx, by - e.spec.get("crown_lift", 40) * scale, t)
+
+
+def _draw_bat_swarm(surf, e, rise, t):
+    fx, fy = _feet(e, rise)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 22, fy - 6, 44, 12))
+    for i in range(7):
+        a = t * 5 + i * math.tau / 7
+        r = 16 + 6 * math.sin(t * 3 + i)
+        x = fx + math.cos(a) * r
+        y = fy - 46 + math.sin(a) * r * 0.5 + math.sin(t * 9 + i * 2) * 4
+        _draw_bat(surf, e, rise, t + i * 0.13, False, pos=(x, y))
+
+
+def _draw_crown(surf, x, y, t):
+    bob = math.sin(t * 3) * 2
+    x, y = int(x), int(y + bob)
+    pts = [(x - 13, y + 6), (x - 13, y - 4), (x - 7, y + 1), (x, y - 8), (x + 7, y + 1), (x + 13, y - 4),
+           (x + 13, y + 6)]
+    pygame.draw.polygon(surf, (255, 205, 60), pts)
+    pygame.draw.polygon(surf, (150, 100, 20), pts, 2)
+    for gx, col in ((x - 7, (220, 40, 60)), (x, (80, 200, 255)), (x + 7, (220, 40, 60))):
+        pygame.draw.circle(surf, col, (gx, y + 3), 2)
 
 
 # ----- spawn-in animations -------------------------------------------------
@@ -645,7 +715,7 @@ def _draw_zombie(surf, e, rise, t, hovered, dy=0):
             pygame.draw.line(surf, skin, (shoulder[0], shoulder[1] + d),
                              (shoulder[0] + 15 * e.facing, shoulder[1] - 2 + d + reach), 4)
     if not entering:
-        _hp_bar(surf, head[0], head[1] - 11, e.hp / e.max_hp)
+        _hp_bar(surf, head[0], head[1] - 11, e.hp / e.max_hp, BAD)
 
 
 def _draw_spider(surf, e, rise, t, hovered, dy=0):
@@ -674,7 +744,7 @@ def _draw_spider(surf, e, rise, t, hovered, dy=0):
     pygame.draw.circle(surf, (240, 50, 50), (head[0] + 2 * e.facing, head[1] - 1), 1)
     pygame.draw.circle(surf, (240, 50, 50), (head[0] + 4 * e.facing, head[1]), 1)
     if not entering:
-        _hp_bar(surf, cx, cy - 12, e.hp / e.max_hp, 26)
+        _hp_bar(surf, cx, cy - 12, e.hp / e.max_hp, BAD, 26)
 
 
 def _draw_bat(surf, e, rise, t, hovered, dy=0, pos=None):
@@ -705,7 +775,7 @@ def _draw_bat(surf, e, rise, t, hovered, dy=0, pos=None):
         pygame.draw.line(surf, (255, 255, 255), (cx - 1, cy + 3), (cx - 1, cy + 6), 1)
         pygame.draw.line(surf, (255, 255, 255), (cx + 1, cy + 3), (cx + 1, cy + 6), 1)
     if e.targetable:   # below the bat while biting, so it doesn't cover the miner's own bar
-        _hp_bar(surf, cx, cy + 16 if attacking else cy - 11, e.hp / e.max_hp, 22)
+        _hp_bar(surf, cx, cy + 16 if attacking else cy - 11, e.hp / e.max_hp, BAD, 22)
 
 
 def _draw_vampire(surf, e, rise, t, hovered, dy=0):
@@ -772,7 +842,7 @@ def _draw_vampire(surf, e, rise, t, hovered, dy=0):
         pygame.draw.line(surf, suit, shoulder, hand, 3)
         pygame.draw.circle(surf, skin, hand, 2)
     if not entering:   # over the body, not the leaning head, so it doesn't sit on the victim's bar
-        _hp_bar(surf, bx, fy - 44, e.hp / e.max_hp)
+        _hp_bar(surf, bx, fy - 44, e.hp / e.max_hp, BAD)
 
 
 def _screen_heading(e):
@@ -811,7 +881,7 @@ def _draw_wisp(surf, e, rise, t, hovered, dy=0, alpha=1.0):
     glow.set_alpha(int(255 * alpha))
     surf.blit(glow, (cx - o, cy - o))
     if e.targetable:
-        _hp_bar(surf, cx, cy - 13, e.hp / e.max_hp, 18)
+        _hp_bar(surf, cx, cy - 13, e.hp / e.max_hp, BAD, 18)
 
 
 def _draw_ghost(surf, e, rise, t, hovered, dy=0, alpha=1.0):
@@ -863,8 +933,33 @@ def _draw_ghost(surf, e, rise, t, hovered, dy=0, alpha=1.0):
     if hovered:
         pygame.draw.ellipse(surf, BAD, (bx - 19, by - 46, 38, 48), 2)
     if e.targetable:
-        _hp_bar(surf, bx, by - height - 6, e.hp / e.max_hp, 28)
+        _hp_bar(surf, bx, by - height - 6, e.hp / e.max_hp, BAD, 28)
+
+
+def _draw_eggsac(surf, e, rise, t, hovered, dy=0, alpha=1.0):
+    """A clutch of spider eggs in silk; it pulses and shudders harder as it gets ready to hatch."""
+    fx, fy = _feet(e, rise)
+    p = min(1.0, e.timer / e.spec["hatch"]["after"])
+    shake = math.sin(t * (10 + 30 * p)) * (0.5 + 2.5 * p)
+    flash = e.flash > 0
+    silk = (255, 255, 255) if flash else _lerp((225, 222, 205), (240, 225, 190), p)
+    if hovered:
+        pygame.draw.ellipse(surf, BAD, (fx - 16, fy - 7, 32, 14), 2)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 11, fy - 4, 22, 8))
+    cx = fx + shake
+    for ox, oy, r in ((-5, -6, 6), (5, -6, 6), (0, -12, 7)):
+        pygame.draw.circle(surf, silk, (int(cx + ox), int(fy + oy)), r)
+        pygame.draw.circle(surf, (170, 165, 150), (int(cx + ox), int(fy + oy)), r, 1)
+    pulse = 0.5 + 0.5 * math.sin(t * (4 + 10 * p))
+    for ox, oy in ((-5, -6), (5, -6), (0, -12)):   # something moving inside
+        pygame.draw.circle(surf, _lerp((150, 190, 110), (90, 60, 120), p), (int(cx + ox), int(fy + oy)),
+                           max(1, int(2 + 2 * pulse * p)))
+    for k in range(3):   # silk strands
+        pygame.draw.line(surf, (200, 198, 185), (cx - 8 + k * 8, fy - 2), (cx - 4 + k * 4, fy - 18), 1)
+    if e.targetable:
+        _hp_bar(surf, fx, fy - 24, e.hp / e.max_hp, BAD, 20)
 
 
 DRAWERS = {"zombie": _draw_zombie, "spider": _draw_spider, "bat": _draw_bat, "vampire": _draw_vampire,
-           "wisp": _draw_wisp, "ghost": _draw_ghost}
+           "wisp": _draw_wisp, "ghost": _draw_ghost, "eggsac": _draw_eggsac}
+DRAWERS.update({kind: DRAWERS[spec["look"]] for kind, spec in ENEMY_TYPES.items() if "look" in spec})   # bosses

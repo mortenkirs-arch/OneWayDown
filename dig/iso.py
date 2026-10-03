@@ -21,6 +21,10 @@ def origin_at(pos):
         _origin = saved
 
 
+def current_origin():
+    return _origin
+
+
 def iso(gx, gy, gz):
     """Grid coordinates (gz in block units) -> screen pixels."""
     return (_origin[0] + (gx - gy) * TILE_W / 2,

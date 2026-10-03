@@ -6,6 +6,7 @@ import pygame
 
 from ..config import BAD, GOLD, GOOD, H, MUTED, PANEL, PANEL_EDGE, SCALE, TEXT, W
 from ..icons import draw_icon
+from ..miners import MAX_LEVEL, level_mult, xp_to_next
 from ..sprites import HI_VIS, draw_portrait
 from ..ui import Button, draw_gold, draw_text
 from ..upgrades import BRANCHES
@@ -60,12 +61,12 @@ class CrewScene(Scene):
         w = self.world
         if self.tab == "crew":
             rows = [dict(look={**m.look(), "role": m.role}, name=m.name, stats=m.stats, miner=m, order=i,
-                         role=m.role,
+                         role=m.role, level=m.level, xp=m.xp,
                          time=w.clock - m.stats["hired_clock"], depth=m.stats["hired_depth"])
                     for i, m in enumerate(w.miners)]
         else:
             rows = [dict(look=g, name=g["name"], stats=g["stats"], killer=g["killer"], order=i,
-                         role=g.get("role", "miner"),
+                         role=g.get("role", "miner"), level=g.get("level", 1), xp=g.get("xp", 0.0),
                          time=g["died_clock"] - g["stats"]["hired_clock"], depth=g["died_depth"])
                     for i, g in enumerate(w.graveyard)]
             rows.reverse()   # most recent first by default
@@ -209,7 +210,8 @@ class CrewScene(Scene):
             fallen = dead or row.get("miner") is not None and row["miner"].state == "down"
             draw_portrait(s, f, row["look"], (rect.x + 38, rect.centery - 2), dead=fallen,
                           pick_level=self.world.lv("diamond"))
-            name = draw_text(s, f, row["name"], 28, MUTED if dead else TEXT, (100, rect.centery - 8), "midleft")
+            name = draw_text(s, f, row["name"], 28, MUTED if dead else TEXT, (100, rect.centery - 10), "midleft")
+            self.draw_level(s, row, rect, dead)
             tag_right = name.right
             if row["role"] in ROLE_BADGES:   # role badge after the name
                 text, color = ROLE_BADGES[row["role"]]
@@ -245,6 +247,24 @@ class CrewScene(Scene):
                                 6, max(24, track.h * frac))
             pygame.draw.rect(s, (120, 108, 150), thumb, border_radius=3)
 
+    def draw_level(self, s, row, rect, dead):
+        """Under the name: experience level, and (for the living) a bar of xp towards the next one."""
+        f = self.fonts
+        level = row["level"]
+        y = rect.centery + 15
+        maxed = level >= MAX_LEVEL
+        color = shade(GOLD, 0.7) if dead else GOLD
+        label = draw_text(s, f, "MASTER" if maxed else f"Lv {level}", 20, color, (100, y), "midleft")
+        if dead or maxed:
+            tip = f"x{level_mult(level):.2f} at their job" if not dead else ("reached master" if maxed else "")
+            draw_text(s, f, tip, 18, MUTED, (label.right + 8, y), "midleft")
+            return
+        bar = pygame.Rect(label.right + 8, y - 3, 70, 6)
+        pygame.draw.rect(s, (20, 16, 24), bar.inflate(2, 2), border_radius=3)
+        frac = min(1.0, row["xp"] / xp_to_next(level))
+        pygame.draw.rect(s, GOLD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=3)
+        draw_text(s, f, f"x{level_mult(level):.2f}", 18, MUTED, (bar.right + 6, y), "midleft")
+
     def draw_status(self, s, row, rect):
         f = self.fonts
         x, y = 300, rect.centery
@@ -277,5 +297,5 @@ class CrewScene(Scene):
         bar = pygame.Rect(x, y + 8, 150, 8)
         frac = max(0.0, m.hp / m.max_hp)
         pygame.draw.rect(s, (20, 16, 24), bar.inflate(2, 2), border_radius=3)
-        pygame.draw.rect(s, GOOD if frac > 0.5 else BAD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=3)
+        pygame.draw.rect(s, GOOD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=3)   # crew: always green
         draw_text(s, f, f"{m.hp:.0f}/{m.max_hp:.0f} hp", 20, MUTED, (bar.right + 10, bar.centery), "midleft")

@@ -8,6 +8,7 @@ import pygame
 from .blocks import BLOCKS
 from .config import GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
+from .enemies import BOSS_SLAM_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS
 from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
 from .iso import cube_faces, draw_cube, iso, point_in_poly
 from .sprites import draw_bomb, draw_enemy, draw_miner, enemy_anchor
@@ -92,6 +93,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                               seed=hash((x, y, w.depth + layer)))
             if layer == 0:
                 draw_damage(surf, b, x, y, z)
+                if b.artifact:
+                    draw_artifact_glint(surf, faces, t, x, y)
                 if w.golden and w.golden[0] == (x, y):
                     draw_golden_block(surf, faces, w.golden[1], t)
                 if hover and hover[0] == (x, y):
@@ -111,6 +114,10 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
     draw_blast_zones(surf, w, t)
+    draw_webs(surf, w)
+    draw_slam_zones(surf, w, t)
+    draw_boss_auras(surf, w, t)
+    draw_curses(surf, w, t)
     draw_quake_waves(surf, w)
     draw_crit_bursts(surf, w)
     draw_spike_traps(surf, w)
@@ -178,6 +185,121 @@ def draw_golden_block(surf, faces, left, t):
         sx, sy = rng.uniform(box.left + 6, box.right - 6), rng.uniform(box.top, box.bottom + 10)
         pygame.draw.line(surf, (255, 255, 230), (sx - 3, sy), (sx + 3, sy), 1)
         pygame.draw.line(surf, (255, 255, 230), (sx, sy - 3), (sx, sy + 3), 1)
+
+
+def draw_artifact_glint(surf, faces, t, x, y):
+    """A block hiding an artifact: a slow violet shimmer and a star that winks on its top face."""
+    top = faces["top"]
+    cx = sum(p[0] for p in top) / 4
+    cy = sum(p[1] for p in top) / 4
+    phase = t * 2.2 + x * 1.7 + y * 0.9
+    pulse = 0.5 + 0.5 * math.sin(phase)
+    pygame.draw.polygon(surf, (200, 150, 255), top, 1 + int(pulse * 2))
+    if math.sin(phase * 0.5) > 0.2:   # the star winks on and off
+        r = 3 + 4 * pulse
+        sx, sy = cx + 8 * math.sin(phase * 0.3), cy - 2
+        pygame.draw.line(surf, (255, 245, 255), (sx - r, sy), (sx + r, sy), 2)
+        pygame.draw.line(surf, (255, 245, 255), (sx, sy - r), (sx, sy + r), 2)
+        pygame.draw.circle(surf, (230, 200, 255), (int(sx), int(sy)), 2)
+
+
+def _ground_ellipse(world, x, y, radius, z=None):
+    """Screen rect of a circle of `radius` tiles on the ground around grid point (x, y)."""
+    z = world.column_height(*world.cell_of(x, y)) if z is None else z
+    cx, cy = iso(x, y, z + world.rise)
+    rect = pygame.Rect(0, 0, radius * TILE_W * 1.42, radius * TILE_H * 1.42)
+    rect.center = (cx, cy)
+    return rect
+
+
+def draw_webs(surf, world):
+    """Broodmother: sticky webs on the ground her slams hit; they fade as they wear off."""
+    if not world.webs:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for (x, y), left in world.webs.items():
+        a = int(150 * min(1.0, left / 1.5))
+        z = world.column_height(x, y) + world.rise
+        c = iso(x + 0.5, y + 0.5, z)
+        corners = [iso(x + u, y + v, z) for u, v in ((0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9))]
+        mids = [iso(x + u, y + v, z) for u, v in ((0.5, 0.08), (0.92, 0.5), (0.5, 0.92), (0.08, 0.5))]
+        for p in corners + mids:   # spokes
+            pygame.draw.line(overlay, (235, 235, 245, a), c, p, 1)
+        for k in (0.35, 0.7):      # rings
+            ring = [(c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k)
+                    for pair in zip(corners, mids) for p in pair]
+            pygame.draw.polygon(overlay, (235, 235, 245, a), ring, 1)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_boss_auras(surf, world, t):
+    """Zombie King: a sickly green ring of command, and a glow under every zombie he has rallied.
+    Lich: violet threads from each wisp shielding him, and the shield itself."""
+    boss = world.boss()
+    if not boss or boss.state == "emerging":
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    pulse = 0.5 + 0.5 * math.sin(t * 3)
+    if boss.kind == "zombieking":
+        pygame.draw.ellipse(overlay, (120, 200, 80, int(40 + 30 * pulse)), _ground_ellipse(world, boss.x, boss.y,
+                                                                                       RALLY_RADIUS), 3)
+        for e in world.enemies:
+            if getattr(e, "rallied", False):
+                pygame.draw.ellipse(overlay, (140, 230, 90, 150), _ground_ellipse(world, e.x, e.y, 0.45, e.draw_z), 3)
+    elif boss.kind == "lich":
+        bx, by = enemy_anchor(boss, world.rise, t)
+        wisps = world.shield_wisps()
+        for e in wisps:
+            ex, ey = enemy_anchor(e, world.rise, t)
+            pygame.draw.line(overlay, (190, 140, 255, int(110 + 80 * pulse)), (ex, ey), (bx, by), 2)
+        if wisps:   # (centred on his body, a little above the click anchor)
+            r = int(56 + 4 * pulse)
+            pygame.draw.circle(overlay, (170, 120, 255, 45), (int(bx), int(by - 30)), r)
+            pygame.draw.circle(overlay, (210, 170, 255, 170), (int(bx), int(by - 30)), r, 2)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_curses(surf, world, t):
+    """Lich: a violet sigil over each cursed crew member, its ring running down to the burst,
+    and the area the burst will hit."""
+    cursed = [m for m in world.miners if m.curse > 0 and m.state != "down"]
+    if not cursed:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for m in cursed:
+        urgency = 1 - m.curse / CURSE_SECS
+        pulse = 0.5 + 0.5 * math.sin(t * (6 + 18 * urgency))
+        pygame.draw.ellipse(overlay, (170, 100, 255, int(30 + 60 * pulse * urgency)),
+                            _ground_ellipse(world, m.x, m.y, CURSE_RADIUS, m.draw_z))
+        x, y = world.entity_screen(m, 70 + m.height)
+        pygame.draw.circle(overlay, (60, 20, 90, 200), (int(x), int(y)), 13)
+        pygame.draw.arc(overlay, (230, 200, 255, 255), (x - 15, y - 15, 30, 30), math.pi / 2,
+                        math.pi / 2 + math.tau * (m.curse / CURSE_SECS), 3)
+        for k in range(3):   # a little three-pointed sigil
+            a = t * 2 + k * math.tau / 3
+            pygame.draw.line(overlay, (220, 170, 255, 255), (x, y), (x + math.cos(a) * 8, y + math.sin(a) * 8), 2)
+        hx, hy = world.entity_screen(m, 30)   # a pulsing ring around the miner: click here
+        pygame.draw.circle(overlay, (220, 170, 255, int(120 + 120 * pulse)), (int(hx), int(hy)), 22, 2)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_slam_zones(surf, world, t):
+    """A boss winding up: the ground it is about to cave in glows red, filling in as the slam nears."""
+    winding = [e for e in world.enemies if e.boss and e.windup > 0]
+    if not winding:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for e in winding:
+        cx, cy = iso(e.x, e.y, e.draw_z + world.rise)
+        full = pygame.Rect(0, 0, BOSS_SLAM_RADIUS * TILE_W * 1.42, BOSS_SLAM_RADIUS * TILE_H * 1.42)
+        full.center = (cx, cy)
+        q = 1 - e.windup / e.windup_total
+        pulse = 0.5 + 0.5 * math.sin(t * (10 + 20 * q))
+        pygame.draw.ellipse(overlay, (255, 40, 30, int(40 + 50 * pulse)), full)
+        inner = full.inflate(-full.w * (1 - q), -full.h * (1 - q))
+        pygame.draw.ellipse(overlay, (255, 80, 50, 120), inner)
+        pygame.draw.ellipse(overlay, (255, 150, 110, 230), full, 3)
+    surf.blit(overlay, (0, 0))
 
 
 def draw_whetstone(surf, base, t, busy):

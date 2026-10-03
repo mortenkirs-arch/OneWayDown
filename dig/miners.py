@@ -19,6 +19,20 @@ DIGGERS = ("miner", "driller")
 CRIT_ANIM_SECS = 0.6          # a critical strike's slam-and-recoil animation
 MINER_MAX_HP = 10.0           # before Hard Hats (see upgrades.miner_max_hp)
 
+# Experience: the crew get better at their jobs the longer they survive (a new recruit starts over).
+MAX_LEVEL = 10
+XP_FIRST = 10.0               # xp from level 1 to 2 (a digger earns about 1 xp per block broken)...
+XP_GROWTH = 1.6               # ...and each level after needs this much more than the last
+
+
+def xp_to_next(level):
+    return XP_FIRST * XP_GROWTH ** (level - 1)
+
+
+def level_mult(level):
+    """How good a crew member is at their job: 1x at level 1, 2x at MAX_LEVEL."""
+    return 1 + (level - 1) / (MAX_LEVEL - 1)
+
 SKIN_TONES = [(255, 224, 196), (241, 194, 155), (224, 172, 125), (198, 134, 90),
               (161, 102, 64), (120, 74, 46), (88, 54, 36)]
 NATURAL_HAIR = [(30, 24, 20), (78, 52, 32), (150, 100, 50), (226, 194, 110),
@@ -101,6 +115,9 @@ class Miner:
         self.streak_cell = None  # Hot Streak: the block being hit in a row...
         self.streak = 0.0        # ...and how many hits in a row so far
         self.sharp = 0.0         # Whetstone: seconds of freshly sharpened pick left
+        self.curse = 0.0         # Lich: seconds until the curse on them bursts (0 = not cursed)
+        self.level = 1           # experience level (see level_mult)...
+        self.xp = 0.0            # ...and xp towards the next one
         if ROLES[role]["height"]:
             self.height = ROLES[role]["height"]
         if role == "foreman" and self.facial is None:   # foremen always have a mustache
@@ -115,11 +132,13 @@ class Miner:
         return self.role in DIGGERS
 
     def to_dict(self):
-        return {**self.look(), "role": self.role, "stats": dict(self.stats)}
+        return {**self.look(), "role": self.role, "stats": dict(self.stats), "level": self.level, "xp": self.xp}
 
     def apply_saved(self, data):
         self.apply_look(data)
         self.stats.update(data.get("stats", {}))   # older saves have no stats: keep the zeros
+        self.level = data.get("level", 1)          # ...nor levels
+        self.xp = data.get("xp", 0.0)
 
     def apply_look(self, look):
         for field in LOOK_FIELDS:

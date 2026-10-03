@@ -5,13 +5,15 @@ import time
 
 import pygame
 
-from ..config import BAD, BOARD_ORIGIN, GOLD, GOLD_HUD_COIN, GRID, H, MUTED, PANEL, TEXT, W
+from ..config import BAD, BOARD_ORIGIN, GOLD, GOLD_HUD_COIN, GRID, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
 from ..world import COMBO_WINDOW
 
 SLAM_MIN_HOLD = 0.35    # hold at least this long for a slam (a quick click is just a click)
 SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
 HUD_PANELS = [pygame.Rect(16, 16, 420, 134), pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
-from ..enemies import ENEMY_START_DEPTH, max_enemies
+from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
+from ..enemies import BOSS_TIME_LIMIT, ENEMY_START_DEPTH, max_enemies
+from ..icons import draw_icon
 from ..iso import origin_at
 from ..render import draw_board, draw_flying_coins, pick_block
 from ..sprites import pick_enemy
@@ -31,6 +33,7 @@ class PlayScene(Scene):
             Button((W - 360, 16, 170, 46), "Upgrades (U)", lambda: game.open_upgrades("play"), size=26),
             Button((W - 178, 16, 160, 46), "Menu (Esc)", game.to_menu, size=26, color=(70, 64, 90)),
             Button((W - 360, 72, 170, 40), "Crew (C)", game.open_crew, size=24, color=(50, 96, 140)),
+            Button((W - 178, 72, 160, 40), "Artifacts (A)", game.open_artifacts, size=24, color=(110, 70, 150)),
         ]
 
     def handle(self, event):
@@ -44,12 +47,22 @@ class PlayScene(Scene):
                 self.game.open_upgrades("play")
             elif event.key == pygame.K_c:
                 self.game.open_crew()
+            elif event.key == pygame.K_a:
+                self.game.open_artifacts()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.world.reveals and self.reveal_rect().collidepoint(event.pos):
+                if self.reveal_close_rect().collidepoint(event.pos):   # only the X closes the found card...
+                    self.world.reveals.pop(0)
+                return   # ...other clicks on it do nothing, so spam-clicking can't dismiss it unread
             if any(r.collidepoint(event.pos) for r in HUD_PANELS):   # clicks on the HUD aren't play
                 return
             self.world.combo_click()   # every click counts towards the combo, whatever it lands on
             if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
                 self.charge = time.time()
+            cursed = self.world.pick_cursed(event.pos)
+            if cursed:   # lifting a Lich's curse comes first
+                self.world.lift_curse(cursed)
+                return
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
                 self.world.player_hit_enemy(enemy)
@@ -63,7 +76,8 @@ class PlayScene(Scene):
             if held >= SLAM_MIN_HOLD:
                 cell = self.slam_target(event.pos)
                 if cell:
-                    self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD))
+                    self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD),
+                                    target=pick_enemy(self.world, event.pos, time.time()))
 
     def slam_target(self, pos):
         """The block under the cursor, or failing that the block nearest to it on screen."""
@@ -92,6 +106,51 @@ class PlayScene(Scene):
         self.draw_charge_and_combo(surf, w, mouse)
         if w.notice:
             self.draw_notice(surf, w)
+        if w.reveals:
+            self.draw_reveal(surf, w, mouse)
+
+    @staticmethod
+    def reveal_rect():
+        return pygame.Rect(0, 0, 560, 170).move(W // 2 - 280, 150)
+
+    def reveal_close_rect(self):
+        box = self.reveal_rect()
+        return pygame.Rect(box.right - 40, box.top + 8, 32, 32)
+
+    def draw_reveal(self, surf, w, mouse):
+        """The card that pops up when an artifact is found: icon, name, what it does, a line of lore."""
+        key, shown = w.reveals[0]
+        art = ARTIFACTS[key]
+        f = self.fonts
+        box = self.reveal_rect()
+        grow = min(1.0, shown / REVEAL_POP_SECS)              # pops in, then stays until the X is clicked
+        layer = pygame.Surface(box.size, pygame.SRCALPHA)
+        pygame.draw.rect(layer, (*PANEL, 245), layer.get_rect(), border_radius=14)
+        pygame.draw.rect(layer, art["color"], layer.get_rect(), 3, border_radius=14)
+        trophy = "boss" in art
+        draw_text(layer, f, "BOSS TROPHY!" if trophy else "ARTIFACT FOUND!", 24, GOLD, (box.w // 2, 20), "center")
+        t = time.time()
+        ic = (70, 96)
+        glow = pygame.Surface((110, 110), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (*art["color"], int(60 + 30 * math.sin(t * 4))), (55, 55), 50)
+        layer.blit(glow, (ic[0] - 55, ic[1] - 55))
+        draw_icon(layer, art["icon"], ic, 30, art["color"])
+        draw_text(layer, f, art["name"], 32, art["color"], (130, 58), "midleft")
+        draw_text(layer, f, art["bonus"], 24, TEXT, (130, 94), "midleft")
+        draw_text(layer, f, art["lore"], 20, MUTED, (130, 126), "midleft")
+        more = len(w.reveals) - 1
+        footer = (f"{more} more to see  -  " if more else "") + "see them all with A"
+        draw_text(layer, f, footer, 18, GOLD if more else MUTED, (box.w - 14, box.h - 12), "bottomright")
+        close = self.reveal_close_rect().move(-box.x, -box.y)   # the X, top right
+        hot = grow >= 1 and self.reveal_close_rect().collidepoint(mouse)
+        pygame.draw.rect(layer, (90, 50, 60) if hot else (56, 46, 72), close, border_radius=8)
+        pygame.draw.rect(layer, (255, 150, 150) if hot else PANEL_EDGE, close, 2, border_radius=8)
+        cx, cy, d = close.centerx, close.centery, 7
+        for a, b in (((cx - d, cy - d), (cx + d, cy + d)), ((cx - d, cy + d), (cx + d, cy - d))):
+            pygame.draw.line(layer, (255, 255, 255) if hot else TEXT, a, b, 3)
+        if grow < 1:
+            layer = pygame.transform.smoothscale(layer, (max(1, int(box.w * grow)), max(1, int(box.h * grow))))
+        surf.blit(layer, layer.get_rect(center=box.center))
 
     def draw_milestone(self, surf, w):
         """Bottom of the top panel: the next depth that unlocks upgrades, and progress towards it."""
@@ -153,8 +212,8 @@ class PlayScene(Scene):
                      (btn.left - 60, btn.centery + 6), "midright")
 
     def draw_notice(self, surf, w):
-        """Banner when a depth milestone opens up new upgrades."""
-        text, left = w.notice
+        """Banner at the bottom: new upgrades at a depth milestone, or news of a boss."""
+        text, left, *hint = w.notice   # (an optional third item replaces the "Press U" hint)
         img = self.fonts[28].render(text, True, GOLD)
         box = img.get_rect(midbottom=(W // 2, H - 64)).inflate(36, 20)
         alpha = int(255 * min(1.0, left / 0.5))
@@ -164,7 +223,51 @@ class PlayScene(Scene):
         layer.blit(img, img.get_rect(center=(box.w // 2, box.h // 2)))
         layer.set_alpha(alpha)
         surf.blit(layer, box)
-        draw_text(surf, self.fonts, "Press U to see them", 20, MUTED, (W // 2, box.bottom + 14), "center")
+        hint = hint[0] if hint else "Press U to see them"
+        if hint:
+            draw_text(surf, self.fonts, hint, 20, MUTED, (W // 2, box.bottom + 14), "center")
+
+    def draw_boss_bar(self, surf, boss):
+        """Top of the screen during a boss fight: its name, a big health bar and the time left."""
+        f = self.fonts
+        cx = W // 2 + 30
+        pulse = 0.8 + 0.2 * math.sin(time.time() * 5)
+        draw_text(surf, f, boss.spec["name"].upper(), 34, tuple(int(c * pulse) for c in BAD), (cx, 30), "center")
+        bar = pygame.Rect(0, 0, 420, 18)
+        bar.center = (cx, 60)
+        pygame.draw.rect(surf, (20, 16, 24), bar.inflate(4, 4), border_radius=6)
+        frac = max(0.0, boss.hp / boss.max_hp)
+        pygame.draw.rect(surf, BAD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=5)
+        pygame.draw.rect(surf, (255, 200, 190), bar.inflate(4, 4), 2, border_radius=6)
+        left = max(0, math.ceil(BOSS_TIME_LIMIT - boss.fight_time))
+        hint = "It's coming..." if boss.state == "emerging" else f"{self.boss_tip(boss)}  -  retreats in {left}s"
+        draw_text(surf, f, hint, 20, BAD if left <= 15 else MUTED, (cx, 84), "center")
+
+    def boss_tip(self, boss):
+        """What to do about this boss right now."""
+        w = self.world
+        if boss.kind == "zombieking":
+            if boss.enraged:
+                return "ENRAGED - he winds up and slams much faster!"
+            return "Rallied zombies are tough - kill them away from him, or lure him off"
+        if boss.kind == "broodmother":
+            if any(e.kind == "eggsac" for e in w.enemies):
+                return "Break the egg sacs before they hatch!"
+            return "Her slams leave webs that slow your crew"
+        if boss.kind == "vampirelord":
+            if boss.mode == "bats":
+                return "He's a swarm of bats - get ready for where he lands!"
+            if boss.mode == "bite":
+                return f"He's feeding on {boss.victim.name} - hit him hard to make him let go!"
+            return "Click him!  Stay out of the red when he slams"
+        if boss.kind == "lich":
+            if any(m.curse > 0 for m in w.miners):
+                return "Click the cursed crew member to lift the curse!"
+            shield = round(100 * (1 - boss.dmg_taken))
+            if shield:
+                return f"His wisps shield him ({shield}% less damage) - kill them!"
+            return "Click him!  Stay out of the red when he slams"
+        return "Click it!  Stay out of the red when it slams"
 
     def draw_hud(self, surf, mouse):
         w = self.world
@@ -182,10 +285,11 @@ class PlayScene(Scene):
         for b in self.buttons:
             b.draw(surf, f, mouse)
         affordable = sum(1 for u in UPGRADES if w.can_buy(u))
-        if affordable:
-            badge = (self.buttons[0].rect.right - 4, self.buttons[0].rect.top + 2)
-            pygame.draw.circle(surf, BAD, badge, 12)
-            draw_text(surf, f, str(affordable), 22, TEXT, badge, "center")
+        for count, button in ((affordable, self.buttons[0]), (len(w.new_artifacts), self.buttons[3])):
+            if count:
+                badge = (button.rect.right - 4, button.rect.top + 2)
+                pygame.draw.circle(surf, BAD, badge, 12)
+                draw_text(surf, f, str(count), 22, TEXT, badge, "center")
 
         down = sum(1 for m in w.miners if m.state == "down")
         specialists = sum(1 for m in w.miners if m.role != "miner")
@@ -202,7 +306,10 @@ class PlayScene(Scene):
         for i, (s, color) in enumerate(stats):
             draw_text(surf, f, s, 24, color, (32, H - 155 + i * 27))
 
-        if w.depth >= ENEMY_START_DEPTH:
+        boss = w.boss()
+        if boss:
+            self.draw_boss_bar(surf, boss)
+        elif w.depth >= ENEMY_START_DEPTH:
             secs = math.ceil(w.enemy_timer)
             incoming = max_enemies(w.depth) - len(w.enemies)
             wave = f"next wave in {secs}s" + (f" (+{incoming})" if incoming > 0 else " (at max)")
