@@ -15,7 +15,10 @@ from .world import World
 
 
 class Game:
-    def __init__(self):
+    def __init__(self, save_path=SAVE_PATH, world=None):
+        """`save_path`: where to load and save. `world`: start straight into this one on the dig site
+        (a developer's test game) instead of loading the save and opening the menu."""
+        self.save_path = save_path
         pygame.init()
         pygame.display.set_caption("Keep Digging")
         self.screen = pygame.display.set_mode((W, H))
@@ -26,7 +29,11 @@ class Game:
         self.world = None
         self.last_save = time.time()
         self.toast = None              # (text, time_left)
-        self.load()
+        if world:
+            self.world = world
+            self.save()
+        else:
+            self.load()
         if self.world:   # open on the saved depth's backdrop, not a fade from the surface
             self.bg_key = biome_at(self.world.depth)["key"]
         self.scenes = {
@@ -36,7 +43,7 @@ class Game:
             "crew": CrewScene(self),
             "artifacts": ArtifactScene(self),
         }
-        self.scene = self.scenes["menu"]
+        self.scene = self.scenes["play" if world else "menu"]
 
     # ----- scene control --------------------------------------------------
     def switch(self, name):
@@ -73,10 +80,10 @@ class Game:
 
     # ----- persistence ----------------------------------------------------
     def load(self):
-        if not os.path.exists(SAVE_PATH):
+        if not os.path.exists(self.save_path):
             return
         try:
-            with open(SAVE_PATH) as f:
+            with open(self.save_path) as f:
                 data = json.load(f)
             self.world = World.from_dict(data)
         except (OSError, ValueError, KeyError, TypeError):
@@ -85,10 +92,11 @@ class Game:
     def save(self):
         if not self.world:
             return
-        tmp = SAVE_PATH + ".tmp"
+        os.makedirs(os.path.dirname(os.path.abspath(self.save_path)), exist_ok=True)   # (e.g. saves/ for tests)
+        tmp = self.save_path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(self.world.to_dict(), f)
-        os.replace(tmp, SAVE_PATH)
+        os.replace(tmp, self.save_path)
         self.last_save = time.time()
 
     # ----- main loop ------------------------------------------------------

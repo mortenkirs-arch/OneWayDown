@@ -88,6 +88,21 @@ Requires [uv](https://docs.astral.sh/uv/):
 uv run main.py
 ```
 
+## Testing
+
+Jump straight to any depth or boss with a fresh test game, set up about how a player would have it by
+then (upgrades, crew experience, earlier bosses' trophies, a few artifacts and some gold). Test games
+save under `saves/`, so your own `savegame.json` is never touched; a boss guarding that depth rises
+straight away.
+
+```
+uv run main.py --depth 39            # start at 39m
+uv run main.py --boss bonetyrant     # start at a boss (any unambiguous start works: bone, vamp, lich...)
+uv run main.py --list                # the bosses and their depths
+uv run main.py --boss bat --gold 1e9 # ...with plenty of gold to try upgrades
+uv run main.py --save saves/depth_39.json   # carry on a test game later (or use another save slot)
+```
+
 ## Controls
 
 | Input | Action |
