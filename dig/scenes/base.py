@@ -3,6 +3,7 @@
 
 class Scene:
     simulate = True   # whether the world keeps ticking while this scene is active
+    combat = False    # whether enemies move/attack/spawn (only where the player can fight back)
 
     def __init__(self, game):
         self.game = game

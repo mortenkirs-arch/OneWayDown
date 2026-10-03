@@ -4,27 +4,17 @@ import random
 import time
 
 from .blocks import BLOCKS, Block, generate_layer
-from .config import GOLD, GOOD, GRID, TEXT, W
+from .config import BAD, GOLD, GOOD, GRID, TEXT, W
 from .effects import Floater, Particle
+from .enemies import FIRST_SPAWN_DELAY, Enemy, choose_kind, edge_cell, max_enemies, spawn_delay
 from .iso import iso
+from .miners import MINER_REGEN, MINER_RESPAWN_SECS, Miner
 from .upgrades import (BRANCHES, UPGRADES, click_damage, dynamite_interval, is_maxed, is_unlocked,
                        miner_count, miner_damage, ore_mult, swing_time, upgrade_cost, value_mult,
                        walk_speed)
 from .util import fmt
 
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1))
-
-
-class Miner:
-    def __init__(self, idx):
-        self.x = random.uniform(1, GRID - 1)
-        self.y = random.uniform(1, GRID - 1)
-        self.draw_z = 2.0
-        self.target = None
-        self.swing = random.uniform(0, 0.5)
-        self.anim = 0.0          # pickaxe animation 0..1
-        self.facing = 1
-        self.hue = [(80, 160, 230), (230, 120, 80), (120, 200, 110), (210, 110, 200)][idx % 4]
 
 
 class World:
@@ -45,6 +35,8 @@ class World:
         self.gps_cached = 0.0
         self.tap_timer = 0.0
         self.dynamite_timer = 0.0
+        self.enemies = []
+        self.enemy_timer = FIRST_SPAWN_DELAY
 
     # ----- stats ----------------------------------------------------------
     def lv(self, key): return self.levels[key]
@@ -67,15 +59,110 @@ class World:
             self.gps_cached = sum(a for _, a in self.earn_log) / span
         return self.gps_cached
 
-    def sync_miners(self):
+    def sync_miners(self, announce=False):
         while len(self.miners) < miner_count(self.lv("miners")):
-            self.miners.append(Miner(len(self.miners)))
+            miner = Miner(taken_names={m.name for m in self.miners})
+            self.miners.append(miner)
+            if announce:
+                px, py = self.entity_screen(miner, 60)
+                self.floaters.append(Floater(f"{miner.name} joins the crew!", px, py, GOOD, life=2.0, size=24))
 
     def column_height(self, cx, cy):
         return 2 if (cx, cy) in self.current else 1
 
+    @staticmethod
+    def cell_of(x, y):
+        return int(min(GRID - 1, max(0, x))), int(min(GRID - 1, max(0, y)))
+
     def cell_screen(self, cell):
         return iso(cell[0] + 0.5, cell[1] + 0.5, 2 + self.rise)
+
+    def entity_screen(self, e, lift=0):
+        """Screen position of a miner/enemy, `lift` pixels above its feet."""
+        x, y = iso(e.x, e.y, e.draw_z + self.rise)
+        return x, y - lift
+
+    # ----- combat ---------------------------------------------------------
+    def nearest_free_miner(self, x, y):
+        free = [m for m in self.miners if m.state == "working"]
+        return min(free, key=lambda m: (m.x - x) ** 2 + (m.y - y) ** 2, default=None)
+
+    def spawn_enemy(self):
+        kind = choose_kind(self.depth)
+        if not kind:
+            return
+        cell = edge_cell()
+        enemy = Enemy(kind, self.depth, cell, self.column_height(*cell))
+        self.enemies.append(enemy)
+        px, py = self.entity_screen(enemy)
+        for _ in range(16):
+            self.particles.append(Particle(px, py - 30, (110, 84, 60), big=True))
+        self.floaters.append(Floater(f"A {enemy.spec['name'].lower()} crawls out!", px, py - 60, BAD,
+                                     life=1.8, size=26))
+
+    def grab(self, enemy, miner):
+        if enemy.kind == "spider":
+            enemy.grab_offset = (0.0, 0.0)          # rides on the miner's head
+        else:
+            # stand beside the miner on screen (screen-x follows x - y) so the choke is visible
+            side = 1 if (enemy.x - miner.x) - (enemy.y - miner.y) >= 0 else -1
+            reach = enemy.spec["reach"] * 1.15
+            enemy.grab_offset = (side * reach, -side * reach)
+            enemy.facing = -side
+        enemy.victim = miner
+        enemy.state = "attacking"
+        miner.state = "grabbed"
+        miner.attacker = enemy
+        px, py = self.entity_screen(miner, 60)
+        self.floaters.append(Floater(f"{miner.name}: HELP!", px, py, BAD, life=1.2, size=26))
+
+    def miner_down(self, miner):
+        miner.state = "down"
+        miner.respawn = MINER_RESPAWN_SECS
+        miner.attacker = None
+        miner.target = None
+        px, py = self.entity_screen(miner, 30)
+        self.floaters.append(Floater(f"{miner.name} is down!", px, py - 20, BAD, life=1.6, size=26))
+        for _ in range(12):
+            self.particles.append(Particle(px, py, miner.shirt, big=True))
+
+    def respawn_miner(self, miner):
+        miner.place_randomly()
+        miner.draw_z = self.column_height(*self.cell_of(miner.x, miner.y))
+        miner.hp = miner.max_hp
+        miner.state = "working"
+        px, py = self.entity_screen(miner, 50)
+        self.floaters.append(Floater(f"{miner.name} is back to work!", px, py, GOOD, life=1.4, size=22))
+
+    def hit_enemy(self, enemy, dmg):
+        if enemy not in self.enemies:
+            return
+        enemy.hp -= dmg
+        enemy.flash = 0.12
+        px, py = self.entity_screen(enemy, 22)
+        self.rings.append([px, py + 18, 0.0, 30, BAD])
+        for _ in range(6):
+            self.particles.append(Particle(px, py, (120, 190, 80) if enemy.kind == "zombie" else (90, 60, 120)))
+        if enemy.hp <= 0:
+            self.kill_enemy(enemy)
+
+    def kill_enemy(self, enemy):
+        self.enemies.remove(enemy)
+        bounty = enemy.bounty_base * value_mult(self.lv("value"))
+        self.gold += bounty
+        self.earn_log.append((time.time(), bounty))
+        px, py = self.entity_screen(enemy, 22)
+        self.floaters.append(Floater(f"+${fmt(bounty)}", px, py - 20, GOLD, size=28))
+        self.rings.append([px, py + 18, 0.0, 60, GOOD])
+        for _ in range(26):
+            self.particles.append(Particle(px, py, random.choice([(120, 190, 80), (70, 110, 50), (200, 60, 60)]),
+                                           big=True))
+        victim = enemy.victim
+        if victim and victim.attacker is enemy:
+            victim.state = "working"
+            victim.attacker = None
+            vx, vy = self.entity_screen(victim, 60)
+            self.floaters.append(Floater("Saved!", vx, vy, GOOD, life=1.3, size=28))
 
     # ----- upgrades -------------------------------------------------------
     def can_buy(self, up):
@@ -87,7 +174,7 @@ class World:
             return False
         self.gold -= upgrade_cost(up, self.levels[up["key"]])
         self.levels[up["key"]] += 1
-        self.sync_miners()
+        self.sync_miners(announce=True)
         return True
 
     # ----- mining ---------------------------------------------------------
@@ -146,6 +233,9 @@ class World:
         for _ in range(30):
             self.particles.append(Particle(px, py, random.choice([(255, 200, 80), (255, 110, 40), (90, 80, 80)]),
                                            big=True))
+        for e in list(self.enemies):   # dynamite hurts enemies caught in the blast too
+            if max(abs(e.x - (cx + 0.5)), abs(e.y - (cy + 0.5))) <= 1.6:
+                self.hit_enemy(e, dmg)
         depth = self.depth
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
@@ -188,6 +278,8 @@ class World:
         for m in self.miners:
             m.draw_z += 1
             m.target = None
+        for e in self.enemies:
+            e.draw_z += 1
         self.floaters.append(Floater(f"Depth {self.depth}m", W / 2, 120, TEXT, life=2.0, size=40))
 
     def pick_target(self, miner):
@@ -205,13 +297,25 @@ class World:
         return best
 
     # ----- update ---------------------------------------------------------
-    def update(self, dt):
+    def update(self, dt, combat=True):
+        """Advance the simulation. With combat=False enemies freeze and none spawn."""
         self.sync_miners()
         if self.rise < 0:
             self.rise = min(0.0, self.rise + dt * 2.5)
         speed = walk_speed(self.lv("boots"))
         swing = self.miner_swing_time()
         for m in self.miners:
+            if m.state == "down":
+                m.respawn -= dt
+                if m.respawn <= 0:
+                    self.respawn_miner(m)
+                continue
+            if m.state == "grabbed":
+                if random.random() < dt * 5:   # panicked sweat
+                    px, py = self.entity_screen(m, 36)
+                    self.particles.append(Particle(px, py, (150, 200, 255)))
+                continue
+            m.hp = min(m.max_hp, m.hp + MINER_REGEN * dt)
             if m.target is None or m.target not in self.current:
                 m.target = self.pick_target(m)
             m.anim = max(0.0, m.anim - dt * 4)
@@ -230,9 +334,17 @@ class World:
                         m.swing += swing
                         m.anim = 1.0
                         self.miner_hit(m.target)
-            cx, cy = int(min(GRID - 1, max(0, m.x))), int(min(GRID - 1, max(0, m.y)))
-            target_z = self.column_height(cx, cy)
+            target_z = self.column_height(*self.cell_of(m.x, m.y))
             m.draw_z += (target_z - m.draw_z) * min(1.0, dt * 10)
+
+        if combat:
+            for e in list(self.enemies):
+                e.update(self, dt)
+            if self.depth >= 1 and len(self.enemies) < max_enemies(self.depth):
+                self.enemy_timer -= dt
+                if self.enemy_timer <= 0:
+                    self.enemy_timer = spawn_delay(self.depth)
+                    self.spawn_enemy()
 
         if self.lv("autotap"):
             self.tap_timer += dt * self.lv("autotap")
@@ -261,7 +373,8 @@ class World:
         pack = lambda layer: [[x, y, b.kind, b.hp] for (x, y), b in layer.items()]
         return dict(gold=self.gold, depth=self.depth, levels=self.levels,
                     total_blocks=self.total_blocks, current=pack(self.current),
-                    next=pack(self.next), saved_at=time.time(), gps=self.gold_per_sec())
+                    next=pack(self.next), saved_at=time.time(), gps=self.gold_per_sec(),
+                    crew=[m.look() for m in self.miners])
 
     @classmethod
     def from_dict(cls, d):
@@ -276,5 +389,7 @@ class World:
             w.descend()
         w.miners = []
         w.sync_miners()
+        for miner, look in zip(w.miners, d.get("crew", [])):   # older saves have no crew: keep random looks
+            miner.apply_look(look)
         w.gps_cached = d.get("gps", 0.0)
         return w

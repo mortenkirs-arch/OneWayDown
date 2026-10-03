@@ -1,13 +1,13 @@
 """Drawing the isometric dig site, and mapping the mouse back onto blocks."""
-import math
 import random
 import time
 
 import pygame
 
 from .blocks import BLOCKS
-from .config import BAD, GOOD, GRID, W
+from .config import GRID, W
 from .iso import cube_faces, draw_cube, iso, point_in_poly
+from .sprites import draw_enemy, draw_miner
 from .util import shade
 
 _slab_fade = None
@@ -32,8 +32,9 @@ def pick_block(world, pos):
     return None
 
 
-def draw_board(surf, world, fonts, hover=None):
+def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     w = world
+    t = time.time()
     r = w.rise
     # Earth slab under the board
     bottom = -3 + r
@@ -55,8 +56,15 @@ def draw_board(surf, world, fonts, hover=None):
         items.append((x + y, 0, "block", (x, y, 1 + r, b, 1)))
     for (x, y), b in w.current.items():
         items.append((x + y, 1, "block", (x, y, 2 + r, b, 0)))
+    miner_key = {}
     for m in w.miners:
-        items.append((m.x + m.y - 0.5, 2, "miner", m))
+        miner_key[id(m)] = m.x + m.y - 0.5
+        items.append((miner_key[id(m)], 2, "miner", m))
+    for e in w.enemies:
+        if e.kind == "spider" and e.state == "attacking" and e.victim:
+            items.append((miner_key[id(e.victim)], 3, "enemy", e))   # drawn on top of its victim
+        else:
+            items.append((e.x + e.y - 0.5, 2, "enemy", e))
     items.sort(key=lambda t: (t[0], t[1]))
 
     for _, _, kind, data in items:
@@ -73,8 +81,10 @@ def draw_board(surf, world, fonts, hover=None):
                 if hover and hover[0] == (x, y):
                     for name, poly in faces.items():
                         pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
+        elif kind == "miner":
+            draw_miner(surf, fonts, data, r, t)
         else:
-            draw_miner(surf, data, r)
+            draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
     for rx, ry, age, max_r, color in w.rings:
         t = age / 0.4
@@ -103,30 +113,3 @@ def draw_damage(surf, b, x, y, z):
             v += rng.uniform(-0.18, 0.18)
             pts.append(iso(x + max(0.05, min(0.95, u)), y + max(0.05, min(0.95, v)), z))
         pygame.draw.lines(surf, (30, 24, 28), False, pts, 2)
-    # health bar
-    cx, cy = iso(x + 0.5, y + 0.5, z)
-    bar = pygame.Rect(0, 0, 40, 6)
-    bar.center = (cx, cy - 24)
-    pygame.draw.rect(surf, (20, 16, 24), bar.inflate(2, 2))
-    pygame.draw.rect(surf, GOOD if frac < 0.6 else BAD, (bar.x, bar.y, int(bar.w * (1 - frac)), bar.h))
-
-
-def draw_miner(surf, m, rise):
-    fx, fy = iso(m.x, m.y, m.draw_z + rise)
-    fx, fy = int(fx), int(fy)
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 11, fy - 4, 22, 8))
-    bob = abs(math.sin(time.time() * 10)) * 2 if m.anim == 0 else 0
-    body = pygame.Rect(fx - 7, fy - 26 - bob, 14, 18)
-    pygame.draw.rect(surf, m.hue, body, border_radius=4)
-    pygame.draw.rect(surf, (60, 50, 40), (fx - 7, fy - 10 - bob, 14, 8), border_radius=2)
-    head = (fx, int(fy - 32 - bob))
-    pygame.draw.circle(surf, (238, 196, 160), head, 7)
-    pygame.draw.ellipse(surf, (240, 200, 40), (head[0] - 9, head[1] - 10, 18, 9))
-    pygame.draw.circle(surf, (255, 250, 200), (head[0] + 5 * m.facing, head[1] - 6), 2)
-    # pickaxe swing
-    ang = (-0.5 + m.anim * 2.5) * m.facing
-    hx, hy = fx + 7 * m.facing, fy - 20 - bob
-    ex, ey = hx + math.sin(ang) * 18, hy - math.cos(ang) * 18
-    pygame.draw.line(surf, (120, 82, 44), (hx, hy), (ex, ey), 3)
-    perp = (math.cos(ang) * 8, math.sin(ang) * 8)
-    pygame.draw.line(surf, (190, 190, 200), (ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]), 3)

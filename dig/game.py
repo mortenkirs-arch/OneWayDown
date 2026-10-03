@@ -98,7 +98,7 @@ class Game:
 
     def update(self, dt):
         if self.world and self.scene.simulate:
-            self.world.update(dt)
+            self.world.update(dt, combat=self.scene.combat)
             if time.time() - self.last_save > AUTOSAVE_SECS:
                 self.save()
         self.scene.update(dt)
