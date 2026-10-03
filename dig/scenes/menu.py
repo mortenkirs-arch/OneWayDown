@@ -5,11 +5,14 @@ import time
 import pygame
 
 from ..blocks import BLOCKS
-from ..config import GOLD, MUTED, TEXT, W
+from ..config import GOLD, H, MUTED, TEXT, W
 from ..iso import draw_cube, origin_at
-from ..ui import Button, draw_text
+from ..ui import Button, draw_gold, draw_text
 from ..util import fmt, shade
 from .base import Scene
+
+
+MENU_DY = (H - 720) // 2   # keep the menu vertically centred on taller windows
 
 
 class MenuScene(Scene):
@@ -18,12 +21,12 @@ class MenuScene(Scene):
     def __init__(self, game):
         super().__init__(game)
         self.confirm_new = False
-        cx = W // 2 - 160
+        cx, dy = W // 2 - 160, MENU_DY
         self.buttons = {
-            "continue": Button((cx, 330, 320, 60), "Continue", lambda: game.switch("play")),
-            "new": Button((cx, 405, 320, 60), "New Game", self.new_game),
-            "upgrades": Button((cx, 480, 320, 60), "Upgrades", lambda: game.open_upgrades("menu")),
-            "quit": Button((cx, 555, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
+            "continue": Button((cx, 330 + dy, 320, 60), "Continue", lambda: game.switch("play")),
+            "new": Button((cx, 405 + dy, 320, 60), "New Game", self.new_game),
+            "upgrades": Button((cx, 480 + dy, 320, 60), "Upgrades", lambda: game.open_upgrades("menu")),
+            "quit": Button((cx, 555 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
         }
 
     def enter(self):
@@ -48,22 +51,22 @@ class MenuScene(Scene):
         mouse = pygame.mouse.get_pos()
         bob = math.sin(time.time() * 2) * 0.12
         # decorative isometric stacks
-        with origin_at((W // 2 + 360, 330)):
+        with origin_at((W // 2 + 360, 330 + MENU_DY)):
             for i, k in enumerate(["diamond", "gold", "stone", "dirt"]):
                 draw_cube(surf, i % 2, i // 2, 1, BLOCKS[k]["color"], BLOCKS[k].get("fleck"), seed=i)
             draw_cube(surf, 0, 0, 2.3 + bob, BLOCKS["gold"]["color"], BLOCKS["gold"]["fleck"], seed=9)
-        with origin_at((W // 2 - 420, 360)):
+        with origin_at((W // 2 - 420, 360 + MENU_DY)):
             for i, k in enumerate(["coal", "copper", "stone", "dirt"]):
                 draw_cube(surf, i % 2, i // 2, 1, BLOCKS[k]["color"], BLOCKS[k].get("fleck"), seed=i + 20)
             draw_cube(surf, 1, 1, 2.3 - bob, BLOCKS["diamond"]["color"], BLOCKS["diamond"]["fleck"], seed=3)
 
         title = "KEEP DIGGING"
-        draw_text(surf, self.fonts, title, 120, shade(GOLD, 0.45), (W // 2 + 4, 154), "center")
-        draw_text(surf, self.fonts, title, 120, GOLD, (W // 2, 150), "center")
-        draw_text(surf, self.fonts, "an isometric incremental mining game", 30, MUTED, (W // 2, 225), "center")
+        draw_text(surf, self.fonts, title, 120, shade(GOLD, 0.45), (W // 2 + 4, 154 + MENU_DY), "center")
+        draw_text(surf, self.fonts, title, 120, GOLD, (W // 2, 150 + MENU_DY), "center")
+        draw_text(surf, self.fonts, "an isometric incremental mining game", 30, MUTED, (W // 2, 225 + MENU_DY), "center")
         if self.world:
-            draw_text(surf, self.fonts, f"Save: ${fmt(self.world.gold)}  -  depth {self.world.depth}m",
-                      26, TEXT, (W // 2, 280), "center")
+            draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.depth}m",
+                      26, TEXT, (W // 2, 280 + MENU_DY), "center")
         b = self.buttons
         b["continue"].enabled = self.world is not None
         b["new"].text = "Click again to confirm" if self.confirm_new else "New Game"

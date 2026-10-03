@@ -1,15 +1,17 @@
 """The dig site: isometric board plus HUD."""
 import math
+import random
 import time
 
 import pygame
 
-from ..config import BAD, GOLD, GRID, H, MUTED, TEXT, W
+from ..config import BAD, BOARD_ORIGIN, GOLD, GOLD_HUD_COIN, GRID, H, MUTED, PANEL, TEXT, W
 from ..enemies import ENEMY_START_DEPTH, max_enemies
-from ..render import draw_board, pick_block
+from ..iso import origin_at
+from ..render import draw_board, draw_flying_coins, pick_block
 from ..sprites import pick_enemy
-from ..ui import Button, draw_panel, draw_text
-from ..upgrades import UPGRADES
+from ..ui import Button, draw_coin, draw_panel, draw_text
+from ..upgrades import BRANCHES, UPGRADES, enemy_hit_floor, next_milestone
 from ..util import fmt
 from .base import Scene
 
@@ -22,6 +24,7 @@ class PlayScene(Scene):
         self.buttons = [
             Button((W - 360, 16, 170, 46), "Upgrades (U)", lambda: game.open_upgrades("play"), size=26),
             Button((W - 178, 16, 160, 46), "Menu (Esc)", game.to_menu, size=26, color=(70, 64, 90)),
+            Button((W - 360, 72, 170, 40), "Crew (C)", game.open_crew, size=24, color=(50, 96, 140)),
         ]
 
     def handle(self, event):
@@ -33,28 +36,76 @@ class PlayScene(Scene):
                 self.game.to_menu()
             elif event.key == pygame.K_u:
                 self.game.open_upgrades("play")
+            elif event.key == pygame.K_c:
+                self.game.open_crew()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
-                self.world.hit_enemy(enemy, self.world.click_hit_damage())
+                self.world.player_hit_enemy(enemy)
                 return
             hit = pick_block(self.world, event.pos)
             if hit:
-                self.world.player_hit(hit[0])
+                self.world.player_hit(hit[0], manual=True)
 
     def draw(self, surf):
         mouse = pygame.mouse.get_pos()
         enemy = pick_enemy(self.world, mouse, time.time())
         block = None if enemy else pick_block(self.world, mouse)
-        draw_board(surf, self.world, self.fonts, hover=block, hover_enemy=enemy)
+        w = self.world
+        if w.shake > 0:   # dynamite screen shake: jolt the whole board for a moment
+            amp = w.shake_power * min(1.0, w.shake / 0.25)
+            ox, oy = BOARD_ORIGIN
+            with origin_at((ox + random.uniform(-amp, amp), oy + random.uniform(-amp, amp))):
+                draw_board(surf, w, self.fonts, hover=block, hover_enemy=enemy)
+        else:
+            draw_board(surf, w, self.fonts, hover=block, hover_enemy=enemy)
         self.draw_hud(surf, mouse)
+        draw_flying_coins(surf, w.coins)   # over the HUD, so they visibly drop into the counter
+        if w.notice:
+            self.draw_notice(surf, w)
+
+    def draw_milestone(self, surf, w):
+        """Bottom of the top panel: the next depth that unlocks upgrades, and progress towards it."""
+        f = self.fonts
+        nxt = next_milestone(w.depth)
+        if not nxt:
+            draw_text(surf, f, "Every upgrade unlocked!", 22, GOLD, (34, 116), "midleft")
+            return
+        depth, ups = nxt
+        names = ", ".join(u["name"] for u in ups[:2]) + (f" +{len(ups) - 2} more" if len(ups) > 2 else "")
+        draw_text(surf, f, f"Next unlock at {depth}m: {names}", 22, MUTED, (34, 112), "midleft")
+        prev = max([u["depth"] for u in UPGRADES if u["depth"] <= w.depth], default=0)
+        layer = 1 - len(w.current) / (GRID * GRID)            # progress through the current layer
+        frac = min(1.0, (w.depth - prev + layer) / max(1, depth - prev))
+        bar = pygame.Rect(34, 126, 384, 8)
+        pygame.draw.rect(surf, (20, 16, 28), bar, border_radius=4)
+        pygame.draw.rect(surf, (240, 150, 90), (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=4)
+
+    def draw_notice(self, surf, w):
+        """Banner when a depth milestone opens up new upgrades."""
+        text, left = w.notice
+        img = self.fonts[28].render(text, True, GOLD)
+        box = img.get_rect(midbottom=(W // 2, H - 64)).inflate(36, 20)
+        alpha = int(255 * min(1.0, left / 0.5))
+        layer = pygame.Surface(box.size, pygame.SRCALPHA)
+        pygame.draw.rect(layer, (*PANEL, 235), layer.get_rect(), border_radius=10)
+        pygame.draw.rect(layer, GOLD, layer.get_rect(), 2, border_radius=10)
+        layer.blit(img, img.get_rect(center=(box.w // 2, box.h // 2)))
+        layer.set_alpha(alpha)
+        surf.blit(layer, box)
+        draw_text(surf, self.fonts, "Press U to see them", 20, MUTED, (W // 2, box.bottom + 14), "center")
 
     def draw_hud(self, surf, mouse):
         w = self.world
         f = self.fonts
-        draw_panel(surf, pygame.Rect(16, 16, 420, 96))
-        draw_text(surf, f, f"$ {fmt(w.gold)}", 48, GOLD, (34, 26))
-        draw_text(surf, f, f"{fmt(w.gold_per_sec())} / sec", 24, MUTED, (36, 72))
+        draw_panel(surf, pygame.Rect(16, 16, 420, 134))
+        self.draw_milestone(surf, w)
+        bump = w.gold_bump / 0.18          # 1 the moment a coin lands, easing back to 0
+        cx, cy = GOLD_HUD_COIN
+        draw_coin(surf, (cx, cy), 17 + 4 * bump)
+        color = tuple(min(255, int(c + (255 - c) * 0.6 * bump)) for c in GOLD)
+        draw_text(surf, f, fmt(w.gold), 48, color, (cx + 26, cy + 1), "midleft")
+        draw_text(surf, f, f"{fmt(w.gold_per_sec())} gold / sec", 24, MUTED, (36, 72))
         draw_text(surf, f, f"Depth  {w.depth}m", 34, TEXT, (420, 30), "topright")
         draw_text(surf, f, f"{len(w.current)}/{GRID * GRID} left", 24, MUTED, (420, 72), "topright")
         for b in self.buttons:
@@ -65,15 +116,20 @@ class PlayScene(Scene):
             pygame.draw.circle(surf, BAD, badge, 12)
             draw_text(surf, f, str(affordable), 22, TEXT, badge, "center")
 
-        down = sum(1 for m in w.miners if m.state == "down")
-        stats = [(f"Miners: {len(w.miners) - down}/{len(w.miners)}" + (f"  ({down} down)" if down else ""),
-                  BAD if down else TEXT),
+        crew = w.workers()
+        down = sum(1 for m in crew if m.state == "down")
+        boss = next((m for m in w.miners if m.is_foreman), None)
+        boss_text = ("" if not boss else "  + foreman" if boss.state != "down" else "  (foreman dead)")
+        stats = [(f"Miners: {len(crew) - down}/{len(crew)}" + (f"  ({down} dead)" if down else "") + boss_text,
+                  BAD if down or (boss and boss.state == "down") else TEXT),
                  (f"Pick dmg: {fmt(w.miner_hit_damage())}", TEXT),
-                 (f"Click dmg: {fmt(w.click_hit_damage())}", TEXT),
+                 (f"Click dmg: {fmt(w.click_hit_damage())}  (blocks)", TEXT),
+                 (f"Monster dmg: {fmt(w.monster_hit_damage())}  (min {enemy_hit_floor(w.lv('executioner')):.0%})",
+                  BRANCHES["combat"]["color"]),
                  (f"Blocks mined: {fmt(w.total_blocks)}", TEXT)]
-        draw_panel(surf, pygame.Rect(16, H - 140, 300, 124))
+        draw_panel(surf, pygame.Rect(16, H - 167, 330, 151))
         for i, (s, color) in enumerate(stats):
-            draw_text(surf, f, s, 24, color, (32, H - 128 + i * 27))
+            draw_text(surf, f, s, 24, color, (32, H - 155 + i * 27))
 
         if w.depth >= ENEMY_START_DEPTH:
             secs = math.ceil(w.enemy_timer)

@@ -7,9 +7,7 @@ import random
 
 from .config import GRID
 
-MINER_MAX_HP = 10.0
-MINER_REGEN = 1.0             # hp per second while working
-MINER_RESPAWN_SECS = 15.0
+MINER_MAX_HP = 10.0           # before Hard Hats (see upgrades.miner_max_hp)
 
 SKIN_TONES = [(255, 224, 196), (241, 194, 155), (224, 172, 125), (198, 134, 90),
               (161, 102, 64), (120, 74, 46), (88, 54, 36)]
@@ -26,6 +24,23 @@ NAMES = ["Gus", "Dot", "Rocco", "Mabel", "Bjorn", "Pip", "Rusty", "Ada", "Clem",
          "Dusty", "Olga", "Flint", "Juno", "Barry", "Sven", "Ruby", "Clyde", "Agnes", "Rex"]
 
 LOOK_FIELDS = ("name", "skin", "hair", "style", "facial", "shirt", "height")
+ROMAN = ["", "", " II", " III", " IV", " V", " VI", " VII", " VIII", " IX", " X"]
+
+
+def new_stats(depth=0, clock=0.0):
+    """Lifetime record for one miner (shown on the Crew page, kept in the graveyard)."""
+    return dict(blocks=0, gold=0.0, monsters=0, saved=0, orders=0, hired_depth=depth, hired_clock=clock)
+
+
+def base_name(name):
+    """'Gus III' -> 'Gus'."""
+    return name.split(" ")[0]
+
+
+def numbered_name(name, previous):
+    """Name for the `previous + 1`-th miner called `name`: Gus, Gus II, Gus III, ..."""
+    n = previous + 1
+    return name + (ROMAN[n] if n < len(ROMAN) else f" #{n}")
 
 
 def _weighted(options):
@@ -48,7 +63,10 @@ def random_look(taken_names=()):
 
 
 class Miner:
-    def __init__(self, taken_names=()):
+    """A crew member. role "miner" digs; role "foreman" walks the site barking orders (see World)."""
+
+    def __init__(self, taken_names=(), role="miner"):
+        self.role = role
         self.place_randomly()
         self.draw_z = 2.0
         self.target = None
@@ -59,8 +77,27 @@ class Miner:
         self.hp = self.max_hp
         self.state = "working"   # working | grabbed | down
         self.attacker = None     # enemy currently grabbing this miner
-        self.respawn = 0.0       # seconds until back on their feet (when down)
+        self.respawn = 0.0       # seconds until a replacement recruit arrives (when dead)
         self.apply_look(random_look(taken_names))
+        self.stats = new_stats()
+        self.inspecting = None   # foreman: the miner currently being supervised
+        self.walk_timer = 0.0    # foreman: seconds until moving on to someone else
+        self.bark_timer = 2.0    # foreman: seconds until the next shouted order
+        if role == "foreman":    # foremen are a little taller, and always have a mustache
+            self.height = 4
+            if self.facial is None:
+                self.facial = "mustache"
+
+    @property
+    def is_foreman(self):
+        return self.role == "foreman"
+
+    def to_dict(self):
+        return {**self.look(), "role": self.role, "stats": dict(self.stats)}
+
+    def apply_saved(self, data):
+        self.apply_look(data)
+        self.stats.update(data.get("stats", {}))   # older saves have no stats: keep the zeros
 
     def apply_look(self, look):
         for field in LOOK_FIELDS:

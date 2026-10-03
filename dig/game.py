@@ -9,8 +9,9 @@ import pygame
 
 from .config import (AUTOSAVE_SECS, BG_BOTTOM, BG_TOP, FPS, GOLD, H, OFFLINE_CAP_SECS, PANEL,
                      SAVE_PATH, W)
-from .scenes import MenuScene, PlayScene, UpgradeScene
+from .scenes import CrewScene, MenuScene, PlayScene, UpgradeScene
 from .ui import Fonts
+from .upgrades import offline_share
 from .util import fmt
 from .world import World
 
@@ -31,6 +32,7 @@ class Game:
             "menu": MenuScene(self),
             "play": PlayScene(self),
             "upgrades": UpgradeScene(self),
+            "crew": CrewScene(self),
         }
         self.scene = self.scenes["menu"]
 
@@ -43,6 +45,10 @@ class Game:
         self.world = World()
         self.save()
         self.switch("play")
+
+    def open_crew(self):
+        if self.world:
+            self.switch("crew")
 
     def open_upgrades(self, came_from):
         if not self.world:
@@ -68,10 +74,11 @@ class Game:
                 data = json.load(f)
             self.world = World.from_dict(data)
             away = min(OFFLINE_CAP_SECS, max(0, time.time() - data.get("saved_at", time.time())))
-            earned = data.get("gps", 0.0) * away * 0.5
+            earned = data.get("gps", 0.0) * away * offline_share(self.world.lv("pockets"))
             if earned >= 1 and away > 60:
                 self.world.gold += earned
-                self.toast = (f"While you were away ({int(away // 60)} min) your miners earned ${fmt(earned)}", 6.0)
+                self.toast = (f"While you were away ({int(away // 60)} min) your miners dug up "
+                              f"{fmt(earned)} gold", 6.0)
         except (OSError, ValueError, KeyError, TypeError):
             self.world = None
 

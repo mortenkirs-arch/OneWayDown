@@ -16,6 +16,20 @@ BLOCKS = {
 }
 ORE_ORDER = ["diamond", "ruby", "gold", "iron", "copper", "coal"]
 
+# How fast things get tougher / richer per metre of depth (blocks and monsters share these).
+# Value grows a little slower than health, so each metre is slightly harder than the last;
+# upgrades are what keep you ahead.
+HP_GROWTH = 1.12
+VALUE_GROWTH = 1.115
+
+
+def hp_scale(depth):
+    return HP_GROWTH ** depth
+
+
+def value_scale(depth):
+    return VALUE_GROWTH ** depth
+
 
 class Block:
     __slots__ = ("kind", "hp", "max_hp", "value")
@@ -23,9 +37,9 @@ class Block:
     def __init__(self, kind, depth, hp=None):
         spec = BLOCKS[kind]
         self.kind = kind
-        self.max_hp = spec["hp"] * 1.12 ** depth
+        self.max_hp = spec["hp"] * hp_scale(depth)
         self.hp = self.max_hp if hp is None else hp
-        self.value = spec["value"] * 1.1 ** depth
+        self.value = spec["value"] * value_scale(depth)
 
 
 def generate_layer(depth, ore_boost=1.0, rng=random):

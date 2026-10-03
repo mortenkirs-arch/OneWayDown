@@ -7,8 +7,10 @@ import pygame
 
 from .blocks import BLOCKS
 from .config import GRID, W
+from .dynamite import EXPLOSION_SECS
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_enemy, draw_miner
+from .sprites import draw_bomb, draw_enemy, draw_miner
+from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
 from .util import shade
 
 _slab_fade = None
@@ -69,6 +71,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             items.append((math.inf, 4, "enemy", e))                  # in the air: above everything
         else:
             items.append((e.x + e.y - 0.5, 2, "enemy", e))
+    for b in w.bombs:   # on its block once landed; above everything while flying in
+        items.append((b.cell[0] + b.cell[1] + 0.5, 2, "bomb", b) if b.landed else (math.inf, 5, "bomb", b))
     items.sort(key=lambda t: (t[0], t[1]))
 
     for _, _, kind, data in items:
@@ -87,19 +91,96 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                         pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
         elif kind == "miner":
             draw_miner(surf, fonts, data, r, t)
+        elif kind == "bomb":
+            draw_bomb(surf, data, w, t)
         else:
             draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
+    draw_blast_zones(surf, w, t)
     for rx, ry, age, max_r, color in w.rings:
-        t = age / 0.4
-        rad = max(2, int(max_r * t))
-        pygame.draw.ellipse(surf, color, (rx - rad, ry - rad / 2, rad * 2, rad), max(1, int(4 * (1 - t))))
+        q = age / 0.4
+        rad = max(2, int(max_r * q))
+        pygame.draw.ellipse(surf, color, (rx - rad, ry - rad / 2, rad * 2, rad), max(1, int(4 * (1 - q))))
+    draw_explosions(surf, w)
     for p in w.particles:
         pygame.draw.rect(surf, p.color, (int(p.x), int(p.y), p.size, p.size))
+    draw_smoke(surf, w)
+    if w.flash > 0:   # white flash the instant dynamite goes off
+        flash = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        flash.fill((255, 245, 225, int(150 * w.flash / 0.12)))
+        surf.blit(flash, (0, 0))
     for f in w.floaters:
-        img = fonts[f.size].render(f.text, True, f.color)
+        if f.coin:
+            img = gold_label(fonts, f.text, f.size, f.color)
+        else:
+            img = fonts[f.size].render(f.text, True, f.color)
         img.set_alpha(int(255 * min(1, f.life / f.max_life * 2)))
         surf.blit(img, img.get_rect(center=(f.x, f.y)))
+
+
+def draw_flying_coins(surf, coins):
+    """Coins in mid-air (earned coins heading for the counter, or spent ones heading for an upgrade)."""
+    for c in coins:
+        if c.t < 0:
+            continue
+        x, y = c.pos()
+        squash = abs(math.cos(c.t * 14))          # spinning: the coin flips edge-on and back
+        r = c.size
+        rect = pygame.Rect(0, 0, max(2, int(2 * r * squash)), 2 * r)
+        rect.center = (int(x), int(y))
+        pygame.draw.ellipse(surf, COIN_EDGE, rect.move(0, 1))
+        pygame.draw.ellipse(surf, COIN, rect)
+        if squash > 0.5:
+            pygame.draw.circle(surf, COIN_SHINE, (rect.centerx - 1, rect.centery - 2), max(1, r // 3))
+
+
+def draw_blast_zones(surf, world, t):
+    """Pulsing red danger area under every lit bundle of dynamite; pulses faster as the fuse shortens."""
+    lit = [b for b in world.bombs if b.landed]
+    if not lit:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for b in lit:
+        urgency = 1 - b.fuse_left()
+        pulse = 0.5 + 0.5 * math.sin(t * (7 + 22 * urgency))
+        fill = (255, 50, 30, int(35 + 70 * pulse * (0.4 + 0.6 * urgency)))
+        edge = (255, 120, 70, int(140 + 100 * pulse))
+        cx, cy = b.cell
+        for dx in range(-b.radius, b.radius + 1):
+            for dy in range(-b.radius, b.radius + 1):
+                x, y = cx + dx, cy + dy
+                if 0 <= x < GRID and 0 <= y < GRID:
+                    top = cube_faces(x, y, world.column_height(x, y) + world.rise)["top"]
+                    pygame.draw.polygon(overlay, fill, top)
+                    pygame.draw.polygon(overlay, edge, top, 1)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_explosions(surf, world):
+    """Fireball: white-hot core that blooms out into orange and red, then fades."""
+    for x, y, age, size in world.explosions:
+        p = age / EXPLOSION_SECS
+        grow = 1 - (1 - p) ** 2
+        fade = 1 - p
+        rad = size * (0.35 + 0.9 * grow)
+        dim = int(rad * 2.6)
+        ball = pygame.Surface((dim, dim), pygame.SRCALPHA)
+        c = dim // 2
+        for scale, color, alpha in ((1.15, (170, 50, 30), 90), (1.0, (255, 120, 40), 180),
+                                    (0.8, (255, 200, 80), 220), (0.55, (255, 245, 210), 255)):
+            pygame.draw.circle(ball, (*color, int(alpha * fade)), (c, c), int(rad * scale))
+        if p < 0.15:   # blinding core for the first instant
+            pygame.draw.circle(ball, (255, 255, 255, int(255 * (1 - p / 0.15))), (c, c), int(rad * 0.75))
+        surf.blit(ball, (x - c, y - c * 0.85))
+
+
+def draw_smoke(surf, world):
+    for s in world.smoke:
+        r = max(1, int(s.r))
+        puff = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+        alpha = int(150 * s.life / s.max_life)
+        pygame.draw.circle(puff, (s.shade, s.shade - 6, s.shade - 10, alpha), (r, r), r)
+        surf.blit(puff, (s.x - r, s.y - r))
 
 
 def draw_damage(surf, b, x, y, z):

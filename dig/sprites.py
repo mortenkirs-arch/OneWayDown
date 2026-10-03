@@ -5,9 +5,12 @@ import random
 import pygame
 
 from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
+from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
 from .enemies import FLY_ALTITUDE, TELEGRAPH_SECS, TRANSFORM_SECS
-from .iso import iso
+from .iso import iso, origin_at
+from .miners import LOOK_FIELDS
 
+HI_VIS = (255, 140, 30)
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24}
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
 SPIDER_BODY = (58, 48, 70)
@@ -108,30 +111,90 @@ def draw_miner(surf, fonts, m, rise, t):
     body = pygame.Rect(fx - 7, fy - 26 - bob - lift, 14, 18 + lift)
     head = (fx, int(fy - 32 - bob - lift))
     _draw_hair_back(surf, m, head)
+    foreman = getattr(m, "role", "miner") == "foreman"
     pygame.draw.rect(surf, m.shirt, body, border_radius=4)
+    if foreman:   # hi-vis vest with a reflective stripe, open at the front
+        vest = pygame.Rect(fx - 7, body.y + 1, 14, body.h - 9)
+        pygame.draw.rect(surf, HI_VIS, vest, border_radius=3)
+        pygame.draw.rect(surf, (255, 245, 200), (vest.x, vest.centery, vest.w, 3))
+        pygame.draw.line(surf, m.shirt, (fx, vest.y), (fx, vest.y + 6), 2)
     pygame.draw.rect(surf, (60, 50, 40), (fx - 7, fy - 10 - bob, 14, 8), border_radius=2)
     # choked purple / venom green / drained pale, depending on who has hold of them
     tint = m.attacker.spec["tint"] if grabbed and m.attacker else m.skin
     skin = _lerp(m.skin, tint, 1 - m.hp / m.max_hp) if grabbed else m.skin
     pygame.draw.circle(surf, skin, head, 7)
     _draw_face(surf, m, head, grabbed)
-    pygame.draw.ellipse(surf, (240, 200, 40), (head[0] - 9, head[1] - 10, 18, 9))
+    helmet = (245, 245, 250) if foreman else (240, 200, 40)   # the boss wears white
+    pygame.draw.ellipse(surf, helmet, (head[0] - 9, head[1] - 10, 18, 9))
+    if foreman:
+        pygame.draw.line(surf, HI_VIS, (head[0] - 6, head[1] - 7), (head[0] + 6, head[1] - 7), 2)
     pygame.draw.circle(surf, (255, 250, 200), (head[0] + 5 * m.facing, head[1] - 6), 2)
     if m.style == "mohawk":
         _draw_mohawk(surf, m, head)
-    # pickaxe: normal swing, or flailing wildly while grabbed
-    # (rests raised in front of the miner so it doesn't hide their face)
-    ang = math.sin(t * 16) * 1.4 if grabbed else (0.35 + m.anim * 2.0) * m.facing
-    hx, hy = fx + 7 * m.facing, fy - 20 - bob - lift
-    ex, ey = hx + math.sin(ang) * 18, hy - math.cos(ang) * 18
-    pygame.draw.line(surf, (120, 82, 44), (hx, hy), (ex, ey), 3)
-    perp = (math.cos(ang) * 8, math.sin(ang) * 8)
-    pygame.draw.line(surf, (190, 190, 200), (ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]), 3)
+    if foreman:
+        _draw_clipboard(surf, m, fx, fy - bob - lift, skin, grabbed, t)
+    else:
+        # pickaxe: normal swing, or flailing wildly while grabbed
+        # (rests raised in front of the miner so it doesn't hide their face)
+        ang = math.sin(t * 16) * 1.4 if grabbed else (0.35 + m.anim * 2.0) * m.facing
+        hx, hy = fx + 7 * m.facing, fy - 20 - bob - lift
+        ex, ey = hx + math.sin(ang) * 18, hy - math.cos(ang) * 18
+        pygame.draw.line(surf, (120, 82, 44), (hx, hy), (ex, ey), 3)
+        perp = (math.cos(ang) * 8, math.sin(ang) * 8)
+        pygame.draw.line(surf, (190, 190, 200), (ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]), 3)
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 46 - lift, m.hp / m.max_hp, 26)
     if grabbed and int(t * 4) % 2 == 0:
         img = fonts[26].render("!!", True, BAD)
         surf.blit(img, img.get_rect(midbottom=(fx, fy - 50 - lift)))
+
+
+def _draw_clipboard(surf, m, fx, top, skin, grabbed, t):
+    """The foreman's clipboard: held at the chest, a finger jabbed out when barking, waved when grabbed."""
+    f = m.facing
+    if grabbed:   # swatting at the monster with it
+        ang = math.sin(t * 16) * 1.3
+        cx, cy = fx + 7 * f + math.sin(ang) * 10, top - 26 - math.cos(ang) * 8
+    else:
+        cx, cy = fx + 6 * f, top - 18
+    board = pygame.Rect(0, 0, 10, 12)
+    board.center = (int(cx), int(cy))
+    pygame.draw.rect(surf, (150, 105, 60), board, border_radius=2)
+    pygame.draw.rect(surf, (245, 245, 240), board.inflate(-4, -4))
+    for i in range(2):   # scribbled lines on the paper
+        ly = board.y + 5 + i * 3
+        pygame.draw.line(surf, (120, 120, 140), (board.x + 3, ly), (board.right - 3, ly))
+    pygame.draw.rect(surf, (170, 170, 180), (board.centerx - 2, board.y - 1, 5, 3))
+    if m.anim > 0.2 and not grabbed:   # pointing at whoever is being told off
+        sx, sy = fx - 4 * f, top - 21
+        tip = (sx - 13 * f, sy - 5)
+        pygame.draw.line(surf, m.shirt, (sx, sy), tip, 3)
+        pygame.draw.circle(surf, skin, tip, 2)
+
+
+class _Portrait:
+    """Stand-in for a miner built from a saved look (works for the living and the dead)."""
+
+    def __init__(self, look):
+        for field in LOOK_FIELDS:
+            value = look[field]
+            setattr(self, field, tuple(value) if isinstance(value, list) else value)
+        self.role = look.get("role", "miner")
+        self.x = self.y = self.draw_z = 0.0
+        self.state, self.attacker, self.anim, self.facing = "working", None, 0.25, 1
+        self.hp = self.max_hp = 1.0
+        self.respawn = 0.0
+
+
+def draw_portrait(surf, fonts, look, center, dead=False):
+    """A miner standing still, for the Crew page. The dead are shown faded and in greyscale."""
+    img = pygame.Surface((64, 72), pygame.SRCALPHA)
+    with origin_at((32, 64)):
+        draw_miner(img, fonts, _Portrait(look), 0, 0.0)
+    if dead:
+        img = pygame.transform.grayscale(img)
+        img.set_alpha(170)
+    surf.blit(img, img.get_rect(center=center))
 
 
 def draw_grave(surf, fonts, fx, fy, secs):
@@ -143,6 +206,89 @@ def draw_grave(surf, fonts, fx, fy, secs):
     pygame.draw.line(surf, (80, 80, 92), (fx - 5, fy - 19), (fx + 5, fy - 19), 2)
     img = fonts[20].render(f"{math.ceil(secs)}s", True, MUTED)
     surf.blit(img, img.get_rect(midbottom=(fx, fy - 31)))
+
+
+# ----- dynamite ------------------------------------------------------------
+BOMB_SURF = 80                      # bundle is drawn on a square surface (so it can spin in flight)
+BOMB_BASE = (40, 66)                # where the bottom of the sticks sits on that surface
+STICK_STEP = STICK_H - 1      # stacked sticks overlap by a pixel
+
+
+def _bomb_land(b, world):
+    cx, cy = b.cell
+    return iso(cx + 0.5, cy + 0.5, world.column_height(cx, cy) + world.rise)
+
+
+def _bomb_jitter(b, t):
+    """The bundle starts rattling as the fuse gets short."""
+    left = b.fuse_left()
+    return math.sin(t * 50) * 2.5 * (1 - left / 0.4) if b.landed and left < 0.4 else 0.0
+
+
+def _stick_rect(i):
+    """Rect of the i-th stick from the bottom of the pile (sticks lie sideways, stacked up)."""
+    x = BOMB_BASE[0] - STICK_W // 2 + STICK_STAGGER[i % len(STICK_STAGGER)]
+    y = BOMB_BASE[1] - STICK_H - i * STICK_STEP
+    return pygame.Rect(x, y, STICK_W, STICK_H)
+
+
+def _bomb_fuse_base(b):
+    top = _stick_rect(b.sticks - 1)   # fuse comes out of the end of the top stick
+    return top.right - 2, top.y + 3
+
+
+def bomb_fuse_tip(b, world, t=0.0):
+    """Screen position of the burning end of the fuse (for spark particles)."""
+    lx, ly = _bomb_land(b, world)
+    bx, by = _bomb_fuse_base(b)
+    tip = fuse_points(bx, by, FUSE_LEN * b.fuse_left())[-1]
+    return lx - BOMB_BASE[0] + tip[0] + _bomb_jitter(b, t), ly - BOMB_BASE[1] + tip[1]
+
+
+def draw_bomb(surf, b, world, t):
+    """A bundle of dynamite sticks with a burning fuse; spins in on an arc, then sits and fizzes."""
+    img = pygame.Surface((BOMB_SURF, BOMB_SURF), pygame.SRCALPHA)
+    n = b.sticks
+    for i in range(n):   # bottom stick first, so each one sits on the one below
+        stick = _stick_rect(i)
+        x, y = stick.topleft
+        pygame.draw.rect(img, (205, 38, 38), stick, border_radius=4)
+        pygame.draw.line(img, (250, 125, 105), (x + 6, y + 2), (stick.right - 5, y + 2), 2)   # shine
+        pygame.draw.line(img, (150, 22, 22), (x + 6, stick.bottom - 2), (stick.right - 5, stick.bottom - 2), 1)
+        pygame.draw.rect(img, (105, 15, 15), stick, 1, border_radius=4)
+        cap = pygame.Rect(x, y, 6, STICK_H)   # paper end of the stick
+        pygame.draw.ellipse(img, (238, 218, 190), cap)
+        pygame.draw.ellipse(img, (150, 110, 80), cap, 1)
+    pile_top = _stick_rect(n - 1).y
+    pile_left = BOMB_BASE[0] - STICK_W // 2
+    for frac in (0.32, 0.68):   # two bands of twine around the bundle
+        bx = pile_left + int(STICK_W * frac)
+        band = pygame.Rect(bx, pile_top - 1, 4, BOMB_BASE[1] - pile_top + 2)
+        pygame.draw.rect(img, (222, 192, 135), band)
+        pygame.draw.rect(img, (135, 105, 65), band, 1)
+    fuse = fuse_points(*_bomb_fuse_base(b), FUSE_LEN * b.fuse_left())
+    if len(fuse) > 1:
+        pygame.draw.lines(img, (70, 58, 46), False, fuse, 2)
+    tx, ty = fuse[-1]
+    flick = 1 + 0.35 * math.sin(t * 47)
+    pygame.draw.circle(img, (255, 170, 60, 110), (int(tx), int(ty)), int(6 * flick))
+    pygame.draw.circle(img, (255, 235, 150, 230), (int(tx), int(ty)), int(3 * flick))
+    pygame.draw.circle(img, (255, 255, 255, 255), (int(tx), int(ty)), 1)
+
+    lx, ly = _bomb_land(b, world)
+    if b.landed:
+        surf.blit(img, (lx - BOMB_BASE[0] + _bomb_jitter(b, t), ly - BOMB_BASE[1]))
+        return
+    # in flight: arc in from above the top-right of the board, spinning end over end
+    p = b.throw_progress()
+    sx, sy = lx + 300, -60
+    ex, ey = lx, ly - (BOMB_BASE[1] - BOMB_SURF // 2)
+    x = sx + (ex - sx) * p
+    y = sy + (ey - sy) * p - math.sin(math.pi * p) * 140
+    spun = pygame.transform.rotate(img, -p * 540)
+    surf.blit(spun, spun.get_rect(center=(x, y)))
+    shadow = 4 + 10 * p   # shadow grows on the landing spot
+    pygame.draw.ellipse(surf, (16, 12, 20), (lx - shadow, ly - shadow * 0.35, shadow * 2, shadow * 0.7))
 
 
 # ----- enemies -------------------------------------------------------------

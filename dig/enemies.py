@@ -25,6 +25,7 @@ Each enemy type is data in ENEMY_TYPES:
 import math
 import random
 
+from .blocks import hp_scale, value_scale
 from .config import GRID
 
 ENEMY_TYPES = {
@@ -113,9 +114,9 @@ class Enemy:
         """Set the enemy type, with full health for that type at this depth."""
         spec = ENEMY_TYPES[kind]
         self.kind = kind
-        self.max_hp = spec["hp"] * 1.12 ** self.depth
+        self.max_hp = spec["hp"] * hp_scale(self.depth)
         self.hp = self.max_hp
-        self.bounty_base = spec["bounty"] * 2 * 1.1 ** self.depth
+        self.bounty_base = spec["bounty"] * 2 * value_scale(self.depth)
 
     @property
     def spec(self):
@@ -187,7 +188,7 @@ class Enemy:
                 self.hp = min(self.max_hp, self.hp + drained / v.max_hp * self.max_hp * self.spec["lifesteal"])
                 world.blood_drip(v, self)
             if v.hp <= 0:
-                world.miner_down(v)
+                world.miner_down(v, killer=self)
                 self.release()
             return
 
