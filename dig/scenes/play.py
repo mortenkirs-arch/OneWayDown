@@ -6,6 +6,11 @@ import time
 import pygame
 
 from ..config import BAD, BOARD_ORIGIN, GOLD, GOLD_HUD_COIN, GRID, H, MUTED, PANEL, TEXT, W
+from ..world import COMBO_WINDOW
+
+SLAM_MIN_HOLD = 0.35    # hold at least this long for a slam (a quick click is just a click)
+SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
+HUD_PANELS = [pygame.Rect(16, 16, 420, 134), pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
 from ..enemies import ENEMY_START_DEPTH, max_enemies
 from ..iso import origin_at
 from ..render import draw_board, draw_flying_coins, pick_block
@@ -21,6 +26,7 @@ class PlayScene(Scene):
 
     def __init__(self, game):
         super().__init__(game)
+        self.charge = None   # time pressed while charging a slam
         self.buttons = [
             Button((W - 360, 16, 170, 46), "Upgrades (U)", lambda: game.open_upgrades("play"), size=26),
             Button((W - 178, 16, 160, 46), "Menu (Esc)", game.to_menu, size=26, color=(70, 64, 90)),
@@ -39,6 +45,11 @@ class PlayScene(Scene):
             elif event.key == pygame.K_c:
                 self.game.open_crew()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if any(r.collidepoint(event.pos) for r in HUD_PANELS):   # clicks on the HUD aren't play
+                return
+            self.world.combo_click()   # every click counts towards the combo, whatever it lands on
+            if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
+                self.charge = time.time()
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
                 self.world.player_hit_enemy(enemy)
@@ -46,6 +57,22 @@ class PlayScene(Scene):
             hit = pick_block(self.world, event.pos)
             if hit:
                 self.world.player_hit(hit[0], manual=True)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.charge:
+            held = time.time() - self.charge
+            self.charge = None
+            if held >= SLAM_MIN_HOLD:
+                cell = self.slam_target(event.pos)
+                if cell:
+                    self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD))
+
+    def slam_target(self, pos):
+        """The block under the cursor, or failing that the block nearest to it on screen."""
+        hit = pick_block(self.world, pos)
+        if hit:
+            return hit[0]
+        if not self.world.current:
+            return None
+        return min(self.world.current, key=lambda c: math.dist(pos, self.world.cell_screen(c)))
 
     def draw(self, surf):
         mouse = pygame.mouse.get_pos()
@@ -62,6 +89,7 @@ class PlayScene(Scene):
         self.draw_hud(surf, mouse)
         draw_flying_coins(surf, w.coins)   # over the HUD, so they visibly drop into the counter
         self.draw_first_hire_guide(surf, w)
+        self.draw_charge_and_combo(surf, w, mouse)
         if w.notice:
             self.draw_notice(surf, w)
 
@@ -81,6 +109,36 @@ class PlayScene(Scene):
         bar = pygame.Rect(34, 126, 384, 8)
         pygame.draw.rect(surf, (20, 16, 28), bar, border_radius=4)
         pygame.draw.rect(surf, (240, 150, 90), (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=4)
+
+    def enter(self):
+        self.charge = None   # time pressed while charging a slam
+
+    def draw_charge_and_combo(self, surf, w, mouse):
+        """Charged Slam's growing ring at the cursor, and the Combo Clicks counter beside it."""
+        t = time.time()
+        mx, my = mouse
+        if getattr(self, "charge", None):
+            held = t - self.charge
+            if held > 0.12:
+                frac = min(1.0, max(0.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD))
+                full = frac >= 1.0
+                rad = 12 + 26 * min(1.0, held / (SLAM_MIN_HOLD + SLAM_FULL_HOLD))
+                color = (255, 255, 255) if full and int(t * 12) % 2 else (200, 150, 255)
+                pygame.draw.circle(surf, color, (mx, my), int(rad), 3)
+                if held >= SLAM_MIN_HOLD:
+                    pygame.draw.arc(surf, (255, 230, 255), (mx - rad - 6, my - rad - 6, 2 * rad + 12, 2 * rad + 12),
+                                    math.pi / 2, math.pi / 2 + math.tau * frac, 4)
+                if full:
+                    draw_text(surf, self.fonts, "SLAM!", 26, (240, 210, 255), (mx, my - rad - 16), "center")
+        if w.lv("combo") and w.combo >= 3:
+            heat = min(1.0, w.combo / 20)
+            color = tuple(int(a + (b - a) * heat) for a, b in zip((255, 220, 120), (255, 110, 60)))
+            r = draw_text(surf, self.fonts, f"x{w.combo_mult():.2f}", 30 + int(8 * heat), color,
+                          (mx + 22, my + 10), "topleft")
+            draw_text(surf, self.fonts, f"{w.combo} combo", 18, MUTED, (r.left, r.bottom), "topleft")
+            bar = pygame.Rect(r.left, r.bottom + 16, 60, 4)   # time left before the combo drops
+            pygame.draw.rect(surf, (20, 16, 28), bar)
+            pygame.draw.rect(surf, color, (bar.x, bar.y, int(bar.w * w.combo_timer / COMBO_WINDOW), bar.h))
 
     def draw_first_hire_guide(self, surf, w):
         """New game, no miners yet: once the first miner is affordable, point at the Upgrades button."""

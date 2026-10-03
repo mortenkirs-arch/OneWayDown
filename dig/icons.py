@@ -100,6 +100,80 @@ def draw_icon(surf, kind, c, s, col):
             pygame.draw.line(surf, col, (x0, y + dy * s), (x0 + ln * s, y + dy * s), 3)
             pygame.draw.arc(surf, col, (x0 + ln * s - s * 0.2, y + dy * s - s * 0.35, s * 0.35, s * 0.35),
                             -math.pi / 2, math.pi, 3)
+    # ----- tools middle path ------------------------------------------------
+    elif kind == "flame":
+        pygame.draw.polygon(surf, col, [(x, y - s * 0.85), (x + s * 0.55, y - s * 0.05), (x + s * 0.45, y + s * 0.5),
+                                        (x, y + s * 0.75), (x - s * 0.45, y + s * 0.5), (x - s * 0.55, y - s * 0.05)])
+        pygame.draw.polygon(surf, (255, 225, 120), [(x, y - s * 0.2), (x + s * 0.25, y + s * 0.3), (x, y + s * 0.55),
+                                                   (x - s * 0.25, y + s * 0.3)])
+    elif kind == "vein":
+        pts = [(x - s * 0.8, y + s * 0.5), (x - s * 0.3, y + s * 0.1), (x, y + s * 0.3), (x + s * 0.4, y - s * 0.2),
+               (x + s * 0.8, y - s * 0.6)]
+        pygame.draw.lines(surf, col, False, pts, 4)
+        for px, py in pts[::2]:
+            pygame.draw.circle(surf, (255, 225, 90), (px, py), max(2, s * 0.18))
+    elif kind == "whetstone":
+        pygame.draw.circle(surf, col, (x, y - s * 0.1), s * 0.6, 3)
+        for k in range(3):
+            a = k * math.tau / 3
+            pygame.draw.line(surf, col, (x, y - s * 0.1), (x + math.cos(a) * s * 0.5, y - s * 0.1 + math.sin(a) * s * 0.5), 2)
+        pygame.draw.line(surf, col, (x - s * 0.6, y + s * 0.8), (x, y + s * 0.4), 3)
+        pygame.draw.line(surf, col, (x + s * 0.6, y + s * 0.8), (x, y + s * 0.4), 3)
+        pygame.draw.circle(surf, (255, 240, 170), (x + s * 0.65, y - s * 0.55), max(2, s * 0.12))
+    # ----- hands middle path ------------------------------------------------
+    elif kind == "combo":
+        for i, dx in enumerate((-0.45, 0.0, 0.45)):
+            r = s * (0.22 + i * 0.08)
+            pygame.draw.circle(surf, col, (x + dx * s, y + s * 0.3 - i * s * 0.25), r)
+        pygame.draw.polygon(surf, (255, 225, 120), [(x + s * 0.55, y - s * 0.9), (x + s * 0.75, y - s * 0.45),
+                                                   (x + s * 0.35, y - s * 0.45)])
+    elif kind == "goldblock":
+        top = [(x, y - s * 0.75), (x + s * 0.7, y - s * 0.4), (x, y - s * 0.05), (x - s * 0.7, y - s * 0.4)]
+        pygame.draw.polygon(surf, (255, 215, 70), top)
+        pygame.draw.polygon(surf, (215, 160, 40), [top[3], top[2], (x, y + s * 0.7), (x - s * 0.7, y + s * 0.35)])
+        pygame.draw.polygon(surf, (185, 130, 30), [top[2], top[1], (x + s * 0.7, y + s * 0.35), (x, y + s * 0.7)])
+        pygame.draw.line(surf, (255, 255, 230), (x + s * 0.45, y - s * 0.95), (x + s * 0.45, y - s * 0.55), 2)
+    elif kind == "slam":
+        pygame.draw.rect(surf, col, (x - s * 0.35, y - s * 0.75, s * 0.7, s * 0.65), border_radius=5)
+        for k in range(5):
+            a = math.pi + k * math.pi / 4
+            pygame.draw.line(surf, col, (x + math.cos(a) * s * 0.35, y + s * 0.45),
+                             (x + math.cos(a) * s * 0.85, y + s * 0.45 + math.sin(a) * s * 0.3), 2)
+        pygame.draw.line(surf, col, (x - s * 0.8, y + s * 0.5), (x + s * 0.8, y + s * 0.5), 3)
+    # ----- fortune middle path ----------------------------------------------
+    elif kind == "scroll":
+        pygame.draw.rect(surf, col, (x - s * 0.5, y - s * 0.6, s * 1.0, s * 1.2), border_radius=3)
+        for i in range(3):
+            pygame.draw.line(surf, dark, (x - s * 0.3, y - s * 0.3 + i * s * 0.28), (x + s * 0.3, y - s * 0.3 + i * s * 0.28), 2)
+        pygame.draw.circle(surf, (210, 50, 50), (x + s * 0.35, y + s * 0.45), max(2, s * 0.2))
+    elif kind == "chest":
+        pygame.draw.rect(surf, col, (x - s * 0.7, y - s * 0.1, s * 1.4, s * 0.75), border_radius=3)
+        pygame.draw.rect(surf, col, (x - s * 0.7, y - s * 0.55, s * 1.4, s * 0.4), border_top_left_radius=8,
+                         border_top_right_radius=8)
+        pygame.draw.line(surf, dark, (x - s * 0.7, y - s * 0.12), (x + s * 0.7, y - s * 0.12), 2)
+        pygame.draw.rect(surf, (255, 215, 80), (x - s * 0.12, y - s * 0.25, s * 0.24, s * 0.3))
+    elif kind == "vault":
+        pygame.draw.rect(surf, col, (x - s * 0.7, y - s * 0.65, s * 1.4, s * 1.3), 3, border_radius=4)
+        pygame.draw.circle(surf, col, c, s * 0.38, 2)
+        for k in range(4):
+            a = k * math.pi / 2 + 0.4
+            pygame.draw.line(surf, col, c, (x + math.cos(a) * s * 0.38, y + math.sin(a) * s * 0.38), 2)
+    # ----- combat middle path ------------------------------------------------
+    elif kind == "spiritlamp":
+        pygame.draw.circle(surf, (120, 200, 255), (x, y + s * 0.1), s * 0.55)
+        pygame.draw.circle(surf, (225, 245, 255), (x, y + s * 0.1), s * 0.25)
+        pygame.draw.rect(surf, col, (x - s * 0.45, y - s * 0.7, s * 0.9, s * 0.2))
+        pygame.draw.arc(surf, col, (x - s * 0.3, y - s * 1.0, s * 0.6, s * 0.5), 0, math.pi, 2)
+    elif kind == "spikes":
+        for k in range(4):
+            bx = x - s * 0.75 + k * s * 0.5
+            pygame.draw.polygon(surf, col, [(bx, y + s * 0.6), (bx + s * 0.4, y + s * 0.6), (bx + s * 0.2, y - s * 0.6)])
+        pygame.draw.line(surf, col, (x - s * 0.85, y + s * 0.65), (x + s * 0.85, y + s * 0.65), 3)
+    elif kind == "ballista":
+        pygame.draw.line(surf, col, (x - s * 0.7, y + s * 0.4), (x + s * 0.7, y - s * 0.3), 4)
+        pygame.draw.arc(surf, col, (x - s * 0.1, y - s * 0.9, s * 0.9, s * 1.2), -1.2, 1.9, 3)
+        pygame.draw.line(surf, (230, 230, 230), (x + s * 0.55, y - s * 0.85), (x + s * 0.4, y + s * 0.2), 1)
+        pygame.draw.rect(surf, col, (x - s * 0.5, y + s * 0.45, s * 1.0, s * 0.3))
     elif kind == "jackhammer":
         pygame.draw.line(surf, col, (x - s * 0.55, y - s * 0.7), (x + s * 0.55, y - s * 0.7), 4)
         pygame.draw.rect(surf, col, (x - s * 0.3, y - s * 0.6, s * 0.6, s * 0.75), border_radius=3)

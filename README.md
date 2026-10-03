@@ -4,11 +4,12 @@ An isometric incremental mining game built with pygame (pygame-ce).
 
 Your miners dig down through a 10x10 board, layer by layer. Break blocks for gold,
 spend it across five upgrade menus (Crew, Tools, Hands, Fortune and Combat), and go deeper
-for richer ore. Prices climb steeply the more you own, so pick what to push, and most upgrades
+for richer ore. Clearing a layer pays a bonus of a quarter of everything it held, doubled on
+every 5th metre. Prices climb steeply the more you own, so pick what to push, and most upgrades
 only unlock once you've dug deep enough - the HUD shows the next depth milestone.
 
-From depth 1, enemies invade in waves and go after your miners: zombies claw out of
-the ground (depth 1+), bats swoop in (depth 3+), cave spiders drop from the ceiling
+From depth 1, enemies invade in waves and go after your miners - the first one arrives
+the moment you get there. Zombies claw out of the ground (depth 1+), bats swoop in (depth 3+), cave spiders drop from the ceiling
 (depth 6+), fast wisps flicker in (depth 9+) and slow ghosts materialise (depth 15+).
 From depth 12, a bat left flying for 3 seconds turns into a vampire, which heals itself
 as it drains a miner - so swat bats fast. Ghosts phase out and can't be clicked for a
@@ -20,7 +21,10 @@ survive longer and get replaced sooner.
 The Foreman upgrade hires a foreman who walks the site barking orders: the crew swings
 faster while they're alive (and faster still near them), but monsters can kill them too.
 
-The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
+Every menu has a middle path of its own: Tools (Hot Streak, Vein Follower, Whetstone),
+Hands (Combo Clicks, Golden Blocks, Charged Slam - hold the mouse anywhere on the dig), Fortune
+(Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Spirit Lantern, Booby Traps,
+Ballista). The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
 fast), guards (patrol and fight monsters on their own) and a demolitionist (plants charges
 on the toughest blocks).
 

@@ -10,7 +10,8 @@ from .config import GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
 from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bomb, draw_enemy, draw_miner
+from .sprites import draw_bomb, draw_enemy, draw_miner, enemy_anchor
+from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, SPIKE_FX_SECS, WHETSTONE_POS
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
 from .util import shade
 
@@ -74,6 +75,10 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             items.append((e.x + e.y - 0.5, 2, "enemy", e))
     for b in w.bombs:   # on its block once landed; above everything while flying in
         items.append((b.cell[0] + b.cell[1] + 0.5, 2, "bomb", b) if b.landed else (math.inf, 5, "bomb", b))
+    if w.lv("whetstone"):
+        items.append((WHETSTONE_POS[0] + WHETSTONE_POS[1] - 0.4, 2, "whetstone", None))
+    if w.lv("ballista"):
+        items.append((BALLISTA_POS[0] + BALLISTA_POS[1] - 0.4, 2, "ballista", None))
     items.sort(key=lambda t: (t[0], t[1]))
 
     for _, _, kind, data in items:
@@ -87,19 +92,30 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                               seed=hash((x, y, w.depth + layer)))
             if layer == 0:
                 draw_damage(surf, b, x, y, z)
+                if w.golden and w.golden[0] == (x, y):
+                    draw_golden_block(surf, faces, w.golden[1], t)
                 if hover and hover[0] == (x, y):
                     for name, poly in faces.items():
                         pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
         elif kind == "miner":   # rides the quake heave with the block underfoot
-            draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"))
+            draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"),
+                       spirit=w.lv("spiritlantern") > 0)
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
+        elif kind == "whetstone":
+            busy = any(m.task == "sharpening" for m in w.miners)
+            draw_whetstone(surf, _anchor(w, WHETSTONE_POS), t, busy)
+        elif kind == "ballista":
+            draw_ballista(surf, _anchor(w, BALLISTA_POS), w.ballista_aim, w.ballista_timer, t)
         else:
             draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
     draw_blast_zones(surf, w, t)
     draw_quake_waves(surf, w)
     draw_crit_bursts(surf, w)
+    draw_spike_traps(surf, w)
+    draw_bolts(surf, w, t)
+    draw_chests(surf, w)
     for rx, ry, age, max_r, color in w.rings:
         q = age / 0.4
         rad = max(2, int(max_r * q))
@@ -135,6 +151,123 @@ def draw_flying_coins(surf, coins):
         pygame.draw.ellipse(surf, COIN, rect)
         if squash > 0.5:
             pygame.draw.circle(surf, COIN_SHINE, (rect.centerx - 1, rect.centery - 2), max(1, r // 3))
+
+
+def _anchor(world, pos):
+    """Screen position of the ground at a fixed grid spot (whetstone, ballista)."""
+    x, y = pos
+    return iso(x, y, world.column_height(*world.cell_of(x, y)) + world.rise)
+
+
+def draw_golden_block(surf, faces, left, t):
+    """A block turned to gold: shimmering top, gold outline, sparkles; blinks as time runs out."""
+    if left < 1.5 and int(t * 10) % 2:   # about to fade: blink
+        return
+    top = faces["top"]
+    xs, ys = [p[0] for p in top], [p[1] for p in top]
+    box = pygame.Rect(min(xs) - 2, min(ys) - 2, max(xs) - min(xs) + 4, max(ys) - min(ys) + 4)
+    layer = pygame.Surface(box.size, pygame.SRCALPHA)
+    local = [(px - box.x, py - box.y) for px, py in top]
+    shimmer = 0.6 + 0.4 * math.sin(t * 8)
+    pygame.draw.polygon(layer, (255, 210, 60, int(170 * shimmer)), local)
+    surf.blit(layer, box)
+    for name in ("top", "left", "right"):
+        pygame.draw.polygon(surf, (255, 225, 90), faces[name], 2)
+    rng = random.Random(int(t * 6))
+    for _ in range(4):   # twinkles
+        sx, sy = rng.uniform(box.left + 6, box.right - 6), rng.uniform(box.top, box.bottom + 10)
+        pygame.draw.line(surf, (255, 255, 230), (sx - 3, sy), (sx + 3, sy), 1)
+        pygame.draw.line(surf, (255, 255, 230), (sx, sy - 3), (sx, sy + 3), 1)
+
+
+def draw_whetstone(surf, base, t, busy):
+    """A grinding wheel on a little wooden frame; spins fast while someone sharpens."""
+    x, y = int(base[0]), int(base[1])
+    pygame.draw.ellipse(surf, (16, 12, 20), (x - 14, y - 4, 28, 8))
+    for dx in (-9, 9):   # A-frame legs
+        pygame.draw.line(surf, (120, 82, 44), (x + dx, y), (x, y - 20), 3)
+    pygame.draw.rect(surf, (90, 60, 34), (x - 11, y - 4, 22, 4))   # water trough
+    cx, cy = x, y - 20
+    pygame.draw.circle(surf, (150, 150, 160), (cx, cy), 10)
+    pygame.draw.circle(surf, (100, 100, 112), (cx, cy), 10, 2)
+    spin = t * (18 if busy else 2)
+    for k in range(3):   # spokes show the spin
+        a = spin + k * math.tau / 3
+        pygame.draw.line(surf, (110, 110, 120), (cx, cy), (cx + math.cos(a) * 8, cy + math.sin(a) * 8), 2)
+    pygame.draw.circle(surf, (120, 82, 44), (cx, cy), 2)
+    pygame.draw.line(surf, (120, 82, 44), (cx + 10, cy), (cx + 16, cy - 6), 2)   # crank handle
+
+
+def draw_ballista(surf, base, aim, timer, t):
+    """A crossbow turret on a wooden stand, swivelling to face its target."""
+    x, y = int(base[0]), int(base[1])
+    pygame.draw.ellipse(surf, (16, 12, 20), (x - 16, y - 5, 32, 10))
+    pygame.draw.rect(surf, (110, 74, 40), (x - 10, y - 10, 20, 10), border_radius=2)   # stand
+    pygame.draw.line(surf, (90, 60, 34), (x, y - 10), (x, y - 18), 4)                 # post
+    px, py = x, y - 18
+    dx, dy = math.cos(aim), math.sin(aim) * 0.6       # flattened a little for the iso view
+    norm = math.hypot(dx, dy) or 1.0
+    dx, dy = dx / norm, dy / norm
+    nx, ny = -dy, dx
+    front, back = (px + dx * 14, py + dy * 14), (px - dx * 10, py - dy * 10)
+    pygame.draw.line(surf, (130, 90, 50), back, front, 4)                              # stock
+    tips = [(front[0] - dx * 4 + nx * 12, front[1] - dy * 4 + ny * 12),
+            (front[0] - dx * 4 - nx * 12, front[1] - dy * 4 - ny * 12)]
+    pygame.draw.lines(surf, (150, 110, 60), False, [tips[0], front, tips[1]], 3)       # bow
+    draw_back = (px - dx * 3, py - dy * 3) if timer > 0.3 else front                   # string pulled back
+    pygame.draw.lines(surf, (230, 230, 230), False, [tips[0], draw_back, tips[1]], 1)
+    if timer > 0.3:   # a bolt loaded and ready
+        pygame.draw.line(surf, (200, 200, 210), draw_back, (front[0] + dx * 6, front[1] + dy * 6), 2)
+
+
+def draw_bolts(surf, world, t):
+    for (sx, sy), enemy, age in world.bolts:
+        q = min(1.0, age / BOLT_SECS)
+        tx, ty = enemy_anchor(enemy, world.rise, t)
+        x, y = sx + (tx - sx) * q, sy + (ty - sy) * q - math.sin(q * math.pi) * 20
+        dx, dy = tx - sx, ty - sy
+        norm = math.hypot(dx, dy) or 1.0
+        tail = (x - dx / norm * 14, y - dy / norm * 14)
+        pygame.draw.line(surf, (140, 100, 60), tail, (x, y), 2)
+        pygame.draw.circle(surf, (210, 210, 220), (int(x), int(y)), 2)
+
+
+def draw_spike_traps(surf, world):
+    """Booby Traps: a ring of spikes punching up out of the ground and sinking back."""
+    for cell, age in world.spike_fx:
+        h = math.sin(min(1.0, age / SPIKE_FX_SECS) * math.pi) * 16
+        z = world.column_height(*cell) + world.rise
+        for k in range(6):
+            a = k / 6 * math.tau
+            bx, by = iso(cell[0] + 0.5 + math.cos(a) * 0.3, cell[1] + 0.5 + math.sin(a) * 0.3, z)
+            pygame.draw.polygon(surf, (170, 170, 185), [(bx - 3, by), (bx + 3, by), (bx, by - h)])
+            pygame.draw.line(surf, (230, 230, 240), (bx, by), (bx, by - h), 1)
+
+
+def draw_chests(surf, world):
+    """Buried Treasure: a chest pops out of the broken block, the lid flies open, light pours out."""
+    for x, y, age in world.chest_fx:
+        p = age / CHEST_FX_SECS
+        cx, cy = int(x), int(y - 10 - 14 * min(1.0, p * 3))
+        fade = 1 - max(0.0, (p - 0.6) / 0.4)
+        if p > 0.15:   # rays of light
+            for k in range(7):
+                a = -math.pi / 2 + (k - 3) * 0.32
+                ln = 26 * min(1.0, (p - 0.15) * 3)
+                end = (cx + math.cos(a) * ln, cy - 6 + math.sin(a) * ln)
+                pygame.draw.line(surf, _scale_col((255, 230, 120), fade), (cx, cy - 6), end, 2)
+        pygame.draw.rect(surf, _scale_col((140, 90, 40), fade), (cx - 10, cy - 6, 20, 12), border_radius=2)
+        pygame.draw.rect(surf, _scale_col((255, 205, 70), fade), (cx - 10, cy - 2, 20, 3))
+        open_ = min(1.0, p * 4) * 1.9   # lid swings back on its hinge
+        hx, hy = cx - 10, cy - 6
+        lid = [(hx, hy), (hx + 20 * math.cos(open_), hy - 20 * math.sin(open_)),
+               (hx + 20 * math.cos(open_) - 5 * math.sin(open_), hy - 20 * math.sin(open_) - 5 * math.cos(open_)),
+               (hx - 5 * math.sin(open_), hy - 5 * math.cos(open_))]
+        pygame.draw.polygon(surf, _scale_col((160, 105, 50), fade), lid)
+
+
+def _scale_col(color, f):
+    return tuple(int(c * f) for c in color)
 
 
 def quake_lift(world, x, y):

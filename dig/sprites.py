@@ -102,7 +102,7 @@ def pick_head_color(diamond_lv):
     return _lerp(STEEL, DIAMOND, min(1.0, diamond_lv / 10))
 
 
-def draw_miner(surf, fonts, m, rise, t, pick_level=0):
+def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
     fx, fy = _feet(m, rise)
     if m.state == "down":
         draw_grave(surf, fonts, fx, fy, m.respawn)
@@ -149,6 +149,9 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0):
     if role == "guard":   # a proper lantern on the helmet, glowing
         pygame.draw.circle(surf, (255, 220, 120), lamp, 4)
         pygame.draw.circle(surf, (255, 255, 230), lamp, 2)
+    elif spirit:   # Spirit Lantern: a cold blue light that keeps spirits from fading
+        pygame.draw.circle(surf, (120, 200, 255), lamp, 4)
+        pygame.draw.circle(surf, (225, 245, 255), lamp, 2)
     else:
         pygame.draw.circle(surf, (255, 250, 200), lamp, 2)
     if m.style == "mohawk":
@@ -191,6 +194,10 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0):
             perp = (math.cos(ang) * 8, math.sin(ang) * 8)
             tips = ((ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]))
             pygame.draw.line(surf, head_col, tips[0], tips[1], 3)
+        if getattr(m, "sharp", 0) > 0 and tips:   # freshly sharpened at the Whetstone: edge gleams
+            pygame.draw.line(surf, (235, 250, 255), tips[0], tips[1], 1)
+            if int(t * 8 + m.x * 5) % 3 == 0:
+                pygame.draw.circle(surf, (255, 255, 255), (int(tips[1][0]), int(tips[1][1])), 2)
         if pick_level >= 5:   # diamond tips glint
             for i, (gx, gy) in enumerate(tips):
                 if math.sin(t * 5 + i * 2.1 + m.x * 3) > 0.75:

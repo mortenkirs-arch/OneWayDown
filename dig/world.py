@@ -3,7 +3,7 @@ import math
 import random
 import time
 
-from .blocks import BLOCKS, Block, generate_layer
+from .blocks import BLOCKS, Block, generate_layer, layer_value
 from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, W
 from .dynamite import EXPLOSION_SECS, Bomb
 from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, CoinFly, Floater, Particle,
@@ -11,9 +11,13 @@ from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, Co
 from .enemies import (ENEMY_START_DEPTH, ENEMY_TYPES, Enemy, choose_kind, edge_cells, max_enemies,
                       spawn_interval)
 from .iso import iso
+from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, SPIKE_FX_SECS, WHETSTONE_POS
 from .miners import CRIT_ANIM_SECS, ROLES, Miner, base_name, new_stats, numbered_name
 from .sprites import bomb_fuse_tip, enemy_anchor
-from .upgrades import (BRANCHES, UPGRADES, bounty_mult, click_damage, depth_reached, dynamite_interval,
+from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, chest_chance, clear_share,
+                       combo_step, golden_interval, golden_payout, milestone_mult, slam_mult, streak_bonus,
+                       trap_share, vault_rate, vein_share, whetstone_boost, wisp_slow,
+                       bounty_mult, click_damage, depth_reached, dynamite_interval,
                        enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, miner_regen, miner_strike, monster_damage, ore_damage_mult, ore_mult,
                        demo_interval, respawn_secs, second_wind_boost, swing_time, upgrade_cost, value_mult,
@@ -38,8 +42,26 @@ GUARD_REACH = 0.45           # how close a guard gets before swinging
 CHARGE_SPLASH_SHARE = 0.35   # a demolitionist's charge destroys its target and takes this share
 CHARGE_SPLASH_PER_LV = 0.05  # (+ this per level) of max health off the blocks around it
 MAX_FLYING_COINS = 40
+MILESTONE_EVERY = 5          # every 5th metre is a milestone with a bigger clear bonus (see Surveyor's Contract)
+STREAK_CAP = 10              # Hot Streak: up to this many hits in a row count
+COMBO_WINDOW = 0.9           # Combo Clicks: seconds you can pause between clicks before it drops
+COMBO_CAP = 20               # ...and the most clicks that count
+GOLDEN_SECS = 6.0            # Golden Blocks: how long a golden block lasts
+CHEST_PAYOUT = 15            # Buried Treasure: chest worth this many times its block's value
+VAULT_PERIOD = 60.0          # Gold Vault: interest is paid this often (seconds)
+WHET_SHARPEN_SECS = 1.5      # time spent at the wheel
+WHET_SHARP_SECS = 20.0       # how long a sharpened pick stays sharp
+WHET_GAP = 3.0               # seconds between sending miners to the wheel
+LANTERN_RADIUS = 2.5         # Spirit Lantern: wisps this close to the crew are slowed
 SAVE_VERSION = 2         # bump when the save format changes meaning (see from_dict migrations)
    # cap on coins in the air at once (late game breaks blocks very fast)
+
+
+class _Spot:
+    """A bare position, for effects at a fixed spot on the board."""
+
+    def __init__(self, x, y, z):
+        self.x, self.y, self.draw_z = x, y, z
 
 
 def is_ore(block):
@@ -54,6 +76,7 @@ class World:
         self.total_blocks = 0
         self.current = generate_layer(0)
         self.next = generate_layer(1)
+        self.layer_value = layer_value(self.current)   # base value of the layer being dug (for its clear bonus)
         self.clock = 0.0                   # game-time seconds; stands still while paused
         self.graveyard = []                # records of every miner who has died (see bury())
         self.miners = []
@@ -70,6 +93,7 @@ class World:
         self.enemy_timer = spawn_interval(ENEMY_START_DEPTH)   # seconds until the next wave
         self.announcement = None                                # [text, seconds left]
         self.second_wind = 0.0                                  # seconds of Second Wind left
+        self.in_vein = False                                    # Vein Follower: chain guard
         self.bombs = []                                         # dynamite in flight / on a lit fuse
         self.explosions = []                                    # [x, y, age, size_px] fireballs
         self.smoke = []
@@ -81,6 +105,17 @@ class World:
         self.quakes = []                                        # [x, y, age, cells dusted] Seismic Strike waves
         self.gold_bump = 0.0                                    # HUD counter pulse when coins land
         self.notice = None                                      # [text, seconds left] milestone banner
+        self.combo = 0                                          # Combo Clicks: clicks in a row...
+        self.combo_timer = 0.0                                  # ...and time left before it drops
+        self.golden = None                                      # Golden Blocks: [cell, seconds left]
+        self.golden_timer = 20.0                                # seconds until the next golden block
+        self.vault_timer = 0.0                                  # Gold Vault: seconds towards the next payout
+        self.whet_timer = 4.0                                   # Whetstone: seconds until the next miner goes
+        self.ballista_timer = 2.0                               # Ballista: seconds until the next bolt
+        self.ballista_aim = 0.0                                 # direction the ballista is pointing (radians)
+        self.bolts = []                                         # [start (x, y), enemy, age] in flight
+        self.chest_fx = []                                      # [x, y, age] treasure chests bursting open
+        self.spike_fx = []                                      # [cell, age] Booby Traps springing
         self.new_unlocks = set()                                # upgrades opened up by depth, not yet looked at
 
     # ----- stats ----------------------------------------------------------
@@ -217,6 +252,13 @@ class World:
         self.announcement = [msg, 2.5]   # shown as the HUD banner title
         return count
 
+    def spring_trap(self, enemy):
+        """Booby Traps: spikes punch up into a monster arriving on the ground."""
+        if not self.lv("traps") or enemy not in self.enemies:
+            return
+        self.spike_fx.append([self.cell_of(enemy.x, enemy.y), 0.0])
+        self.hit_enemy(enemy, enemy.max_hp * trap_share(self.lv("traps")), floor=False, ring=(200, 200, 210))
+
     def enemy_burst(self, enemy):
         """A zombie breaks through the ground."""
         px, py = self.entity_screen(enemy)
@@ -224,6 +266,7 @@ class World:
             self.particles.append(Particle(px, py, random.choice([(110, 84, 60), (80, 60, 44), (140, 110, 80)]),
                                            big=True))
         self.rings.append([px, py, 0.0, 60, (150, 110, 70)])
+        self.spring_trap(enemy)
 
     def enemy_materialise(self, enemy):
         """A ghost or wisp forms out of cold mist."""
@@ -238,6 +281,7 @@ class World:
         for _ in range(10):
             self.particles.append(Particle(px, py, (150, 145, 160)))
         self.rings.append([px, py, 0.0, 40, (200, 195, 210)])
+        self.spring_trap(enemy)
 
     def transform_enemy(self, enemy, into):
         """e.g. a bat that flew free too long becomes a vampire (full health for the new form)."""
@@ -328,7 +372,7 @@ class World:
 
     def player_hit_enemy(self, enemy):
         """You click a monster: Monster Slayer damage, Critical Smite, then Cleave onto neighbours."""
-        dmg = self.monster_hit_damage()
+        dmg = self.monster_hit_damage() * self.combo_mult()
         if random.random() < 0.05 * self.lv("smite"):
             dmg *= 3
             px, py = enemy_anchor(enemy, self.rise, time.time())
@@ -429,7 +473,7 @@ class World:
         block = self.current.get(cell)
         if not block:
             return
-        dmg = self.miner_hit_damage()
+        dmg = self.miner_hit_damage() * self.pick_bonus(miner, cell, 1.0)
         if is_ore(block):
             dmg *= ore_damage_mult(self.lv("diamond"))
         crit = random.random() < 0.05 * self.lv("crit")
@@ -441,6 +485,23 @@ class World:
             below.hp = max(below.max_hp * 0.05, below.hp - dmg * 0.1 * self.lv("deepstrike"))
         if self.damage(cell, dmg, by=miner) and crit and self.lv("quake"):
             self.splash(cell, dmg * 0.25 * self.lv("quake"), BRANCHES["tools"]["color"], by=miner)
+
+    def pick_bonus(self, miner, cell, weight):
+        """Hot Streak (hits in a row on one block) and a freshly sharpened pick (Whetstone).
+        `weight` = how much one hit counts towards the streak (a drill's rattle is a fraction)."""
+        if not miner:
+            return 1.0
+        if miner.streak_cell != cell:
+            miner.streak_cell, miner.streak = cell, 0.0
+        bonus = 1 + streak_bonus(self.lv("streak")) * miner.streak
+        if self.lv("streak"):
+            miner.streak = min(STREAK_CAP, miner.streak + weight)
+            if miner.streak >= STREAK_CAP / 2 and random.random() < 0.5 * weight:   # on a roll: flames
+                px, py = self.cell_screen(cell)
+                self.particles.append(Particle(px, py - 4, random.choice([(255, 150, 40), (255, 210, 80)])))
+        if miner.sharp > 0:
+            bonus *= 1 + whetstone_boost(self.lv("whetstone"))
+        return bonus
 
     def crit_effects(self, cell, miner):
         """The look of a critical strike: the miner's overhead slam, an impact starburst, and with
@@ -465,6 +526,10 @@ class World:
             return
         dmg = self.click_hit_damage()
         px, py = self.cell_screen(cell)
+        if manual:
+            dmg *= self.combo_mult()
+            if self.golden and self.golden[0] == cell:
+                self.golden_jackpot(cell, block)
         if random.random() < 0.05 * self.lv("steady"):
             dmg *= 3
             self.floaters.append(Floater("CRIT!", px, py - 30, (220, 160, 255), life=0.7, size=22))
@@ -475,6 +540,48 @@ class World:
         self.rings.append([px, py, 0.0, 26, ring_color])
         if self.damage(cell, dmg, sparks) and self.lv("shockwave"):
             self.splash(cell, dmg * 0.2 * self.lv("shockwave"), BRANCHES["hands"]["color"])
+
+    def combo_click(self):
+        """Count one of your clicks towards the combo - any click, hit or miss, keeps it going."""
+        if not self.lv("combo"):
+            return
+        self.combo = self.combo + 1 if self.combo_timer > 0 else 1
+        self.combo_timer = COMBO_WINDOW
+
+    def combo_mult(self):
+        """Damage multiplier the current combo gives your clicks."""
+        if not self.lv("combo"):
+            return 1.0
+        return 1 + combo_step(self.lv("combo")) * min(self.combo, COMBO_CAP)
+
+    def golden_jackpot(self, cell, block):
+        jackpot = self.earn(block.value * value_mult(self.lv("value")) * golden_payout(self.lv("goldblock")))
+        px, py = self.cell_screen(cell)
+        self.floaters.append(Floater(f"JACKPOT! +{fmt(jackpot)}", px, py - 50, GOLD, life=2.2, size=36, coin=True))
+        self.fly_coins(px, py, 14)
+        self.rings.append([px, py, 0.0, 120, GOLD])
+        for _ in range(24):
+            self.particles.append(Particle(px, py, random.choice([GOLD, (255, 240, 170), (255, 255, 255)]), big=True))
+        self.golden = None
+
+    def slam(self, cell, charge):
+        """Charged Slam: a huge hit on `cell` (charge 0..1) that shakes the blocks around it."""
+        if cell not in self.current:
+            return
+        dmg = self.click_hit_damage() * slam_mult(self.lv("slam")) * (0.3 + 0.7 * charge)
+        px, py = self.cell_screen(cell)
+        self.crit_bursts.append([px, py, 0.0])
+        self.quakes.append([cell[0] + 0.5, cell[1] + 0.5, 0.0, set()])
+        self.shake, self.shake_power = 0.25, 4 + 4 * charge
+        self.floaters.append(Floater("SLAM!", px, py - 70, (220, 160, 255), life=1.0, size=30 + int(14 * charge)))
+        depth = self.depth
+        around = [(cell[0] + dx, cell[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
+        if not self.damage(cell, dmg, sparks=10):
+            return
+        for c in around:   # the shock rolls into the blocks around it at half strength
+            if self.depth != depth:
+                return
+            self.damage(c, dmg * 0.5, sparks=2)
 
     def throw_dynamite(self):
         """Toss a lit bundle onto a random block; it goes off when the fuse burns down."""
@@ -546,6 +653,17 @@ class World:
                                          coin=True))
             self.fly_coins(px, py, 6)
             self.rings.append([px, py, 0.0, 90, GOLD])
+        if block.chest:   # Buried Treasure
+            treasure = block.value * value_mult(self.lv("value")) * CHEST_PAYOUT
+            earned += treasure
+            self.chest_fx.append([px, py, 0.0])
+            self.floaters.append(Floater(f"TREASURE! +{fmt(treasure)}", px, py - 56, GOLD, life=2.0, size=30,
+                                         coin=True))
+            self.fly_coins(px, py, 8)
+        if self.golden and self.golden[0] == cell:   # broken before anyone clicked it
+            if by is None:   # your own splash (shockwave, slam, dynamite) broke it: the jackpot is still yours
+                self.golden_jackpot(cell, block)
+            self.golden = None
         earned = self.earn(earned)
         self.total_blocks += 1
         if by:
@@ -561,13 +679,45 @@ class World:
         for m in self.miners:
             if m.target == cell:
                 m.target = None
+        if by and by.digs and is_ore(block) and self.lv("vein") and not self.in_vein:
+            self.follow_vein(cell, block.kind, by)
         if not self.current:
             self.descend()
 
-    def descend(self):
+    def follow_vein(self, cell, kind, miner):
+        """Vein Follower: crack every block of the same ore connected to the one just broken."""
+        vein, frontier = set(), [cell]
+        while frontier:
+            cx, cy = frontier.pop()
+            for dx, dy in NEIGHBOURS:
+                n = (cx + dx, cy + dy)
+                if n not in vein and n in self.current and self.current[n].kind == kind:
+                    vein.add(n)
+                    frontier.append(n)
+        if not vein:
+            return
+        self.in_vein = True   # cracks that break more ore don't start veins of their own
+        depth = self.depth
+        try:
+            for n in sorted(vein, key=lambda c: abs(c[0] - cell[0]) + abs(c[1] - cell[1])):
+                block = self.current.get(n)
+                if self.depth != depth:
+                    return
+                if block:
+                    px, py = self.cell_screen(n)
+                    self.rings.append([px, py, 0.0, 34, BLOCKS[kind].get("fleck", GOLD)])
+                    self.damage(n, block.max_hp * vein_share(self.lv("vein")), sparks=4, by=miner)
+        finally:
+            self.in_vein = False
+
+    def descend(self, award=True):
+        if award:
+            self.layer_clear_bonus(self.depth + 1)
         self.depth += 1
         self.current = self.next
-        self.next = generate_layer(self.depth + 1, ore_mult(self.lv("prospector")))
+        self.layer_value = layer_value(self.current)
+        self.next = generate_layer(self.depth + 1, ore_mult(self.lv("prospector")),
+                                   chest_chance(self.lv("chests")))
         self.rise = -1.0
         for m in self.miners:
             m.draw_z += 1
@@ -580,9 +730,23 @@ class World:
             self.new_unlocks.update(u["key"] for u in unlocked)
             names = ", ".join(u["name"] for u in unlocked)
             self.notice = [f"{self.depth}m reached - new upgrades: {names}", 5.0]
+        if self.depth == ENEMY_START_DEPTH:   # first time this deep: the monsters find you, right away
+            self.enemy_timer = 0.0
         if self.lv("secondwind"):
             self.second_wind = SECOND_WIND_SECS
             self.floaters.append(Floater("Second wind!", W / 2, 160, BRANCHES["crew"]["color"], life=1.6, size=28))
+
+    def layer_clear_bonus(self, new_depth):
+        """Gold for clearing a layer: a share of everything it held, doubled on every 5th metre."""
+        milestone = new_depth % MILESTONE_EVERY == 0
+        surveyor = self.lv("surveyor")
+        share = clear_share(surveyor) * (milestone_mult(surveyor) if milestone else 1)
+        bonus = self.earn(self.layer_value * value_mult(self.lv("value")) * share)
+        title = f"{new_depth}m MILESTONE!" if milestone else "LAYER CLEAR!"
+        self.floaters.append(Floater(f"{title} +{fmt(bonus)}", W / 2, 168, GOLD, life=2.6,
+                                     size=40 if milestone else 34, coin=True))
+        self.fly_coins(W / 2, 168, 16 if milestone else 10)
+        self.rings.append([W / 2, 176, 0.0, 160 if milestone else 110, GOLD])
 
     def pick_target(self, miner):
         if not self.current:
@@ -596,6 +760,8 @@ class World:
                 d += 6
             if seek_ore and is_ore(block) and cell not in claimed:   # Treasure Map: unclaimed ore first
                 d -= 1000
+            if self.golden and self.golden[0] == cell:   # leave the golden block for the player
+                d += 5000
             d += random.random() * 0.3
             if d < best_d:
                 best, best_d = cell, d
@@ -637,7 +803,7 @@ class World:
         block = self.current.get(cell)
         if not block:
             return
-        dmg = self.miner_hit_damage() * DRILL_SHARE
+        dmg = self.miner_hit_damage() * DRILL_SHARE * self.pick_bonus(driller, cell, 1 / DRILL_HITS_PER_SWING)
         if is_ore(block):
             dmg *= ore_damage_mult(self.lv("diamond"))
         if random.random() < 0.3:   # dust and chips flying off the bit
@@ -718,6 +884,107 @@ class World:
             if self.walk_to(demo, *demo.goal, speed * 1.3, dt):
                 demo.task, demo.goal = "idle", None
 
+    # ----- middle-path upgrade systems -----------------------------------------
+    def ward(self, enemy):
+        """Spirit Lantern: ghosts can't phase out, wisps near the crew are slowed."""
+        lv = self.lv("spiritlantern")
+        enemy.warded = lv > 0
+        enemy.speed_mult = 1.0
+        if lv and enemy.kind == "wisp":
+            if any(math.hypot(m.x - enemy.x, m.y - enemy.y) <= LANTERN_RADIUS
+                   for m in self.miners if m.state != "down"):
+                enemy.speed_mult = 1 - wisp_slow(lv)
+
+    def update_whetstone_trip(self, m, dt, speed):
+        sx, sy = WHETSTONE_POS
+        if m.task == "whetstone":
+            if self.walk_to(m, sx + 0.35, sy - 0.35, speed * ROLES[m.role]["speed"], dt):
+                m.task, m.task_timer = "sharpening", WHET_SHARPEN_SECS
+        else:
+            m.task_timer -= dt
+            m.anim = 0.5 + 0.5 * math.sin(self.clock * 30)
+            if random.random() < dt * 25:   # sparks off the wheel
+                px, py = self.entity_screen(_Spot(sx, sy, self.column_height(*self.cell_of(sx, sy))), 18)
+                self.particles.append(Particle(px, py, random.choice([(255, 230, 140), (255, 255, 255)])))
+            if m.task_timer <= 0:
+                m.task, m.sharp, m.anim = "idle", WHET_SHARP_SECS, 0.0
+                px, py = self.entity_screen(m, 56)
+                self.floaters.append(Floater("Sharp!", px, py, (180, 230, 255), life=1.2, size=20))
+
+    def update_upgrade_systems(self, dt, combat):
+        # Combo Clicks: drops if you stop clicking
+        self.combo_timer = max(0.0, self.combo_timer - dt)
+        if self.combo_timer <= 0:
+            self.combo = 0
+        # Golden Blocks
+        if self.golden:
+            self.golden[1] -= dt
+            if self.golden[1] <= 0 or self.golden[0] not in self.current:
+                self.golden = None
+        elif self.lv("goldblock") and self.current:
+            self.golden_timer -= dt
+            if self.golden_timer <= 0:
+                self.golden_timer = golden_interval(self.lv("goldblock"))
+                cell = random.choice(list(self.current))
+                self.golden = [cell, GOLDEN_SECS]
+                px, py = self.cell_screen(cell)
+                self.floaters.append(Floater("A golden block! Click it!", px, py - 60, GOLD, life=2.0, size=26))
+        # Gold Vault: interest on banked gold, capped by what you earn
+        if self.lv("vault"):
+            self.vault_timer += dt
+            if self.vault_timer >= VAULT_PERIOD:
+                self.vault_timer = 0.0
+                cap = max(50.0, self.gold_per_sec() * 60) * self.lv("vault")
+                interest = min(self.gold * vault_rate(self.lv("vault")), cap)
+                if interest >= 1:
+                    interest = self.earn(interest)
+                    x, y = GOLD_HUD_COIN
+                    self.floaters.append(Floater(f"INTEREST +{fmt(interest)}", x + 130, y + 120, GOLD,
+                                                 life=2.2, size=26, coin=True))
+        # Whetstone: send the bluntest idle digger over every few seconds, one at a time
+        if self.lv("whetstone"):
+            self.whet_timer -= dt
+            busy = any(m.task in ("whetstone", "sharpening") for m in self.miners)
+            if self.whet_timer <= 0 and not busy:
+                blunt = [m for m in self.diggers() if m.state == "working" and m.sharp <= 0]
+                if blunt:
+                    m = min(blunt, key=lambda c: math.hypot(c.x - WHETSTONE_POS[0], c.y - WHETSTONE_POS[1]))
+                    m.task, m.target = "whetstone", None
+                self.whet_timer = WHET_GAP
+        # Ballista
+        if self.lv("ballista") and combat:
+            self.ballista_timer -= dt
+            targets = [e for e in self.enemies if e.targetable]
+            if targets:
+                bx, by = BALLISTA_POS
+                target = min(targets, key=lambda e: (e.state != "attacking", math.hypot(e.x - bx, e.y - by)))
+                tx, ty = enemy_anchor(target, self.rise, time.time())
+                sx, sy = self.ballista_screen()
+                self.ballista_aim = math.atan2(ty - sy, tx - sx)
+                if self.ballista_timer <= 0:
+                    self.ballista_timer = ballista_interval(self.lv("ballista"))
+                    self.bolts.append([(sx, sy), target, 0.0])
+        for bolt in self.bolts:
+            bolt[2] += dt
+            if bolt[2] >= BOLT_SECS:
+                enemy = bolt[1]
+                if enemy in self.enemies and enemy.targetable:
+                    self.hit_enemy(enemy, enemy.max_hp * ballista_share(self.lv("ballista")), floor=False,
+                                   ring=(220, 190, 130))
+        self.bolts = [b for b in self.bolts if b[2] < BOLT_SECS]
+        for fx in self.chest_fx:
+            fx[2] += dt
+        self.chest_fx = [fx for fx in self.chest_fx if fx[2] < CHEST_FX_SECS]
+        for fx in self.spike_fx:
+            fx[1] += dt
+        self.spike_fx = [fx for fx in self.spike_fx if fx[1] < SPIKE_FX_SECS]
+
+    def ballista_screen(self):
+        """Where bolts leave the ballista on screen."""
+        bx, by = BALLISTA_POS
+        x, y = iso(bx, by, self.column_height(*self.cell_of(bx, by)) + self.rise)
+        return x, y - 18
+
     # ----- update ---------------------------------------------------------
     def update(self, dt, combat=True):
         """Advance the simulation. With combat=False enemies freeze and none spawn."""
@@ -756,6 +1023,11 @@ class World:
             if not m.digs:   # specialists with their own jobs
                 {"foreman": self.update_foreman, "guard": self.update_guard,
                  "demolitionist": self.update_demolitionist}[m.role](m, dt, speed * ROLES[m.role]["speed"])
+                m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
+                continue
+            m.sharp = max(0.0, m.sharp - dt)
+            if m.task in ("whetstone", "sharpening"):   # off to the sharpening wheel
+                self.update_whetstone_trip(m, dt, speed)
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
                 continue
             my_swing = swing   # pep talk: miners near the foreman swing faster still
@@ -797,8 +1069,10 @@ class World:
             self.announcement[1] -= dt
             if self.announcement[1] <= 0:
                 self.announcement = None
+        self.update_upgrade_systems(dt, combat)
         if combat:
             for e in list(self.enemies):
+                self.ward(e)
                 e.update(self, dt)
             if self.depth >= ENEMY_START_DEPTH:   # waves keep coming even while enemies remain
                 self.enemy_timer -= dt
@@ -866,11 +1140,11 @@ class World:
 
     # ----- persistence ----------------------------------------------------
     def to_dict(self):
-        pack = lambda layer: [[x, y, b.kind, b.hp] for (x, y), b in layer.items()]
+        pack = lambda layer: [[x, y, b.kind, b.hp, b.chest] for (x, y), b in layer.items()]
         return dict(gold=self.gold, depth=self.depth, levels=self.levels,
                     total_blocks=self.total_blocks, current=pack(self.current),
                     next=pack(self.next), saved_at=time.time(), gps=self.gold_per_sec(),
-                    version=SAVE_VERSION,
+                    version=SAVE_VERSION, layer_value=self.layer_value,
                     crew=[m.to_dict() for m in self.miners], graveyard=self.graveyard,
                     clock=self.clock, grid=GRID)
 
@@ -886,13 +1160,15 @@ class World:
         w.clock = d.get("clock", 0.0)
         w.graveyard = d.get("graveyard", [])
         if d.get("grid", 8) == GRID:
-            w.current = {(x, y): Block(k, w.depth, hp) for x, y, k, hp in d["current"]}
-            w.next = {(x, y): Block(k, w.depth + 1, hp) for x, y, k, hp in d["next"]}
+            # (older saves have no chest flag: [x, y, kind, hp])
+            w.current = {(x, y): Block(k, w.depth, hp, *rest) for x, y, k, hp, *rest in d["current"]}
+            w.next = {(x, y): Block(k, w.depth + 1, hp, *rest) for x, y, k, hp, *rest in d["next"]}
         else:   # saved on a different board size: start the current layer fresh
             w.current = generate_layer(w.depth)
             w.next = generate_layer(w.depth + 1, ore_mult(w.lv("prospector")))
+        w.layer_value = d.get("layer_value") or layer_value(w.current)   # older saves: what's left of it
         if not w.current:
-            w.descend()
+            w.descend(award=False)
         w.miners = []
         w.sync_miners()
         saved_crew = d.get("crew", [])   # older saves have no crew: keep random looks

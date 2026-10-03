@@ -98,6 +98,9 @@ class Miner:
         self.task_timer = random.uniform(4.0, 8.0)
         self.goal = None         # guard / demolitionist: (x, y) they're heading for, or a target
         self.charge_cell = None  # demolitionist: the block they're about to blow
+        self.streak_cell = None  # Hot Streak: the block being hit in a row...
+        self.streak = 0.0        # ...and how many hits in a row so far
+        self.sharp = 0.0         # Whetstone: seconds of freshly sharpened pick left
         if ROLES[role]["height"]:
             self.height = ROLES[role]["height"]
         if role == "foreman" and self.facial is None:   # foremen always have a mustache

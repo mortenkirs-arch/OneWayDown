@@ -55,7 +55,7 @@ ENEMY_TYPES = {
 FLY_ALTITUDE = ENEMY_TYPES["bat"]["altitude"]   # bat swoop-in / transformation height
 
 # Waves: every spawn_interval(depth) seconds the board is topped up to max_enemies(depth).
-ENEMY_START_DEPTH = 1          # no enemies on the surface layer
+ENEMY_START_DEPTH = 1          # monsters arrive the moment you reach this depth (none above it)
 WAVE_INTERVAL_START = 35.0     # seconds between waves at ENEMY_START_DEPTH...
 WAVE_INTERVAL_MIN = 20.0       # ...shrinking linearly to this by WAVE_FASTEST_DEPTH, then staying there
 WAVE_FASTEST_DEPTH = 10
@@ -134,7 +134,7 @@ class Enemy:
     def phased(self):
         """Intangible right now (ghosts fade out for part of every cycle while hunting)."""
         phase = self.spec.get("phase")
-        if not phase or self.state != "hunting":
+        if not phase or self.state != "hunting" or getattr(self, "warded", False):   # Spirit Lantern
             return False
         return self.hunt_time % phase["every"] >= phase["every"] - phase["duration"]
 
@@ -217,6 +217,6 @@ class Enemy:
             norm = math.hypot(ux, uy)
             ux, uy = ux / norm, uy / norm
         self.heading = (ux, uy)
-        step = min(dist, self.spec["speed"] * dt)
+        step = min(dist, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)   # (Spirit Lantern)
         self.x = min(GRID - 0.05, max(0.05, self.x + ux * step))
         self.y = min(GRID - 0.05, max(0.05, self.y + uy * step))

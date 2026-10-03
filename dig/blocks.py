@@ -32,17 +32,23 @@ def value_scale(depth):
 
 
 class Block:
-    __slots__ = ("kind", "hp", "max_hp", "value")
+    __slots__ = ("kind", "hp", "max_hp", "value", "chest")
 
-    def __init__(self, kind, depth, hp=None):
+    def __init__(self, kind, depth, hp=None, chest=False):
         spec = BLOCKS[kind]
         self.kind = kind
+        self.chest = chest   # Buried Treasure: bursts open with gold when the block breaks
         self.max_hp = spec["hp"] * hp_scale(depth)
         self.hp = self.max_hp if hp is None else hp
         self.value = spec["value"] * value_scale(depth)
 
 
-def generate_layer(depth, ore_boost=1.0, rng=random):
+def layer_value(layer):
+    """Base value of every block in a layer (before upgrades)."""
+    return sum(b.value for b in layer.values())
+
+
+def generate_layer(depth, ore_boost=1.0, chest_chance=0.0, rng=random):
     layer = {}
     base = "dirt" if depth < 4 else "stone"
     for x in range(GRID):
@@ -53,5 +59,5 @@ def generate_layer(depth, ore_boost=1.0, rng=random):
                 if depth >= mind and rng.random() < chance * ore_boost * (1 + (depth - mind) * 0.01):
                     kind = ore
                     break
-            layer[(x, y)] = Block(kind, depth)
+            layer[(x, y)] = Block(kind, depth, chest=rng.random() < chest_chance)
     return layer

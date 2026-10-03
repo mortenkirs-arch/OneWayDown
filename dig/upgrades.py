@@ -18,15 +18,26 @@ def miner_damage(lv): return (1 + lv) * 1.08 ** lv
 def swing_time(lv): return max(0.15, 0.9 * 0.92 ** lv)
 def ore_damage_mult(lv): return 1 + 0.25 * lv         # Diamond Tips, vs ore blocks
 def masterwork_mult(lv): return 1.5 ** lv
+def streak_bonus(lv): return 0.02 * lv                # Hot Streak: extra damage per consecutive hit
+def vein_share(lv): return 0.15 * lv                  # Vein Follower: crack connected ore by this share
+def whetstone_boost(lv): return 0.2 * lv              # Whetstone: sharpened picks hit this much harder
 # Hands (your clicks on BLOCKS)
 def click_damage(lv): return (2 + 2 * lv) * 1.1 ** lv
 def dynamite_interval(lv): return max(4, 16 - 2 * lv)
+def combo_step(lv): return 0.005 * lv                 # Combo Clicks: bonus per click in the combo
+def golden_interval(lv): return max(15, 60 - 9 * lv)  # Golden Blocks: seconds between golden blocks
+def golden_payout(lv): return 20 + 10 * lv            # ...jackpot, in multiples of the block's value
+def slam_mult(lv): return 3 + 2 * lv                  # Charged Slam: x click damage at full charge
 # Fortune
 def value_mult(lv): return 1.2 ** lv
 def ore_mult(lv): return 1 + 0.25 * lv
 def bounty_mult(lv): return 1 + 0.5 * lv
 def offline_share(lv): return 0.5 + 0.1 * lv
 def midas_mult(lv): return 1 + 0.1 * lv
+def clear_share(lv): return 0.25 + 0.05 * lv          # share of a cleared layer paid as a bonus
+def milestone_mult(lv): return 2 + 0.2 * lv           # milestone (every 5m) bonus multiplier
+def chest_chance(lv): return 0.01 * lv                # Buried Treasure: chance a block hides a chest
+def vault_rate(lv): return 0.01 * lv                  # Gold Vault: interest per minute on banked gold
 # Combat (your clicks on MONSTERS, and miners fighting back)
 def monster_damage(lv): return (4 + 4 * lv) * 1.12 ** lv
 def enemy_hit_floor(lv): return min(0.25, 0.08 + 0.01 * lv)   # min share of an enemy's max hp per hit
@@ -34,6 +45,10 @@ def miner_strike(lv): return 0.0 if lv == 0 else 0.01 + 0.01 * lv  # share of at
 def miner_max_hp(lv): return 10 * (1 + 0.25 * lv)
 def respawn_secs(lv): return 15 - 1.5 * lv
 def miner_regen(lv): return 1 + 0.5 * lv
+def wisp_slow(lv): return 0.15 * lv                   # Spirit Lantern: wisps near the crew slow down
+def trap_share(lv): return 0.08 * lv                  # Booby Traps: share of max hp taken on arrival
+def ballista_interval(lv): return max(1.2, 3.2 - 0.4 * lv)
+def ballista_share(lv): return 0.08 + 0.02 * lv       # Ballista: share of max hp per bolt
 
 
 TABS = ["crew", "tools", "hands", "fortune", "combat"]
@@ -95,6 +110,15 @@ UPGRADES = [
         "Miners hit ore blocks much harder.", lambda l: f"x{ore_damage_mult(l):.2f} dmg vs ore"),
     _up("deepstrike", "Deep Strike", "tools", "drill", (2.5, 2), [("diamond", 1)], 600, 2.0, 5,
         "Miner hits also crack the block underneath.", lambda l: f"{10 * l}% to the layer below"),
+    _up("streak", "Hot Streak", "tools", "flame", (1.5, 1), [("power", 2)], 300, 1.9, 10,
+        "Every hit on the same block lands harder than the last (up to 10 in a row).",
+        lambda l: f"+{round(100 * streak_bonus(l))}% dmg per hit in a row"),
+    _up("vein", "Vein Follower", "tools", "vein", (1.5, 2), [("streak", 1)], 1500, 2.1, 5,
+        "A miner breaking ore cracks all the same ore connected to it.",
+        lambda l: f"{round(100 * vein_share(l))}% to connected ore"),
+    _up("whetstone", "Whetstone", "tools", "whetstone", (1.5, 3), [("vein", 1)], 6000, 2.4, 5,
+        "A sharpening wheel on site: miners take turns sharpening, and hit harder for 20s after.",
+        lambda l: f"+{round(100 * whetstone_boost(l))}% dmg when sharp"),
     _up("masterwork", "Masterwork", "tools", "anvil", (1.5, 4), [("quake", 1), ("deepstrike", 1)],
         6000, 2.6, 5, "Masterfully forged picks for the whole crew.",
         lambda l: f"x{masterwork_mult(l):.2f} miner dmg"),
@@ -111,6 +135,15 @@ UPGRADES = [
         lambda l: "no dynamite" if l == 0 else f"boom every {dynamite_interval(l)}s"),
     _up("bigbombs", "Bigger Bombs", "hands", "bigbomb", (0.5, 4), [("dynamite", 1)], 15000, 3.0, 2,
         "Dynamite blasts cover a wider area.", lambda l: f"{3 + 2 * l}x{3 + 2 * l} blast"),
+    _up("combo", "Combo Clicks", "hands", "combo", (1.5, 1), [("click", 2)], 150, 1.8, 10,
+        "Clicking quickly builds a combo that powers up your clicks (up to 20 in a row).",
+        lambda l: f"up to x{1 + 20 * combo_step(l):.1f} at a full combo"),
+    _up("goldblock", "Golden Blocks", "hands", "goldblock", (1.5, 2), [("combo", 1)], 800, 2.2, 5,
+        "Every so often a block turns to gold for a few seconds. Click it for a jackpot!",
+        lambda l: "none" if l == 0 else f"every {golden_interval(l)}s, worth {golden_payout(l)}x"),
+    _up("slam", "Charged Slam", "hands", "slam", (1.5, 3), [("goldblock", 1)], 4000, 2.4, 5,
+        "Hold the mouse anywhere on the dig to charge, release for a huge slam that shakes the blocks around.",
+        lambda l: f"up to {slam_mult(l)}x click dmg"),
     _up("golden", "Golden Touch", "hands", "touch", (2.5, 1), [("click", 2)], 60, 1.7, 10,
         "Your own clicks on blocks earn gold as you dig.", lambda l: f"{5 * l}% of block value / click"),
     _up("steady", "Steady Hands", "hands", "target", (2.5, 2), [("golden", 1)], 300, 1.9, 10,
@@ -129,6 +162,15 @@ UPGRADES = [
         "Monsters pay out bigger bounties.", lambda l: f"x{bounty_mult(l):.1f} bounties"),
     _up("pockets", "Deep Pockets", "fortune", "bag", (2.5, 2), [("bounty", 1)], 400, 2.2, 5,
         "Your crew earns more while you're away.", lambda l: f"{round(100 * offline_share(l))}% offline income"),
+    _up("surveyor", "Surveyor's Contract", "fortune", "scroll", (1.5, 1), [("value", 1)], 400, 2.0, 5,
+        "Bigger bonuses for clearing layers, and for milestones.",
+        lambda l: f"{round(100 * clear_share(l))}% clear bonus, x{milestone_mult(l):.1f} milestones"),
+    _up("chests", "Buried Treasure", "fortune", "chest", (1.5, 2), [("surveyor", 1)], 2000, 2.2, 5,
+        "Some blocks in new layers hide a treasure chest that bursts open when broken.",
+        lambda l: f"{l}% of blocks hide a chest"),
+    _up("vault", "Gold Vault", "fortune", "vault", (1.5, 3), [("chests", 1)], 9000, 2.5, 5,
+        "Earn interest on your banked gold every minute (capped by your income).",
+        lambda l: f"{round(100 * vault_rate(l))}% interest / minute"),
     _up("midas", "Midas Touch", "fortune", "sun", (1.5, 4), [("goldrush", 1), ("pockets", 1)],
         15000, 2.6, 5, "Every source of gold pays more.", lambda l: f"x{midas_mult(l):.1f} all gold"),
 
@@ -151,6 +193,16 @@ UPGRADES = [
     _up("firstaid", "First Aid", "combat", "cross", (2.5, 3), [("hardhats", 1)], 700, 2.0, 6,
         "Miners heal faster, and replacements for the fallen arrive sooner.",
         lambda l: f"{respawn_secs(l):.1f}s to replace, {miner_regen(l):.1f} hp/s regen"),
+    _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (1.5, 1), [("slayer", 2)], 500, 2.2, 3,
+        "Blue spirit-light on every helmet: ghosts can't fade out, and wisps slow down near the crew.",
+        lambda l: "no lanterns" if l == 0 else f"ghosts can't phase, wisps -{round(100 * wisp_slow(l))}% speed"),
+    _up("traps", "Booby Traps", "combat", "spikes", (1.5, 2), [("spiritlantern", 1)], 2500, 2.2, 5,
+        "Spikes punch up into monsters as they climb out of the ground or drop in.",
+        lambda l: f"{round(100 * trap_share(l))}% of max hp on arrival"),
+    _up("ballista", "Ballista", "combat", "ballista", (1.5, 3), [("traps", 1)], 12000, 2.5, 5,
+        "A crossbow turret on the corner of the dig that fires bolts at monsters.",
+        lambda l: "no ballista" if l == 0 else
+        f"a bolt every {ballista_interval(l):.1f}s, {round(100 * ballista_share(l))}% of max hp"),
     _up("laststand", "Last Stand", "combat", "fist", (1.5, 4), [("cleave", 1), ("firstaid", 1)],
         10000, 2.8, 3, "Miners below 30% health fight back far harder.",
         lambda l: f"x{1 + l} strike when desperate"),
@@ -161,6 +213,10 @@ UNLOCK_DEPTH = {
     # Crew
     "miners": 0, "boots": 2, "treasure": 4, "teamwork": 8, "secondwind": 10, "foreman": 16, "nightshift": 28,
     "driller": 5, "guard": 11, "demolition": 18,
+    "streak": 4, "vein": 9, "whetstone": 16,
+    "combo": 2, "goldblock": 7, "slam": 14,
+    "surveyor": 3, "chests": 8, "vault": 15,
+    "spiritlantern": 9, "traps": 12, "ballista": 20,
     # Tools
     "power": 0, "speed": 1, "diamond": 3, "crit": 6, "deepstrike": 9, "quake": 14, "masterwork": 25,
     # Hands
