@@ -6,9 +6,11 @@ import time
 from .blocks import BLOCKS, Block, generate_layer
 from .config import BAD, GOLD, GOOD, GRID, TEXT, W
 from .effects import Floater, Particle
-from .enemies import FIRST_SPAWN_DELAY, Enemy, choose_kind, edge_cell, max_enemies, spawn_delay
+from .enemies import (ENEMY_START_DEPTH, ENEMY_TYPES, Enemy, choose_kind, edge_cells, max_enemies,
+                      spawn_interval)
 from .iso import iso
 from .miners import MINER_REGEN, MINER_RESPAWN_SECS, Miner
+from .sprites import enemy_anchor
 from .upgrades import (BRANCHES, UPGRADES, click_damage, dynamite_interval, is_maxed, is_unlocked,
                        miner_count, miner_damage, ore_mult, swing_time, upgrade_cost, value_mult,
                        walk_speed)
@@ -31,12 +33,14 @@ class World:
         self.particles = []
         self.floaters = []
         self.rings = []                    # expanding circle effects [x, y, age, max_r, color]
-        self.earn_log = []                 # (time, amount) for $/s estimate
+        self.clock = 0.0                   # game-time seconds; stands still while paused
+        self.earn_log = []                 # (clock, amount) for $/s estimate
         self.gps_cached = 0.0
         self.tap_timer = 0.0
         self.dynamite_timer = 0.0
         self.enemies = []
-        self.enemy_timer = FIRST_SPAWN_DELAY
+        self.enemy_timer = spawn_interval(ENEMY_START_DEPTH)   # seconds until the next wave
+        self.announcement = None                                # [text, seconds left]
 
     # ----- stats ----------------------------------------------------------
     def lv(self, key): return self.levels[key]
@@ -52,7 +56,7 @@ class World:
         return click_damage(self.lv("click"))
 
     def gold_per_sec(self):
-        now = time.time()
+        now = self.clock
         self.earn_log = [(t, a) for t, a in self.earn_log if now - t < 15]
         if self.earn_log:
             span = max(5.0, now - self.earn_log[0][0])
@@ -87,26 +91,72 @@ class World:
         free = [m for m in self.miners if m.state == "working"]
         return min(free, key=lambda m: (m.x - x) ** 2 + (m.y - y) ** 2, default=None)
 
-    def spawn_enemy(self):
-        kind = choose_kind(self.depth)
-        if not kind:
-            return
-        cell = edge_cell()
-        enemy = Enemy(kind, self.depth, cell, self.column_height(*cell))
-        self.enemies.append(enemy)
+    def spawn_wave(self):
+        """Top the board up to the enemy cap for this depth. Returns how many spawned."""
+        count = max_enemies(self.depth) - len(self.enemies)
+        if count <= 0:
+            return 0
+        kinds = [choose_kind(self.depth) for _ in range(count)]
+        for i, cell in enumerate(edge_cells(count)):
+            # stagger the emergence so a big wave pops out one after another
+            enemy = Enemy(kinds[i], self.depth, cell, self.column_height(*cell), delay=i * 0.35)
+            self.enemies.append(enemy)
+        if count == 1:
+            spec = ENEMY_TYPES[kinds[0]]
+            msg = f"A {spec['name'].upper()} {spec['arrival'].upper()}!"
+        else:
+            msg = f"WAVE INCOMING: {count} ENEMIES!"
+        self.announcement = [msg, 2.5]   # shown as the HUD banner title
+        return count
+
+    def enemy_burst(self, enemy):
+        """A zombie breaks through the ground."""
         px, py = self.entity_screen(enemy)
+        for _ in range(22):
+            self.particles.append(Particle(px, py, random.choice([(110, 84, 60), (80, 60, 44), (140, 110, 80)]),
+                                           big=True))
+        self.rings.append([px, py, 0.0, 60, (150, 110, 70)])
+
+    def enemy_materialise(self, enemy):
+        """A ghost or wisp forms out of cold mist."""
+        px, py = self.entity_screen(enemy, 14)
         for _ in range(16):
-            self.particles.append(Particle(px, py - 30, (110, 84, 60), big=True))
-        self.floaters.append(Floater(f"A {enemy.spec['name'].lower()} crawls out!", px, py - 60, BAD,
-                                     life=1.8, size=26))
+            self.particles.append(Particle(px, py, random.choice([(200, 225, 255), (150, 190, 240), (255, 255, 255)])))
+        self.rings.append([px, py + 12, 0.0, 50, (170, 210, 255)])
+
+    def enemy_landed(self, enemy):
+        """A spider drops onto the board."""
+        px, py = self.entity_screen(enemy)
+        for _ in range(10):
+            self.particles.append(Particle(px, py, (150, 145, 160)))
+        self.rings.append([px, py, 0.0, 40, (200, 195, 210)])
+
+    def transform_enemy(self, enemy, into):
+        """e.g. a bat that flew free too long becomes a vampire (full health for the new form)."""
+        enemy.become(into)
+        enemy.state = "transforming"
+        enemy.timer = 0.0
+        px, py = enemy_anchor(enemy, self.rise, time.time())
+        for _ in range(24):
+            self.particles.append(Particle(px, py, random.choice([(120, 60, 160), (80, 40, 110), (170, 120, 200)]),
+                                           big=True))
+        self.floaters.append(Floater(f"The bat becomes a {enemy.spec['name'].upper()}!", px, py - 40,
+                                     (190, 120, 230), life=1.8, size=26))
+
+    def blood_drip(self, miner, enemy):
+        """Red drops flying from a drained miner's neck."""
+        if random.random() < 0.25:
+            px, py = self.entity_screen(miner, 27 + miner.height)
+            self.particles.append(Particle(px, py, (200, 20, 40)))
 
     def grab(self, enemy, miner):
-        if enemy.kind == "spider":
-            enemy.grab_offset = (0.0, 0.0)          # rides on the miner's head
+        style = enemy.spec["grab"]
+        if style in ("head", "orbit", "engulf"):
+            enemy.grab_offset = (0.0, 0.0)          # on / around the miner themselves
         else:
-            # stand beside the miner on screen (screen-x follows x - y) so the choke is visible
+            # beside the miner on screen (screen-x follows x - y) so the attack is visible
             side = 1 if (enemy.x - miner.x) - (enemy.y - miner.y) >= 0 else -1
-            reach = enemy.spec["reach"] * 1.15
+            reach = enemy.spec["reach"] * (0.6 if style == "neck" else 1.15)
             enemy.grab_offset = (side * reach, -side * reach)
             enemy.facing = -side
         enemy.victim = miner
@@ -139,10 +189,10 @@ class World:
             return
         enemy.hp -= dmg
         enemy.flash = 0.12
-        px, py = self.entity_screen(enemy, 22)
+        px, py = enemy_anchor(enemy, self.rise, time.time())
         self.rings.append([px, py + 18, 0.0, 30, BAD])
         for _ in range(6):
-            self.particles.append(Particle(px, py, (120, 190, 80) if enemy.kind == "zombie" else (90, 60, 120)))
+            self.particles.append(Particle(px, py, enemy.spec["gore"]))
         if enemy.hp <= 0:
             self.kill_enemy(enemy)
 
@@ -150,12 +200,13 @@ class World:
         self.enemies.remove(enemy)
         bounty = enemy.bounty_base * value_mult(self.lv("value"))
         self.gold += bounty
-        self.earn_log.append((time.time(), bounty))
-        px, py = self.entity_screen(enemy, 22)
+        self.earn_log.append((self.clock, bounty))
+        px, py = enemy_anchor(enemy, self.rise, time.time())
         self.floaters.append(Floater(f"+${fmt(bounty)}", px, py - 20, GOLD, size=28))
         self.rings.append([px, py + 18, 0.0, 60, GOOD])
+        gore = enemy.spec["gore"]
         for _ in range(26):
-            self.particles.append(Particle(px, py, random.choice([(120, 190, 80), (70, 110, 50), (200, 60, 60)]),
+            self.particles.append(Particle(px, py, random.choice([gore, tuple(c // 2 for c in gore), (200, 60, 60)]),
                                            big=True))
         victim = enemy.victim
         if victim and victim.attacker is enemy:
@@ -234,7 +285,7 @@ class World:
             self.particles.append(Particle(px, py, random.choice([(255, 200, 80), (255, 110, 40), (90, 80, 80)]),
                                            big=True))
         for e in list(self.enemies):   # dynamite hurts enemies caught in the blast too
-            if max(abs(e.x - (cx + 0.5)), abs(e.y - (cy + 0.5))) <= 1.6:
+            if e.targetable and max(abs(e.x - (cx + 0.5)), abs(e.y - (cy + 0.5))) <= 1.6:
                 self.hit_enemy(e, dmg)
         depth = self.depth
         for dx in (-1, 0, 1):
@@ -257,7 +308,7 @@ class World:
             self.rings.append([px, py, 0.0, 90, GOLD])
         self.gold += earned
         self.total_blocks += 1
-        self.earn_log.append((time.time(), earned))
+        self.earn_log.append((self.clock, earned))
         spec = BLOCKS[block.kind]
         for _ in range(14):
             self.particles.append(Particle(px, py, spec["color"], big=True))
@@ -299,6 +350,7 @@ class World:
     # ----- update ---------------------------------------------------------
     def update(self, dt, combat=True):
         """Advance the simulation. With combat=False enemies freeze and none spawn."""
+        self.clock += dt
         self.sync_miners()
         if self.rise < 0:
             self.rise = min(0.0, self.rise + dt * 2.5)
@@ -337,14 +389,18 @@ class World:
             target_z = self.column_height(*self.cell_of(m.x, m.y))
             m.draw_z += (target_z - m.draw_z) * min(1.0, dt * 10)
 
+        if self.announcement:
+            self.announcement[1] -= dt
+            if self.announcement[1] <= 0:
+                self.announcement = None
         if combat:
             for e in list(self.enemies):
                 e.update(self, dt)
-            if self.depth >= 1 and len(self.enemies) < max_enemies(self.depth):
+            if self.depth >= ENEMY_START_DEPTH:   # waves keep coming even while enemies remain
                 self.enemy_timer -= dt
                 if self.enemy_timer <= 0:
-                    self.enemy_timer = spawn_delay(self.depth)
-                    self.spawn_enemy()
+                    self.enemy_timer = spawn_interval(self.depth)
+                    self.spawn_wave()
 
         if self.lv("autotap"):
             self.tap_timer += dt * self.lv("autotap")
@@ -374,7 +430,7 @@ class World:
         return dict(gold=self.gold, depth=self.depth, levels=self.levels,
                     total_blocks=self.total_blocks, current=pack(self.current),
                     next=pack(self.next), saved_at=time.time(), gps=self.gold_per_sec(),
-                    crew=[m.look() for m in self.miners])
+                    crew=[m.look() for m in self.miners], grid=GRID)
 
     @classmethod
     def from_dict(cls, d):
@@ -383,8 +439,12 @@ class World:
         w.depth = d["depth"]
         w.levels.update({k: v for k, v in d["levels"].items() if k in w.levels})
         w.total_blocks = d.get("total_blocks", 0)
-        w.current = {(x, y): Block(k, w.depth, hp) for x, y, k, hp in d["current"]}
-        w.next = {(x, y): Block(k, w.depth + 1, hp) for x, y, k, hp in d["next"]}
+        if d.get("grid", 8) == GRID:
+            w.current = {(x, y): Block(k, w.depth, hp) for x, y, k, hp in d["current"]}
+            w.next = {(x, y): Block(k, w.depth + 1, hp) for x, y, k, hp in d["next"]}
+        else:   # saved on a different board size: start the current layer fresh
+            w.current = generate_layer(w.depth)
+            w.next = generate_layer(w.depth + 1, ore_mult(w.lv("prospector")))
         if not w.current:
             w.descend()
         w.miners = []
@@ -392,4 +452,6 @@ class World:
         for miner, look in zip(w.miners, d.get("crew", [])):   # older saves have no crew: keep random looks
             miner.apply_look(look)
         w.gps_cached = d.get("gps", 0.0)
+        w.enemy_timer = spawn_interval(w.depth)   # first wave on the saved depth's schedule, not depth 1's
+
         return w

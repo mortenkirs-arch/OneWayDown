@@ -4,7 +4,7 @@ import os
 W, H = 1280, 720
 FPS = 60
 
-GRID = 8                      # board is GRID x GRID cells
+GRID = 10                     # board is GRID x GRID cells
 TILE_W, TILE_H = 72, 36       # isometric diamond size
 BLOCK_H = 34                  # pixel height of one block
 BOARD_ORIGIN = (W // 2, 200)  # screen position of the board's back corner at z=0

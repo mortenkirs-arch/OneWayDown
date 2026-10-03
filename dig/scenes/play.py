@@ -5,6 +5,7 @@ import time
 import pygame
 
 from ..config import BAD, GOLD, GRID, H, MUTED, TEXT, W
+from ..enemies import ENEMY_START_DEPTH, max_enemies
 from ..render import draw_board, pick_block
 from ..sprites import pick_enemy
 from ..ui import Button, draw_panel, draw_text
@@ -74,11 +75,23 @@ class PlayScene(Scene):
         for i, (s, color) in enumerate(stats):
             draw_text(surf, f, s, 24, color, (32, H - 128 + i * 27))
 
-        if w.enemies:
-            grabbed = sum(1 for m in w.miners if m.state == "grabbed")
-            title = f"{grabbed} MINER{'S' if grabbed > 1 else ''} UNDER ATTACK!" if grabbed else "ENEMIES IN THE MINE!"
-            pulse = 0.75 + 0.25 * math.sin(time.time() * 8)
-            draw_text(surf, f, title, 36, tuple(int(c * pulse) for c in BAD), (W // 2 + 30, 36), "center")
-            draw_text(surf, f, "Click them to save your crew", 22, MUTED, (W // 2 + 30, 64), "center")
+        if w.depth >= ENEMY_START_DEPTH:
+            secs = math.ceil(w.enemy_timer)
+            incoming = max_enemies(w.depth) - len(w.enemies)
+            wave = f"next wave in {secs}s" + (f" (+{incoming})" if incoming > 0 else " (at max)")
+            if w.enemies:
+                grabbed = sum(1 for m in w.miners if m.state == "grabbed")
+                if grabbed:
+                    title = f"{grabbed} MINER{'S' if grabbed > 1 else ''} UNDER ATTACK!"
+                elif w.announcement:
+                    title = w.announcement[0]
+                else:
+                    title = "ENEMIES IN THE MINE!"
+                pulse = 0.75 + 0.25 * math.sin(time.time() * 8)
+                draw_text(surf, f, title, 36, tuple(int(c * pulse) for c in BAD), (W // 2 + 30, 36), "center")
+                draw_text(surf, f, f"Click them to save your crew  -  {wave}", 22, MUTED, (W // 2 + 30, 64), "center")
+            else:
+                color = BAD if secs <= 5 else MUTED
+                draw_text(surf, f, wave[0].upper() + wave[1:], 28, color, (W // 2 + 30, 40), "center")
         draw_text(surf, f, "Click blocks (top or sides) to mine them yourself!", 24, MUTED,
                   (W - 20, H - 20), "bottomright")

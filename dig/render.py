@@ -1,4 +1,5 @@
 """Drawing the isometric dig site, and mapping the mouse back onto blocks."""
+import math
 import random
 import time
 
@@ -61,8 +62,11 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         miner_key[id(m)] = m.x + m.y - 0.5
         items.append((miner_key[id(m)], 2, "miner", m))
     for e in w.enemies:
-        if e.kind == "spider" and e.state == "attacking" and e.victim:
-            items.append((miner_key[id(e.victim)], 3, "enemy", e))   # drawn on top of its victim
+        if e.state == "attacking" and e.victim and e.spec["grab"] in ("head", "neck", "orbit", "engulf"):
+            items.append((miner_key[id(e.victim)], 3, "enemy", e))   # clinging on: drawn over its victim
+        elif (e.state == "transforming" or (e.flying and e.state != "attacking")
+              or (e.state == "emerging" and e.spec["entrance"] in ("drop", "swoop"))):
+            items.append((math.inf, 4, "enemy", e))                  # in the air: above everything
         else:
             items.append((e.x + e.y - 0.5, 2, "enemy", e))
     items.sort(key=lambda t: (t[0], t[1]))

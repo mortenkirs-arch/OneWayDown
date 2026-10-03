@@ -35,6 +35,8 @@ def bezier(p0, p1, steps=24):
 
 
 class UpgradeScene(Scene):
+    simulate = False   # opening the tree pauses the game: no mining, income, enemies or timers
+
     def __init__(self, game):
         super().__init__(game)
         self.return_to = "menu"
@@ -105,6 +107,12 @@ class UpgradeScene(Scene):
 
         draw_text(s, f, "UPGRADE TREE", 50, TEXT, (24, 24))
         draw_text(s, f, "Unlock paths, then merge them", 22, MUTED, (26, 62))
+        badge = pygame.Rect(318, 26, 112, 30)   # pause indicator next to the title
+        pygame.draw.rect(s, (60, 52, 30), badge, border_radius=8)
+        pygame.draw.rect(s, GOLD, badge, 2, border_radius=8)
+        for dx in (-41, -35):
+            pygame.draw.rect(s, GOLD, (badge.centerx + dx, badge.centery - 7, 4, 14))
+        draw_text(s, f, "PAUSED", 24, GOLD, (badge.centerx + 10, badge.centery), "center")
         gold_rect = draw_text(s, f, f"$ {fmt(w.gold)}", 44, GOLD, (W - 30, 26), "topright")
         draw_text(s, f, f"{fmt(w.gold_per_sec())} / sec", 22, MUTED,
                   (gold_rect.left - 14, gold_rect.centery), "midright")
