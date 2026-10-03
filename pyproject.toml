@@ -1,0 +1,7 @@
+[project]
+name = "keep-digging"
+version = "0.1.0"
+description = "An isometric incremental mining game built with pygame."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pygame-ce>=2.4"]
