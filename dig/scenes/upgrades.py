@@ -10,7 +10,8 @@ from ..effects import CoinFly, Particle
 from ..icons import draw_icon
 from ..render import draw_flying_coins
 from ..ui import Button, draw_callout, draw_glow, draw_gold, draw_panel, draw_pointer, draw_text, wrap_text
-from ..upgrades import BRANCHES, TABS, UPGRADES, UPGRADES_BY_TAB, UPGRADE_BY_KEY, is_maxed, is_unlocked
+from ..upgrades import (BRANCHES, TABS, UPGRADES, UPGRADES_BY_TAB, UPGRADE_BY_KEY, is_maxed, is_unlocked,
+                        tree_requires)
 from ..util import fmt, shade
 from .base import Scene
 
@@ -51,7 +52,9 @@ class UpgradeScene(Scene):
         self.return_to = "menu"
         self.tab = TABS[0]
         # each tab remembers its own selected node; starts on the tab's root
-        self.selected_in = {tab: next(u["key"] for u in UPGRADES_BY_TAB[tab] if not u["requires"]) for tab in TABS}
+        roots = {tab: [u for u in UPGRADES_BY_TAB[tab] if not tree_requires(u)] for tab in TABS}
+        # each tab opens on its earliest root (Hands: Golden Touch, until Power Gloves opens at 3m)
+        self.selected_in = {tab: min(roots[tab], key=lambda u: u["depth"])["key"] for tab in TABS}
         self.particles = []
         self.coins = []                  # spent coins flying from the gold counter to an upgrade
         self.bursts = []                 # [seconds until the coins land, x, y, colour]
@@ -251,7 +254,7 @@ class UpgradeScene(Scene):
             child = self.node_pos[up["key"]]
             color = BRANCHES[up["branch"]]["color"]
             open_ = self.world.available(up)   # the upgrade this path leads to can actually be bought
-            for req_key, req_lv in up["requires"]:
+            for req_key, req_lv in tree_requires(up):
                 pts = bezier(self.node_pos[req_key], child)
                 have = self.world.levels[req_key]
                 if have >= req_lv and not open_:
@@ -279,7 +282,7 @@ class UpgradeScene(Scene):
         x, y = self.node_pos[up["key"]]
         state = self.node_state(up)
         color = BRANCHES[up["branch"]]["color"]
-        big = len(up["requires"]) != 1   # roots and merge points are hexagons
+        big = len(tree_requires(up)) != 1   # roots and merge points are hexagons
         r = (34 if big else 28) + (3 if hovered else 0)
         lv = self.world.levels[up["key"]]
 

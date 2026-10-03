@@ -7,7 +7,8 @@ import time
 
 import pygame
 
-from .config import AUTOSAVE_SECS, BG_BOTTOM, BG_TOP, FPS, GOLD, H, PANEL, SAVE_PATH, W
+from .biomes import BIOMES, biome_at
+from .config import AUTOSAVE_SECS, FPS, GOLD, H, PANEL, SAVE_PATH, W
 from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, UpgradeScene
 from .ui import Fonts
 from .world import World
@@ -20,11 +21,14 @@ class Game:
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.fonts = Fonts()
-        self.background = self.make_background()
+        self.backgrounds = {b["key"]: self.make_background(*b["bg"]) for b in BIOMES}
+        self.bg_key, self.bg_prev, self.bg_fade = "topsoil", None, 1.0   # fading from bg_prev to bg_key
         self.world = None
         self.last_save = time.time()
         self.toast = None              # (text, time_left)
         self.load()
+        if self.world:   # open on the saved depth's backdrop, not a fade from the surface
+            self.bg_key = biome_at(self.world.depth)["key"]
         self.scenes = {
             "menu": MenuScene(self),
             "play": PlayScene(self),
@@ -107,9 +111,20 @@ class Game:
         self.scene.update(dt)
         if self.toast:
             self.toast = (self.toast[0], self.toast[1] - dt) if self.toast[1] > dt else None
+        self.bg_fade = min(1.0, self.bg_fade + dt / 2.5)
 
     def draw(self):
-        self.screen.blit(self.background, (0, 0))
+        key = biome_at(self.world.depth)["key"] if self.world else "topsoil"
+        if key != self.bg_key:   # into a new biome: fade the backdrop across
+            self.bg_prev, self.bg_key, self.bg_fade = self.bg_key, key, 0.0
+        if self.bg_fade < 1.0 and self.bg_prev:
+            self.screen.blit(self.backgrounds[self.bg_prev], (0, 0))
+            layer = self.backgrounds[self.bg_key]
+            layer.set_alpha(int(255 * self.bg_fade))
+            self.screen.blit(layer, (0, 0))
+            layer.set_alpha(None)
+        else:
+            self.screen.blit(self.backgrounds[self.bg_key], (0, 0))
         self.scene.draw(self.screen)
         if self.toast:
             img = self.fonts[26].render(self.toast[0], True, GOLD)
@@ -118,13 +133,13 @@ class Game:
             pygame.draw.rect(self.screen, GOLD, rect, 2, border_radius=8)
             self.screen.blit(img, img.get_rect(center=rect.center))
 
-    def make_background(self):
+    def make_background(self, top, bottom):
         bg = pygame.Surface((W, H))
         for y in range(H):
             t = y / H
-            bg.fill(tuple(int(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)), (0, y, W, 1))
+            bg.fill(tuple(int(a + (b - a) * t) for a, b in zip(top, bottom)), (0, y, W, 1))
         rng = random.Random(7)
         for _ in range(90):
             x, y = rng.randrange(W), rng.randrange(H)
-            pygame.draw.circle(bg, (50, 42, 66), (x, y), rng.randint(1, 3))
+            pygame.draw.circle(bg, tuple(min(255, c + 22) for c in top), (x, y), rng.randint(1, 3))
         return bg

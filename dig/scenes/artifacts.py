@@ -62,10 +62,10 @@ class ArtifactScene(Scene):
 
         top = 96
         draw_text(s, f, "Buried in the dig  -  watch for blocks with a violet glint", 24, GOLD, (LEFT, top))
-        commons = self.card_rects(COMMON, top + 30, 3)
+        commons = self.card_rects(COMMON, top + 30, 4)
         top = commons[-1][1].bottom + 22
         draw_text(s, f, f"Boss trophies  -  a boss guards every {BOSS_EVERY}th metre", 24, GOLD, (LEFT, top))
-        trophies = self.card_rects(TROPHIES, top + 30, len(TROPHIES))
+        trophies = self.card_rects(TROPHIES, top + 30, 3)
         hovered = None
         for key, rect in commons + trophies:
             self.draw_card(s, key, rect)

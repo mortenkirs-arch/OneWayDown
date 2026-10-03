@@ -16,7 +16,8 @@ STAT_KIND = {
     "crit": "add",          # added to the miners' crit chance
     "miner_dmg": "mult", "swing": "mult", "walk": "mult", "miner_hp": "mult", "regen": "mult",
     "click_dmg": "mult", "monster_dmg": "mult", "gold": "mult", "bounty": "mult", "clear": "mult",
-    "ore": "mult", "wave": "mult", "enemy_hp": "mult", "grab_dmg": "mult",
+    "ore": "mult", "wave": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
+    "boss_dmg": "mult",
 }
 
 ARTIFACTS = {
@@ -66,6 +67,12 @@ ARTIFACTS = {
     "broodsilk": dict(name="Broodmother's Silk", icon="vein", color=(220, 220, 235), boss="broodmother",
                       lore="Stronger than steel, and only slightly sticky.",
                       bonus="Grabbed crew take 30% less damage", effects={"grab_dmg": 0.7}),
+    "batwing": dict(name="Great Bat's Wing", icon="wind", color=(150, 120, 190), boss="greatbat",
+                    lore="Leathery, enormous, and it still twitches when something moves.",
+                    bonus="Monsters move 15% slower", effects={"enemy_speed": 0.85}),
+    "jawbone": dict(name="Tyrant's Jawbone", icon="skull", color=(235, 228, 205), boss="bonetyrant",
+                    lore="It chatters on its own. Mostly about weak points.",
+                    bonus="Bosses take 15% more damage", effects={"boss_dmg": 1.15}),
     "vampfang": dict(name="Vampire Lord's Fang", icon="burst", color=(200, 40, 60), boss="vampirelord",
                      lore="It still thirsts. Your crew no longer does.",
                      bonus="Crew heal twice as fast", effects={"regen": 2.0}),

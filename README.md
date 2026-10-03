@@ -9,9 +9,10 @@ every 5th metre. Prices climb steeply the more you own, so pick what to push, an
 only unlock once you've dug deep enough - the HUD shows the next depth milestone.
 
 From depth 1, enemies invade in waves and go after your miners - the first one arrives
-the moment you get there. Zombies claw out of the ground (depth 1+), bats swoop in (depth 3+), cave spiders drop from the ceiling
-(depth 6+), fast wisps flicker in (depth 9+) and slow ghosts materialise (depth 15+).
-From depth 12, a bat left flying for 3 seconds turns into a vampire, which heals itself
+the moment you get there. Zombies claw out of the ground (depth 1+), bats swoop in (depth 3+),
+cave spiders drop from the ceiling (depth 6+), skeletons rattle out of the rock (depth 9+), fast
+wisps flicker in (depth 13+) and slow ghosts materialise (depth 19+).
+From depth 16, a bat left flying for 3 seconds turns into a vampire, which heals itself
 as it drains a miner - so swat bats fast. Ghosts phase out and can't be clicked for a
 moment every few seconds, so time your clicks. A grabbed miner is choked until you click the enemy to death;
 if you are too slow the miner dies - for good. They're buried in the graveyard and a new
@@ -25,8 +26,8 @@ Every menu has a middle path of its own: Tools (Hot Streak, Vein Follower, Whets
 Hands (Combo Clicks, Golden Blocks, Charged Slam - hold the mouse anywhere on the dig), Fortune
 (Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Spirit Lantern, Booby Traps,
 Ballista). The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
-fast), guards (patrol and fight monsters on their own) and a demolitionist (plants charges
-on the toughest blocks).
+fast), guards (patrol and fight monsters on their own) and a demolitionist (charges that level
+a whole 3x3 of blocks wherever they are thickest).
 
 Your crew get better the longer they survive. Every crew member earns experience doing their
 job - diggers by breaking blocks, guards (and miners fighting back) by hitting monsters, the
@@ -45,8 +46,14 @@ staying at 20s after that). Each wave tops the board up to the enemy cap - 1 ene
 depth 1, +1 every 3 levels, up to 8 - so enemies you leave alive count toward the next
 wave. Tuning lives at the top of `dig/enemies.py`.
 
+The mine changes as you go down: every 10 metres you break into a new biome - the Topsoil, the
+Stone Caverns, the Crystal Grotto, the Magma Depths, the Ancient Ruins and finally the Abyss - each
+with its own rock, backdrop and drifting embers, sparkles or dust (purely cosmetic; see
+`dig/biomes.py`).
+
 Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
-Vampire Lord (30m) and the Lich (40m), then round again, tougher each time. A boss stalks your
+Great Bat (30m), the Bone Tyrant (40m), the Vampire Lord (50m) and the Lich (60m), then round
+again, tougher each time. A boss stalks your
 crew, winds up and slams the ground around it (get your miners out of the red), and calls in
 minions; ordinary waves pause while it's on the board. Each has a trick of its own:
 
@@ -54,13 +61,18 @@ minions; ordinary waves pause while it's on the board. Each has a trick of its o
   them off away from him; below half health he rages and slams far more often.
 - **Broodmother** lays egg sacs that hatch into spiders unless you break them, and her slams
   leave webs that slow your crew.
+- **Great Bat** flies: instead of slamming, it marks a crew member's spot and dive-bombs it, and
+  its screech stuns the crew nearby for a moment.
+- **Bone Tyrant** hurls bones at whoever is furthest away, and won't stay down: its first "death"
+  leaves a bone pile you have a few seconds to smash before it pulls itself back together.
 - **Vampire Lord** scatters into a swarm of bats (nothing can hit him), flies to a crew member
   and feeds on them to heal - hit him hard to make him let go.
 - **Lich** curses a crew member: click them to lift it before it bursts and hurts everyone
   nearby (Spirit Lantern weakens the burst). Each of his wisps shields him, so kill them first.
 
 You can't dig past a boss's layer until it falls, but if it isn't beaten within 150 seconds it
-retreats and the dig goes on. Bosses shrug off most "share of max health" damage, so clicking
+retreats and the dig goes on. If your diggers clear the layer first, they don't stand idle: they
+keep their distance, darting clear of its slams, and pelt it with rocks. Bosses shrug off most "share of max health" damage, so clicking
 them is what counts.
 
 Artifacts are rare finds, each a permanent bonus. Now and then a new layer hides one in a block

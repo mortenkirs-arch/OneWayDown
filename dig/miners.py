@@ -116,6 +116,7 @@ class Miner:
         self.streak = 0.0        # ...and how many hits in a row so far
         self.sharp = 0.0         # Whetstone: seconds of freshly sharpened pick left
         self.curse = 0.0         # Lich: seconds until the curse on them bursts (0 = not cursed)
+        self.stun = 0.0          # Great Bat: seconds left reeling from its screech
         self.level = 1           # experience level (see level_mult)...
         self.xp = 0.0            # ...and xp towards the next one
         if ROLES[role]["height"]:

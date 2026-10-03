@@ -44,8 +44,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_PATH = os.path.join(PROJECT_ROOT, "savegame.json")
 AUTOSAVE_SECS = 10
 
-BG_TOP = (28, 22, 40)
-BG_BOTTOM = (10, 8, 16)
 PANEL = (38, 32, 52)
 PANEL_EDGE = (78, 66, 104)
 TEXT = (236, 230, 245)

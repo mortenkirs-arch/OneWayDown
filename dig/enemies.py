@@ -27,10 +27,14 @@ call in minions. Extra keys:
   look, scale   which enemy sprite to draw, and how much bigger
   slam          damage to every crew member in reach when the slam lands (MINER_MAX_HP = 10)
   minion        dict(kind, count, every): summoned around the boss every `every` seconds
+  dive          (flying bosses) instead of walking up and slamming, it marks a crew member's spot and
+                swoops onto it when the wind-up ends
 Each boss also has a trick of its own, run by World.boss_special (see the BOSS TRICKS constants below):
   Zombie King   rallies nearby zombies (faster, tougher) and goes into a rage below half health
   Broodmother   her slams leave webs that slow the crew; she lays egg sacs that hatch into spiders
   Vampire Lord  turns into a swarm of bats, flies to a crew member and bites them to heal
+  Great Bat     dive-bombs a crew member from the air instead of slamming, and screeches to stun the crew
+  Bone Tyrant   throws bones at distant crew; its first "death" leaves a bone pile you must smash quickly
   Lich          curses a crew member (click them to lift it before it explodes); his wisps shield him
 
 Egg sacs (hatch=...) don't move: they hatch into `count` of `kind` after `after` seconds unless broken.
@@ -52,16 +56,19 @@ ENEMY_TYPES = {
     "bat": dict(name="Bat", hp=5, speed=1.9, dps=1.5, bounty=6, min_depth=3, weight=2,
                 reach=0.3, entrance="swoop", grab="neck", arrival="swoops in",
                 altitude=1.1, wobble=dict(amount=0.9, freq=6),
-                transform=dict(into="vampire", min_depth=12, after=3.0),
+                transform=dict(into="vampire", min_depth=16, after=3.0),
                 tint=(228, 228, 238), gore=(70, 50, 80)),
-    "vampire": dict(name="Vampire", hp=24, speed=0.9, dps=2.0, bounty=24, min_depth=12, weight=0,
+    "vampire": dict(name="Vampire", hp=28, speed=0.9, dps=2.0, bounty=26, min_depth=16, weight=0,
                     reach=0.3, entrance="dig", grab="side", arrival="rises", lifesteal=0.5,
                     tint=(228, 228, 238), gore=(160, 30, 45)),
-    "wisp": dict(name="Wisp", hp=4, speed=2.6, dps=1.0, bounty=7, min_depth=9, weight=2,
+    "skeleton": dict(name="Skeleton", hp=12, speed=0.75, dps=1.5, bounty=11, min_depth=9, weight=3,
+                     reach=0.3, entrance="dig", grab="side", arrival="rattles out",
+                     tint=(200, 200, 220), gore=(232, 226, 205)),
+    "wisp": dict(name="Wisp", hp=5, speed=2.6, dps=1.0, bounty=8, min_depth=13, weight=2,
                  reach=0.3, entrance="fade", grab="orbit", arrival="flickers in",
                  altitude=0.8, wobble=dict(amount=1.3, freq=9),
                  tint=(170, 210, 255), gore=(150, 215, 255)),
-    "ghost": dict(name="Ghost", hp=20, speed=0.45, dps=1.6, bounty=18, min_depth=15, weight=2,
+    "ghost": dict(name="Ghost", hp=24, speed=0.45, dps=1.6, bounty=20, min_depth=19, weight=2,
                   reach=0.3, entrance="fade", grab="engulf", arrival="materialises",
                   altitude=0.35, wobble=dict(amount=0.35, freq=1.5), phase=dict(every=4.0, duration=1.2),
                   tint=(160, 190, 230), gore=(220, 230, 255)),
@@ -76,6 +83,15 @@ ENEMY_TYPES = {
                         look="spider", scale=2.4, crown_lift=14, slam=3.0,
                         minion=dict(kind="eggsac", count=2, every=9.0),
                         tint=(150, 200, 120), gore=(90, 60, 120)),
+    "greatbat": dict(name="Great Bat", hp=2400, speed=1.0, dps=0, bounty=380, min_depth=0, weight=0,
+                     reach=0.9, entrance="swoop", grab="neck", arrival="swoops in", boss=True, dive=True,
+                     altitude=1.1, look="bat", scale=2.4, crown_lift=16, slam=4.0,
+                     minion=dict(kind="bat", count=3, every=11.0),
+                     tint=(228, 228, 238), gore=(70, 50, 80)),
+    "bonetyrant": dict(name="Bone Tyrant", hp=2400, speed=0.5, dps=0, bounty=400, min_depth=0, weight=0,
+                       reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
+                       look="skeleton", scale=2.3, slam=5.0, minion=dict(kind="skeleton", count=2, every=12.0),
+                       tint=(200, 200, 220), gore=(232, 226, 205)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
                         reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
                         look="vampire", scale=2.0, slam=4.0, minion=dict(kind="bat", count=2, every=12.0),
@@ -92,7 +108,7 @@ ENEMY_TYPES = {
 }
 FLY_ALTITUDE = ENEMY_TYPES["bat"]["altitude"]   # bat swoop-in / transformation height
 
-BOSSES = ["zombieking", "broodmother", "vampirelord", "lich"]
+BOSSES = ["zombieking", "broodmother", "greatbat", "bonetyrant", "vampirelord", "lich"]
 BOSS_EVERY = 10              # a boss guards every 10th metre
 BOSS_TIME_LIMIT = 150.0      # seconds before an unbeaten boss retreats (no reward, but the dig goes on)
 BOSS_PCT_SCALE = 0.04        # bosses shrug off "share of max health" damage (Executioner, guards, ballista...)
@@ -100,6 +116,7 @@ BOSS_WINDUP = 1.3            # seconds of warning before a slam lands
 BOSS_SLAM_RADIUS = 1.4       # tiles: crew this close to the boss when it slams get hit
 BOSS_SLAM_COOLDOWN = 3.5     # seconds after a slam before it can wind up again
 BOSS_MAX_MINIONS = 4         # it stops calling for help with this many minions alive
+DIVE_SECS = 0.35             # a diving boss swoops onto its marked spot over the last moments of the wind-up
 
 # ----- BOSS TRICKS ------------------------------------------------------------------------------
 RALLY_RADIUS = 2.5           # Zombie King: zombies this close to him are rallied...
@@ -122,6 +139,15 @@ CURSE_RADIUS = 1.5
 CURSE_WARD = 0.3             # Spirit Lantern weakens the burst by this share per level
 SHIELD_PER_WISP = 0.25       # each wisp alive takes this share off the damage the Lich takes...
 SHIELD_MAX = 0.75            # ...up to this much
+SCREECH_EVERY = 13.0         # Great Bat: seconds between screeches...
+SCREECH_RADIUS = 3.5         # ...stunning the crew within this many tiles...
+SCREECH_STUN = 2.2           # ...for this long
+BONE_THROW_EVERY = 5.0       # Bone Tyrant: seconds between bones thrown at whoever is furthest away...
+BONE_THROW_DMG = 3.0         # ...hitting for this much
+BONE_THROW_SECS = 0.7        # (flight time)
+PILE_SECS = 5.0              # its first "death" leaves a bone pile: smash it within this long...
+PILE_HP = 0.2                # ...(the pile has this share of its max health)...
+REFORM_HP = 0.5              # ...or it pulls itself together with this share
 
 
 def boss_for(depth):
@@ -197,6 +223,9 @@ class Enemy:
         self.trick_timer = 6.0        # seconds until the boss's own trick (bat form, curse)
         self.goal = None              # Vampire Lord: the crew member the swarm is flying at
         self.bite_hp = 0.0            # his health when the bite began (to tell when he's been hit enough)
+        self.slam_at = None           # Great Bat: the spot it will dive onto when the wind-up ends
+        self.reformed = False         # Bone Tyrant: already pulled itself back together once
+        self.pile_timer = 0.0         # ...seconds left to smash its bone pile
         if ENEMY_TYPES[kind]["entrance"] == "none":
             self.state = "hunting"
 
@@ -349,14 +378,23 @@ class Enemy:
         if world.boss_special(self, dt):   # busy with its own trick (flying as bats, feeding)
             return
         pace = ENRAGE_PACE if self.enraged else 1.0
-        if self.windup > 0:   # rooted to the spot, about to slam
+        if self.windup > 0:   # rooted to the spot, about to slam (or, diving, about to swoop)
+            if self.slam_at and self.windup <= DIVE_SECS:
+                tx, ty = self.slam_at
+                share = min(1.0, dt / max(self.windup, dt))
+                self.x += (tx - self.x) * share
+                self.y += (ty - self.y) * share
             self.windup -= dt
             if self.windup <= 0:
                 self.windup = 0.0
                 self.cooldown = BOSS_SLAM_COOLDOWN * pace
                 world.boss_slam(self)
+                self.slam_at = None
             return
         self.cooldown = max(0.0, self.cooldown - dt)
+        if self.spec.get("dive"):
+            self.hover_and_dive(world, dt, pace)
+            return
         target = world.nearest_crew(self.x, self.y)
         if not target:
             return
@@ -373,3 +411,22 @@ class Enemy:
         step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)
         self.x = min(GRID - 0.05, max(0.05, self.x + ux * step))
         self.y = min(GRID - 0.05, max(0.05, self.y + uy * step))
+
+    def hover_and_dive(self, world, dt, pace):
+        """A flying boss: drift about over the board, and when ready mark a crew member's spot to dive onto."""
+        if self.cooldown <= 0:
+            crew = [m for m in world.miners if m.state != "down"]
+            if crew:
+                target = random.choice(crew)
+                self.slam_at = (target.x, target.y)
+                self.windup = self.windup_total = BOSS_WINDUP * pace
+                return
+        if self.goal is None or math.hypot(self.goal[0] - self.x, self.goal[1] - self.y) < 0.2:
+            self.goal = (random.uniform(1.5, GRID - 1.5), random.uniform(1.5, GRID - 1.5))
+        dx, dy = self.goal[0] - self.x, self.goal[1] - self.y
+        dist = math.hypot(dx, dy)
+        if dist > 0.03:
+            self.facing = 1 if (dx - dy) >= 0 else -1
+            step = min(dist, self.spec["speed"] * dt)
+            self.x += dx / dist * step
+            self.y += dy / dist * step

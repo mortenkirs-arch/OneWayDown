@@ -10,12 +10,14 @@ from ..world import COMBO_WINDOW
 
 SLAM_MIN_HOLD = 0.35    # hold at least this long for a slam (a quick click is just a click)
 SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
-HUD_PANELS = [pygame.Rect(16, 16, 420, 134), pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
+TOP_PANEL = pygame.Rect(16, 16, 420, 160)
+HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
 from ..enemies import BOSS_TIME_LIMIT, ENEMY_START_DEPTH, max_enemies
 from ..icons import draw_icon
 from ..iso import origin_at
-from ..render import draw_board, draw_flying_coins, pick_block
+from ..biomes import biome_at
+from ..render import draw_ambient, draw_board, draw_flying_coins, pick_block
 from ..sprites import pick_enemy
 from ..ui import Button, draw_callout, draw_coin, draw_glow, draw_panel, draw_pointer, draw_text
 from ..upgrades import BRANCHES, UPGRADE_BY_KEY, UPGRADES, enemy_hit_floor, next_milestone
@@ -57,6 +59,7 @@ class PlayScene(Scene):
             if any(r.collidepoint(event.pos) for r in HUD_PANELS):   # clicks on the HUD aren't play
                 return
             self.world.combo_click()   # every click counts towards the combo, whatever it lands on
+            self.world.combo_held = True   # ...and holding the button keeps it from running down
             if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
                 self.charge = time.time()
             cursed = self.world.pick_cursed(event.pos)
@@ -70,14 +73,21 @@ class PlayScene(Scene):
             hit = pick_block(self.world, event.pos)
             if hit:
                 self.world.player_hit(hit[0], manual=True)
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.charge:
-            held = time.time() - self.charge
-            self.charge = None
-            if held >= SLAM_MIN_HOLD:
-                cell = self.slam_target(event.pos)
-                if cell:
-                    self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD),
-                                    target=pick_enemy(self.world, event.pos, time.time()))
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.world.combo_held = False
+            if self.charge:
+                self.release_slam(event.pos)
+
+    def release_slam(self, pos):
+        """Charged Slam: letting go after holding long enough slams the block (and monster) under the cursor."""
+        held = time.time() - self.charge
+        self.charge = None
+        if held < SLAM_MIN_HOLD:
+            return
+        cell = self.slam_target(pos)
+        if cell:
+            self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD),
+                            target=pick_enemy(self.world, pos, time.time()))
 
     def slam_target(self, pos):
         """The block under the cursor, or failing that the block nearest to it on screen."""
@@ -93,6 +103,7 @@ class PlayScene(Scene):
         enemy = pick_enemy(self.world, mouse, time.time())
         block = None if enemy else pick_block(self.world, mouse)
         w = self.world
+        draw_ambient(surf, w, time.time())   # the biome's drifting embers / sparkles / dust
         if w.shake > 0:   # dynamite screen shake: jolt the whole board for a moment
             amp = w.shake_power * min(1.0, w.shake / 0.25)
             ox, oy = BOARD_ORIGIN
@@ -157,20 +168,22 @@ class PlayScene(Scene):
         f = self.fonts
         nxt = next_milestone(w.depth)
         if not nxt:
-            draw_text(surf, f, "Every upgrade unlocked!", 22, GOLD, (34, 116), "midleft")
+            draw_text(surf, f, "Every upgrade unlocked!", 22, GOLD, (34, 142), "midleft")
             return
         depth, ups = nxt
         names = ", ".join(u["name"] for u in ups[:2]) + (f" +{len(ups) - 2} more" if len(ups) > 2 else "")
-        draw_text(surf, f, f"Next unlock at {depth}m: {names}", 22, MUTED, (34, 112), "midleft")
+        draw_text(surf, f, f"Next unlock at {depth}m: {names}", 22, MUTED, (34, 138), "midleft")
         prev = max([u["depth"] for u in UPGRADES if u["depth"] <= w.depth], default=0)
         layer = 1 - len(w.current) / (GRID * GRID)            # progress through the current layer
         frac = min(1.0, (w.depth - prev + layer) / max(1, depth - prev))
-        bar = pygame.Rect(34, 126, 384, 8)
+        bar = pygame.Rect(34, 152, 384, 8)
         pygame.draw.rect(surf, (20, 16, 28), bar, border_radius=4)
         pygame.draw.rect(surf, (240, 150, 90), (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=4)
 
     def enter(self):
         self.charge = None   # time pressed while charging a slam
+        if self.world:
+            self.world.combo_held = False   # (the button may have been let go elsewhere)
 
     def draw_charge_and_combo(self, surf, w, mouse):
         """Charged Slam's growing ring at the cursor, and the Combo Clicks counter beside it."""
@@ -267,12 +280,22 @@ class PlayScene(Scene):
             if shield:
                 return f"His wisps shield him ({shield}% less damage) - kill them!"
             return "Click him!  Stay out of the red when he slams"
+        if boss.kind == "greatbat":
+            if boss.slam_at:
+                return "It's diving - get out of the red!"
+            return "It dives on whoever it marks, and its screech stuns the crew nearby"
+        if boss.kind == "bonetyrant":
+            if boss.mode == "pile":
+                return "Smash the bones before they pull themselves together!"
+            return "It hurls bones at the crew furthest away - and it won't stay down the first time"
         return "Click it!  Stay out of the red when it slams"
 
     def draw_hud(self, surf, mouse):
         w = self.world
         f = self.fonts
-        draw_panel(surf, pygame.Rect(16, 16, 420, 134))
+        draw_panel(surf, TOP_PANEL)
+        biome = biome_at(w.depth)
+        draw_text(surf, f, biome["name"], 22, biome["accent"], (34, 108), "midleft")
         self.draw_milestone(surf, w)
         bump = w.gold_bump / 0.18          # 1 the moment a coin lands, easing back to 0
         cx, cy = GOLD_HUD_COIN
