@@ -13,7 +13,9 @@ from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, Co
                       Smoke)
 from .enemies import (boss_minion_cap, boss_minion_mult,
                       BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE,
-                      BONE_THROW_EVERY, BONE_THROW_SHARE, BONE_THROW_SECS, PILE_HP, PILE_SECS, REFORM_HP,
+                      BONE_THROW_SHARE, BONE_THROW_SECS, BONE_VOLLEY, BONE_VOLLEY_HURT, CHUNK_SPLIT_HP,
+                      PILE_HP, PILE_SECS, REFORM_HP, SLIME_SPLIT_AT, SLIME_SPLIT_HP, STALK_PATIENCE, STRIDE_RANGE,
+                      STRIDE_SPEED, THROW_ANIM_SECS, THROW_RELEASE, VOLLEY_GAP,
                       SCREECH_EVERY, SCREECH_RADIUS, SCREECH_STUN,
                       BOSS_MAX_MINIONS, BOSS_SLAM_RADIUS, BOSS_TIME_LIMIT, CURSE_EVERY, CURSE_RADIUS, CURSE_SHARE,
                       CURSE_SECS, CURSE_WARD, ENEMY_START_DEPTH, ENEMY_TYPES, ENRAGE_AT, RALLY_RADIUS, RALLY_SPEED,
@@ -75,7 +77,7 @@ COMBO_CAP = 20               # ...and the most clicks that count
 GOLDEN_SECS = 6.0            # Golden Blocks: how long a golden block lasts
 SLAM_MONSTER_MULT = 2.0      # Charged Slam: a full slam hits monsters for this many monster clicks
 CHEST_PAYOUT = 15            # Buried Treasure: chest worth this many times its block's value
-DEEP_GOLD = 1.5              # all gold pays this much more once you're deep, easing in from 0m...
+DEEP_GOLD = 1.15             # all gold pays this much more once you're deep, easing in from 0m...
 DEEP_GOLD_DEPTH = 17         # ...to the full amount here
 BONE_BONUS = 2               # breaking a block with bones in it by your own click: this many times its value
 VAULT_PERIOD = 60.0          # Gold Vault: interest is paid this often (seconds)
@@ -397,10 +399,11 @@ class World:
         cx, cy = self.cell_of(boss.x, boss.y)
         near = [(x, y) for x in range(cx - 2, cx + 3) for y in range(cy - 2, cy + 3)
                 if 0 <= x < GRID and 0 <= y < GRID and (x, y) != (cx, cy)]
-        for i, cell in enumerate(random.sample(near, min(count, len(near)))):
+        kinds = [minion["kind"]] * count + ([minion["plus"]] if "plus" in minion else [])   # (Broodmother: + a spider)
+        for i, (kind, cell) in enumerate(zip(kinds, random.sample(near, min(len(kinds), len(near))))):
             # (elite minions too, deep down - but never elite eggs)
-            elite = minion["kind"] != "eggsac" and random.random() < elite_chance(self.depth)
-            self.enemies.append(Enemy(minion["kind"], self.depth, cell, self.column_height(*cell), delay=i * 0.3,
+            elite = kind != "eggsac" and random.random() < elite_chance(self.depth)
+            self.enemies.append(Enemy(kind, self.depth, cell, self.column_height(*cell), delay=i * 0.3,
                                       hp_mult=self.art_mult("enemy_hp"), elite=elite))
         px, py = enemy_anchor(boss, self.rise, time.time())
         text = ("She lays her eggs! Break them!" if minion["kind"] == "eggsac"
@@ -425,19 +428,93 @@ class World:
                 for y in range(cy - r, cy + r + 1):
                     if 0 <= x < GRID and 0 <= y < GRID and math.hypot(x - cx, y - cy) <= BOSS_SLAM_RADIUS:
                         self.webs[(x, y)] = WEB_SECS
+        self.slam_crew(boss, BOSS_SLAM_RADIUS)
+        if boss.kind == "bonetyrant":   # it backs off to throw bones before coming in again
+            self.start_stride(boss)
+
+    def slam_crew(self, e, radius):
+        """Hurt every crew member within `radius` of a slamming monster (the Slime King's Core softens it)."""
+        dmg = e.spec["slam"] * crew_hp_at(e.depth) * self.art_mult("slam_dmg")
         for m in self.miners:
-            if m.state == "down" or math.hypot(m.x - boss.x, m.y - boss.y) > BOSS_SLAM_RADIUS:
+            if m.state == "down" or math.hypot(m.x - e.x, m.y - e.y) > radius:
                 continue
-            dmg = boss.spec["slam"] * crew_hp_at(boss.depth)
             self.hurt(m, dmg)
-            if boss.spec.get("lifesteal"):   # the Vampire Lord feeds on every crew member it hits
-                boss.hp = min(boss.max_hp, boss.hp + boss.max_hp * boss.spec["lifesteal"])
+            if e.spec.get("lifesteal"):   # the Vampire Lord feeds on every crew member it hits
+                e.hp = min(e.max_hp, e.hp + e.max_hp * e.spec["lifesteal"])
             px, py = self.entity_screen(m, 50)
             self.floaters.append(Floater(f"-{dmg:.0f}", px, py, BAD, life=1.0, size=24))
             if m.hp <= 0:
                 if m.attacker:   # whatever had hold of them lets go
                     m.attacker.release()
-                self.miner_down(m, killer=boss)
+                self.miner_down(m, killer=e)
+
+    def chunk_slam(self, chunk):
+        """A Slime King chunk comes down hard: a smaller, weaker slam of its own."""
+        self.cues.append(("slam", 0.45))
+        fx, fy = self.entity_screen(chunk)
+        if self.shake < 0.15:
+            self.shake, self.shake_power = 0.15, 3
+        self.rings.append([fx, fy, 0.0, 90, (150, 230, 90)])
+        for _ in range(12):
+            self.particles.append(Particle(fx, fy, random.choice([(150, 220, 70), (90, 160, 50), (200, 250, 150)])))
+        self.slam_crew(chunk, chunk.spec["slam_radius"])
+
+    # ----- slimes -------------------------------------------------------------
+    def split_slime(self, slime):
+        """A slime at half health bursts into smaller blobs. The Slime King bursts into his chunks, and stays
+        on (unseen) until they're all beaten."""
+        split = slime.spec["split"]
+        share = CHUNK_SPLIT_HP / split["count"] if slime.boss else SLIME_SPLIT_HP
+        v = slime.victim
+        if v is not None and v.attacker is slime:   # whoever it had hold of slips free
+            v.state, v.attacker = "working", None
+        slime.victim = None
+        cell = self.cell_of(slime.x, slime.y)
+        spread = 0.9 if slime.boss else 0.3
+        children = []
+        for i in range(split["count"]):
+            a = i / split["count"] * math.tau + random.uniform(-0.3, 0.3)
+            child = Enemy(split["into"], self.depth, cell, self.column_height(*cell), elite=slime.elite)
+            child.max_hp = child.hp = slime.max_hp * share
+            child.state = "hunting"
+            child.x = min(GRID - 0.05, max(0.05, slime.x + math.cos(a) * spread))
+            child.y = min(GRID - 0.05, max(0.05, slime.y + math.sin(a) * spread))
+            child.cooldown = random.uniform(1.5, 3.5)   # (chunks: not all slamming at once)
+            child.flash = 0.2
+            children.append(child)
+        self.enemies += children
+        px, py = enemy_anchor(slime, self.rise, time.time())
+        gore = slime.spec["gore"]
+        for _ in range(40 if slime.boss else 16):
+            self.particles.append(Particle(px, py, random.choice([gore, tuple(c // 2 for c in gore)]), big=True))
+        self.rings.append([px, py + 18, 0.0, 160 if slime.boss else 50, gore])
+        if slime.boss:
+            self.cues.append("-windup")
+            slime.mode, slime.chunks = "split", children
+            slime.windup, slime.slam_at = 0.0, None
+            self.floaters.append(Floater("The Slime King bursts apart!", W / 2, 200, BAD, life=2.4, size=34))
+            self.shake, self.shake_power = 0.4, 6
+        else:
+            self.enemies.remove(slime)
+            self.floaters.append(Floater("Splat!", px, py - 30, (170, 240, 120), life=0.9, size=24))
+
+    def update_split_boss(self, boss):
+        """The Slime King in pieces: it sits among its chunks, its health their health; it falls with the last."""
+        alive = [c for c in boss.chunks if c in self.enemies]
+        if not alive:
+            boss.hp = 0
+            self.kill_enemy(boss)
+            return
+        boss.hp = sum(c.hp for c in alive)
+        boss.x = sum(c.x for c in alive) / len(alive)
+        boss.y = sum(c.y for c in alive) / len(alive)
+
+    def boss_target(self):
+        """What the crew should be pelting with rocks: the boss, or (Slime King in pieces) one of its chunks."""
+        boss = self.boss()
+        if boss and boss.mode == "split":
+            return next((c for c in boss.chunks if c in self.enemies), None)
+        return boss
 
     # ----- boss tricks ------------------------------------------------------
     def boss_auras(self):
@@ -565,26 +642,86 @@ class World:
                 m.stun = SCREECH_STUN
 
     def update_bone_tyrant(self, boss, dt):
-        """Throws bones at whoever is furthest away. As a bone pile it just lies there until it pulls itself
-        together - or is smashed first. Returns True while it's a pile."""
+        """After each slam it strides off and hurls a volley of bones at the crew, then marches back in (and if
+        the crew keep away from its slams, it throws a volley from where it stands). As a bone pile it just lies
+        there until it pulls itself together - or is smashed first. Returns True while busy with any of that."""
         if boss.mode == "pile":
             boss.pile_timer -= dt
             if boss.pile_timer <= 0:
-                boss.mode = "stalk"
+                boss.mode, boss.trick_timer = "stalk", STALK_PATIENCE
                 boss.hp = boss.max_hp * REFORM_HP
                 px, py = enemy_anchor(boss, self.rise, time.time())
                 self.floaters.append(Floater("The Bone Tyrant pulls itself back together!", W / 2, 200, BAD,
                                              life=2.4, size=30))
                 self.rings.append([px, py, 0.0, 110, (235, 228, 205)])
             return True
+        if boss.mode == "stride":
+            if self.walk_to(boss, *boss.goal, STRIDE_SPEED, dt, stop=0.1):
+                self.start_volley(boss)
+            return True
+        if boss.mode == "volley":
+            self.update_volley(boss, dt)
+            return True
         boss.trick_timer -= dt
-        if boss.trick_timer <= 0:
-            boss.trick_timer = BONE_THROW_EVERY
-            crew = [m for m in self.miners if m.state != "down"]
-            if crew:
-                far = max(crew, key=lambda m: math.hypot(m.x - boss.x, m.y - boss.y))
-                self.bone_throws.append([enemy_anchor(boss, self.rise, time.time()), far, 0.0])
+        if boss.trick_timer <= 0 and boss.windup <= 0:
+            self.start_volley(boss)
+            return True
         return False
+
+    def start_stride(self, boss):
+        """The Bone Tyrant backs off: somewhere about STRIDE_RANGE from the nearest crew member, to throw from."""
+        crew = [m for m in self.miners if m.state != "down"]
+        if not crew:
+            return
+        def score(spot):
+            near = min(math.hypot(m.x - spot[0], m.y - spot[1]) for m in crew)
+            return abs(near - STRIDE_RANGE)
+        spots = [(random.uniform(1.0, GRID - 1.0), random.uniform(1.0, GRID - 1.0)) for _ in range(16)]
+        boss.mode, boss.goal = "stride", min(spots, key=score)
+
+    def start_volley(self, boss):
+        boss.mode = "volley"
+        boss.volley = BONE_VOLLEY_HURT if boss.hp < boss.max_hp * 0.5 else BONE_VOLLEY
+        boss.throw_anim, boss.trick_timer, boss.goal = 0.0, 0.3, None
+        px, py = enemy_anchor(boss, self.rise, time.time())
+        self.floaters.append(Floater("Incoming bones!", px, py - 90, (235, 228, 205), life=1.4, size=26))
+
+    def update_volley(self, boss, dt):
+        """Throw the volley's bones one after another, each with a wind-up and a whip of the arm."""
+        if boss.throw_anim > 0:
+            before = boss.throw_anim
+            boss.throw_anim = max(0.0, boss.throw_anim - dt)
+            release = THROW_ANIM_SECS * (1 - THROW_RELEASE)   # (the animation counts down)
+            if before > release >= boss.throw_anim:
+                self.throw_bone(boss)
+            return
+        if boss.volley <= 0:   # done: march back in
+            boss.mode, boss.trick_timer, boss.cooldown = "stalk", STALK_PATIENCE, 0.0
+            return
+        boss.trick_timer -= dt
+        if boss.trick_timer > 0:
+            return
+        crew = [m for m in self.miners if m.state != "down"]
+        if not crew:
+            return
+        boss.volley -= 1
+        boss.throw_anim, boss.trick_timer = THROW_ANIM_SECS, VOLLEY_GAP
+        targeted = {id(b[1]) for b in self.bone_throws}   # spread the volley around the crew, furthest first
+        far = sorted(crew, key=lambda m: (id(m) in targeted, -math.hypot(m.x - boss.x, m.y - boss.y)))
+        boss.throw_at = random.choice(far[:3])
+        dx, dy = boss.throw_at.x - boss.x, boss.throw_at.y - boss.y
+        boss.facing = 1 if (dx - dy) >= 0 else -1
+
+    def throw_bone(self, boss):
+        target = boss.throw_at
+        if target is None or target.state == "down":
+            target = self.nearest_crew(boss.x, boss.y)
+        if target is None:
+            return
+        ax, ay = enemy_anchor(boss, self.rise, time.time())
+        hand = (ax + boss.facing * 22, ay - 46)   # (where the throwing hand is when it lets go)
+        self.bone_throws.append([hand, target, 0.0, self.entity_screen(boss)])
+        self.cues.append(("hit", 0.4))
 
     def collapse(self, boss):
         """The Bone Tyrant falls apart - for now: a heap of bones you have a few seconds to smash."""
@@ -593,6 +730,7 @@ class World:
         boss.mode, boss.pile_timer = "pile", PILE_SECS
         boss.hp = boss.max_hp * PILE_HP
         boss.windup, boss.slam_at = 0.0, None
+        boss.volley, boss.throw_anim, boss.goal = 0, 0.0, None
         fx, fy = self.entity_screen(boss)
         for _ in range(30):
             self.particles.append(Particle(fx, fy - 30, random.choice([(235, 228, 205), (200, 190, 165)]), big=True))
@@ -682,6 +820,9 @@ class World:
         """Time's up: the boss withdraws into the dark. No trophy, but the dig can go on."""
         self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
         self.enemies.remove(boss)
+        for chunk in boss.chunks:   # (the Slime King's chunks ooze away with him)
+            if chunk in self.enemies:
+                self.enemies.remove(chunk)
         self.end_bite(boss)
         px, py = enemy_anchor(boss, self.rise, time.time())
         for _ in range(8):
@@ -868,7 +1009,7 @@ class World:
     def hit_enemy(self, enemy, dmg, floor=True, ring=BAD, by=None):
         """Apply damage to an enemy. `floor` applies the player's Executioner minimum.
         `by` is the miner landing the hit (None = you / your dynamite), credited with the kill."""
-        if enemy not in self.enemies:
+        if enemy not in self.enemies or enemy.mode == "split":   # (the split Slime King: hit its chunks)
             return
         enemy.hp -= ((self.enemy_hit_damage(enemy, dmg) if floor else dmg) * enemy.dmg_taken
                      * (self.art_mult("boss_dmg") if enemy.boss else 1))
@@ -877,6 +1018,11 @@ class World:
         self.rings.append([px, py + 18, 0.0, 30, ring])
         for _ in range(6):
             self.particles.append(Particle(px, py, enemy.spec["gore"]))
+        split = enemy.spec.get("split")   # slimes burst apart at half health (the King always does)
+        if split and enemy.mode != "split" and enemy.hp <= enemy.max_hp * SLIME_SPLIT_AT and \
+                (enemy.hp > 0 or enemy.boss):
+            self.split_slime(enemy)
+            return
         if enemy.hp <= 0:
             if enemy.kind == "bonetyrant" and not enemy.reformed:
                 self.collapse(enemy)
@@ -1131,6 +1277,7 @@ class World:
         self.crit_bursts.append([px, py, 0.0])
         self.quakes.append([cell[0] + 0.5, cell[1] + 0.5, 0.0, set()])
         self.shake, self.shake_power = 0.25, 4 + 4 * charge
+        self.cues.append(("smash", 0.6 + 0.4 * charge))   # (louder the longer it was charged)
         self.floaters.append(Floater("SLAM!", px, py - 70, (220, 160, 255), life=1.0, size=30 + int(14 * charge)))
         depth = self.depth
         around = [(cell[0] + dx, cell[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)]
@@ -1590,6 +1737,11 @@ class World:
                 self.hurt(target, dmg)
                 px, py = self.entity_screen(target, 40)
                 self.floaters.append(Floater(f"-{dmg:.0f}", px, py, BAD, life=1.0, size=22))
+                self.cues.append(("hit", 0.8))
+                self.rings.append([px, py + 10, 0.0, 40, (235, 228, 205)])
+                for _ in range(10):   # the bone shatters
+                    self.particles.append(Particle(px, py, random.choice([(235, 228, 205), (170, 160, 135)]),
+                                                   big=True))
                 if target.hp <= 0:
                     if target.attacker:
                         target.attacker.release()
@@ -1640,7 +1792,7 @@ class World:
         regen = miner_regen(self.lv("firstaid")) * self.art_mult("regen")
         boss = self.foreman()
         boss_here = boss if boss and boss.state == "working" else None
-        holdout = None if self.current else self.boss()   # layer cleared, boss still standing
+        holdout = None if self.current else self.boss_target()   # layer cleared, boss still standing
         for m in self.miners:
             if m.state == "down":
                 m.respawn -= dt

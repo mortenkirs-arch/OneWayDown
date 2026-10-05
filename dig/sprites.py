@@ -6,7 +6,8 @@ import pygame
 
 from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
 from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
-from .enemies import ELITE_SCALE, ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, TRANSFORM_SECS
+from .enemies import (ELITE_SCALE, ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, THROW_ANIM_SECS,
+                      THROW_RELEASE, TRANSFORM_SECS)
 from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
 
@@ -18,11 +19,14 @@ CRIT_SLAM = 0.3     # share of the crit animation spent slamming down (the rest 
 CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the shoulder
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24,
                     "zombieking": 54, "broodmother": 46, "vampirelord": 50, "lich": 50, "eggsac": 18,
-                    "skeleton": 24, "greatbat": 48, "bonetyrant": 54}
+                    "skeleton": 24, "greatbat": 48, "bonetyrant": 54,
+                    "slime": 20, "slimeling": 14, "slimechunk": 24, "slimeking": 54}
 BONE_COL, BONE_SHADE = (232, 226, 205), (150, 142, 120)
 BOSS_CANVAS = (120, 200)   # a boss is drawn at normal size on this canvas, then scaled up
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
 SPIDER_BODY = (58, 48, 70)
+SLIME_GREEN, SLIME_DARK, SLIME_ANGRY = (110, 210, 90), (46, 110, 40), (230, 100, 60)
+SLIME_SIZE = {"slimeling": 8, "slimechunk": 10}   # body radius (slimes, and the Slime King before scaling: 13)
 BAT_BODY, BAT_WING, BAT_EDGE = (58, 44, 70), (82, 60, 100), (36, 26, 46)
 VAMP_SKIN, VAMP_SUIT, VAMP_CAPE, VAMP_LINING, VAMP_HAIR = (
     (232, 230, 240), (32, 28, 40), (22, 18, 28), (160, 22, 42), (20, 18, 24))
@@ -487,6 +491,8 @@ def _draw_enemy(surf, e, rise, t, hovered):
 
 def _draw_boss(surf, e, rise, t, hovered, scale):
     """A boss: its monster's sprite drawn on a canvas around its feet, scaled up, with a crown on top."""
+    if e.mode == "split":   # the Slime King in pieces: only its chunks are on the board
+        return
     fx, fy = _feet(e, rise)
     cw, ch = BOSS_CANVAS
     ax, ay = cw // 2, ch - 24                     # where the feet sit on the canvas
@@ -1018,6 +1024,11 @@ def _draw_skeleton(surf, e, rise, t, hovered, dy=0):
         ry = fy - 25 + k * 4
         pygame.draw.arc(surf, bone, (fx - 7, ry - 3, 14, 7), math.pi * 1.05, math.pi * 1.95, 2)
     shoulder = (fx, fy - 26)
+    throw = 1 - e.throw_anim / THROW_ANIM_SECS if getattr(e, "throw_anim", 0) > 0 else None   # (Bone Tyrant)
+    lean = 0
+    if throw is not None:   # rears back with the bone, then lunges into the throw
+        lean = -3 * _ease_out(throw / THROW_RELEASE) if throw < THROW_RELEASE else 3
+        lean *= e.facing
     if attacking:   # bony hands round the miner's neck
         nx, ny = miner_neck(e.victim, rise, t)
         for d in (-3, 3):
@@ -1030,9 +1041,13 @@ def _draw_skeleton(surf, e, rise, t, hovered, dy=0):
     else:           # arms swinging stiffly
         swing = math.sin(e.anim_t * 7) * 5
         for d in (-1, 1):
+            if throw is not None and d == e.facing:   # (the throwing arm is drawn below)
+                continue
             pygame.draw.line(surf, bone, (shoulder[0] + d * 5, shoulder[1]),
                              (shoulder[0] + d * 7 + swing * d * 0.3 + 4 * e.facing, shoulder[1] + 11), 2)
-    head = (int(fx + e.facing), fy - 34)
+        if throw is not None:
+            _draw_throwing_arm(surf, e, (shoulder[0] + e.facing * 5 + lean, shoulder[1]), throw, bone)
+    head = (int(fx + e.facing + lean), fy - 34)
     pygame.draw.circle(surf, BONE_SHADE, head, 7)
     pygame.draw.circle(surf, bone, head, 6)
     pygame.draw.rect(surf, bone, (head[0] - 3, head[1] + 3, 6, 4))   # jaw
@@ -1043,6 +1058,87 @@ def _draw_skeleton(surf, e, rise, t, hovered, dy=0):
         _hp_bar(surf, head[0], head[1] - 11, e.hp / e.max_hp, BAD)
 
 
+def draw_bone(surf, x, y, angle, half, width, col=BONE_COL):
+    """A bone: a shaft with a pair of knobs at each end, `half` px long each way, outlined so it reads."""
+    dx, dy = math.cos(angle) * half, math.sin(angle) * half
+    nx, ny = -math.sin(angle) * width * 0.45, math.cos(angle) * width * 0.45
+    ends = ((x - dx, y - dy), (x + dx, y + dy))
+    pygame.draw.line(surf, (40, 30, 30), *ends, width + 4)
+    for ex, ey in ends:
+        for s in (-1, 1):
+            pygame.draw.circle(surf, (40, 30, 30), (int(ex + nx * s), int(ey + ny * s)), int(width * 0.6) + 2)
+    pygame.draw.line(surf, BONE_SHADE, *ends, width + 2)
+    pygame.draw.line(surf, col, *ends, width)
+    for ex, ey in ends:
+        for s in (-1, 1):
+            pygame.draw.circle(surf, col, (int(ex + nx * s), int(ey + ny * s)), int(width * 0.6))
+
+
+def _draw_throwing_arm(surf, e, shoulder, p, bone):
+    """The Bone Tyrant's throw (`p` 0..1): the arm swings up and back over its shoulder with a bone in hand,
+    then whips forward and lets go at THROW_RELEASE."""
+    f = e.facing
+    if p < THROW_RELEASE:
+        k = _ease_out(p / THROW_RELEASE)
+        hand = (shoulder[0] + f * (4 - 13 * k), shoulder[1] + 10 - 24 * k)
+    else:
+        k = (p - THROW_RELEASE) / (1 - THROW_RELEASE)
+        hand = (shoulder[0] + f * (8 + 6 * k), shoulder[1] - 12 + 18 * k)
+    elbow = ((shoulder[0] + hand[0]) / 2 - f * 2, (shoulder[1] + hand[1]) / 2 - 2)
+    pygame.draw.line(surf, BONE_SHADE, shoulder, elbow, 4)
+    pygame.draw.line(surf, bone, shoulder, elbow, 3)
+    pygame.draw.line(surf, BONE_SHADE, elbow, hand, 4)
+    pygame.draw.line(surf, bone, elbow, hand, 3)
+    if p < THROW_RELEASE:   # the bone it's about to throw
+        draw_bone(surf, hand[0], hand[1] - 2, -0.9 * f - p * 2 * f, 6, 3)
+
+
+def _draw_slime(surf, e, rise, t, hovered, dy=0):
+    """A wobbling blob of green ooze with beady eyes that hops along; winding up a slam it swells and reddens."""
+    fx, fy = _feet(e, rise)
+    fy += dy
+    r = SLIME_SIZE.get(e.kind, 13)
+    entering = e.state == "emerging"
+    attacking = e.state == "attacking" and e.victim is not None
+    charge = 1 - e.windup / e.windup_total if e.windup > 0 else 0.0
+    hop = max(0.0, math.sin(e.anim_t * 6)) if e.state == "hunting" and not charge else 0.0
+    if attacking:
+        fx += struggle_shake(t, 0.4)
+    if hovered:
+        pygame.draw.ellipse(surf, BAD, (fx - r - 5, fy - 7, 2 * r + 10, 14), 2)
+    if not entering:
+        sw = r * 1.8 * (1 - 0.3 * hop)
+        pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 4, sw, 8))
+    wob = math.sin(e.anim_t * 9) * 0.06
+    w = r * (1.1 + wob - 0.18 * hop + 0.3 * charge)
+    h = r * (0.85 - wob + 0.25 * hop + 0.2 * charge)
+    lift = hop * r * 0.6
+    col = (255, 255, 255) if e.flash > 0 else _lerp(SLIME_GREEN, SLIME_ANGRY, charge * 0.8)
+    body = pygame.Surface((int(w * 2) + 4, int(h * 2) + 4), pygame.SRCALPHA)
+    rect = body.get_rect().inflate(-4, -4)
+    pygame.draw.ellipse(body, (*col, 215), rect)
+    for bx, by, br in ((0.35, 0.6, 0.12), (0.62, 0.42, 0.08)):   # bubbles inside
+        pygame.draw.circle(body, (*_lerp(col, (255, 255, 255), 0.4), 150),
+                           (int(rect.x + rect.w * bx), int(rect.y + rect.h * by)), max(1, int(r * br)))
+    pygame.draw.ellipse(body, (255, 255, 255, 110),
+                        (rect.x + rect.w * 0.2, rect.y + rect.h * 0.12, rect.w * 0.3, rect.h * 0.22))   # shine
+    pygame.draw.ellipse(body, (*SLIME_DARK, 255), rect, 2)
+    top = fy - lift - 2 * h
+    surf.blit(body, (fx - w - 2, top - 2))
+    if attacking:   # a gob of it reaching out over the miner
+        nx, ny = miner_neck(e.victim, rise, t)
+        pygame.draw.line(surf, col, (fx, top + h), (nx, ny), max(2, r // 3))
+        pygame.draw.circle(surf, col, (int(nx), int(ny)), max(2, r // 3))
+    eye_y = int(top + h * 0.75)
+    for ex in (-1, 1):
+        cx = int(fx + e.facing * r * 0.2 + ex * r * 0.3)
+        pygame.draw.circle(surf, (250, 250, 240), (cx, eye_y), max(2, int(r * 0.2)))
+        pygame.draw.circle(surf, (20, 20, 24), (cx + e.facing, eye_y), max(1, int(r * 0.11)))
+    if not entering:
+        _hp_bar(surf, fx, int(top) - 5, e.hp / e.max_hp, BAD, 28 if r >= 10 else 20)
+
+
 DRAWERS = {"zombie": _draw_zombie, "spider": _draw_spider, "bat": _draw_bat, "vampire": _draw_vampire,
-           "wisp": _draw_wisp, "ghost": _draw_ghost, "eggsac": _draw_eggsac, "skeleton": _draw_skeleton}
+           "wisp": _draw_wisp, "ghost": _draw_ghost, "eggsac": _draw_eggsac, "skeleton": _draw_skeleton,
+           "slime": _draw_slime, "slimeling": _draw_slime, "slimechunk": _draw_slime}
 DRAWERS.update({kind: DRAWERS[spec["look"]] for kind, spec in ENEMY_TYPES.items() if "look" in spec})   # bosses

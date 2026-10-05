@@ -12,7 +12,7 @@ from .dynamite import EXPLOSION_SECS
 from .enemies import BONE_THROW_SECS, BOSS_SLAM_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS
 from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bomb, draw_enemy, draw_miner, enemy_anchor
+from .sprites import draw_bone, draw_bomb, draw_enemy, draw_miner, enemy_anchor
 from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS, WHETSTONE_POS
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
 from .util import shade
@@ -93,11 +93,14 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                 color = shade(color, 0.7)
             faces = draw_cube(surf, x, y, z, color, spec.get("fleck"),
                               seed=hash((x, y, w.depth + layer)))
+            # biome details and bones on both layers (the one below dimmer), seeded by the block's own layer
+            dim = NEXT_DIM if layer else 1.0
+            deco = biome_at(w.depth + layer)["deco"]
+            if deco:
+                draw_block_deco(surf, deco, faces, x, y, w.depth + layer, t, dim)
+            if b.bones:
+                draw_bones(surf, faces, x, y, w.depth + layer, dim)
             if layer == 0:
-                if biome["deco"]:
-                    draw_block_deco(surf, biome["deco"], faces, x, y, w.depth, t)
-                if b.bones:
-                    draw_bones(surf, faces, x, y, w.depth)
                 draw_damage(surf, b, x, y, z)
                 if b.artifact:
                     draw_artifact_glint(surf, faces, t, x, y)
@@ -153,11 +156,139 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         surf.blit(img, img.get_rect(center=(f.x, f.y)))
 
 
-def draw_block_deco(surf, deco, faces, x, y, depth, t):
-    """Biome detail on a block of the layer being dug (on about a third of them, the same ones each layer)."""
-    rng = random.Random(hash((x, y, depth, 7)))
-    if rng.random() > 0.38:
+LAVA_SHARE = 0.6   # magma blocks with lava showing (other biomes' details: about a third)
+SIDE_SHARE = 0.5   # chance each side face of a decorated block shows some of it too
+NEXT_DIM = 0.7     # the layer below is drawn this much darker (its details too; lava glows through a bit more)
+
+
+def face_point(face):
+    """(u, v) across a face -> screen: u along its first edge, v along its last. For the sides, that's along the
+    top edge and down the face."""
+    o = face[0]
+    ax, ay = face[1][0] - o[0], face[1][1] - o[1]
+    bx, by = face[3][0] - o[0], face[3][1] - o[1]
+    return lambda u, v: (o[0] + ax * u + bx * v, o[1] + ay * u + by * v)
+
+
+def draw_lava(surf, face, rng, t, side=False, dim=1.0):
+    """Lava in one face of a block, placed anywhere on it. On the top: a crack wandering across, a crack forking
+    out from a point, a small bubbling pool, or a scatter of short cracks. On a side: a seam running down from
+    the top edge, a short drip, or a glowing pocket in the rock."""
+    on = face_point(face)
+    glow = 0.7 + 0.3 * math.sin(t * (2 + rng.random() * 2))
+    heat = max(dim, 0.85)
+    hot = shade((255, int(110 + 70 * glow), 40), heat)
+    crust, bright = shade((120, 30, 10), dim), shade((255, 230, 150), heat)
+
+    def crack(u, v, a, steps, step, width=2):
+        pts = [(u, v)]
+        for _ in range(steps):
+            a += rng.uniform(-0.7, 0.7)
+            u = min(0.92, max(0.08, u + math.cos(a) * step))
+            v = min(0.92, max(0.08, v + math.sin(a) * step))
+            pts.append((u, v))
+        pts = [on(*q) for q in pts]
+        pygame.draw.lines(surf, crust, False, [(px, py + 1) for px, py in pts], width + 2)
+        pygame.draw.lines(surf, hot, False, pts, width)
+        return pts
+
+    def pool(u, v, r):
+        ring = [on(u + math.cos(k / 8 * math.tau) * r * rng.uniform(0.75, 1.2),
+                   v + math.sin(k / 8 * math.tau) * r * rng.uniform(0.75, 1.2)) for k in range(8)]
+        pygame.draw.polygon(surf, crust, ring)
+        cx, cy = sum(p[0] for p in ring) / 8, sum(p[1] for p in ring) / 8
+        pygame.draw.polygon(surf, hot, [(cx + (px - cx) * 0.7, cy + (py - cy) * 0.7) for px, py in ring])
+        return cx, cy
+
+    if side:
+        shape = rng.choice(("seam", "seam", "drip", "pocket"))
+        down = math.pi / 2   # (straight down the face, in (u, v))
+        if shape == "seam":     # from the top edge down through the rock, maybe splitting
+            u = rng.uniform(0.2, 0.8)
+            crack(u, 0.05, down + rng.uniform(-0.5, 0.5), rng.randint(3, 6), rng.uniform(0.12, 0.17))
+            if rng.random() < 0.4:
+                crack(u, rng.uniform(0.3, 0.5), down + rng.choice((-1, 1)) * 0.8, 2, 0.12, 1)
+        elif shape == "drip":   # a short crack with lava dribbling out of the bottom
+            px, py = crack(rng.uniform(0.2, 0.8), 0.05, down, rng.randint(1, 2), 0.14)[-1]
+            drop = (t * 0.6 + rng.random()) % 1
+            pygame.draw.circle(surf, hot, (int(px), int(py + 2 + drop * 8)), 2)
+        else:                   # a pocket of lava glowing in the rock
+            pool(rng.uniform(0.3, 0.7), rng.uniform(0.35, 0.7), rng.uniform(0.09, 0.13))
         return
+    shape = rng.choice(("wander", "wander", "fork", "pool", "scatter"))
+    if shape == "wander":   # from near one edge across to somewhere else, maybe with a branch
+        u, v = rng.choice([(0.1, rng.uniform(0.2, 0.8)), (rng.uniform(0.2, 0.8), 0.1)])
+        a = math.atan2(0.5 - v, 0.5 - u) + rng.uniform(-0.6, 0.6)
+        crack(u, v, a, rng.randint(4, 7), rng.uniform(0.09, 0.14))
+        if rng.random() < 0.5:
+            crack(rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7), rng.uniform(0, math.tau), 2, 0.1, 1)
+    elif shape == "fork":   # cracks spreading out from one hot spot
+        u, v = rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7)
+        base = rng.uniform(0, math.tau)
+        for k in range(rng.randint(2, 4)):
+            a = base + k * math.tau / 3 + rng.uniform(-0.4, 0.4)
+            crack(u, v, a, rng.randint(2, 3), rng.uniform(0.08, 0.13))
+        pygame.draw.circle(surf, bright, [int(c) for c in on(u, v)], 2)
+    elif shape == "pool":   # a little pool of lava with a dark crust, bubbling
+        u, v = rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7)
+        cx, cy = pool(u, v, rng.uniform(0.1, 0.17))
+        bubble = (t * 1.5 + rng.random()) % 1   # a bubble swelling and popping
+        pygame.draw.circle(surf, bright, (int(cx + rng.uniform(-2, 2)), int(cy)), int(1 + 2 * bubble))
+        if rng.random() < 0.6:   # a crack leaking out of it
+            crack(u, v, rng.uniform(0, math.tau), 2, 0.12, 1)
+    else:                   # a scatter of short, thin cracks
+        for _ in range(rng.randint(2, 4)):
+            crack(rng.uniform(0.15, 0.85), rng.uniform(0.15, 0.85), rng.uniform(0, math.tau), rng.randint(1, 2),
+                  rng.uniform(0.07, 0.11), 1)
+
+
+def draw_side_deco(surf, deco, face, rng, t, dim):
+    """A biome's detail showing in a block's side face: lava, crystals, a carved rune or faint lights."""
+    on = face_point(face)
+    if deco == "lava":
+        draw_lava(surf, face, rng, t, side=True, dim=dim)
+    elif deco == "crystals":   # a few gems set into the rock
+        for _ in range(rng.randint(1, 3)):
+            px, py = on(rng.uniform(0.2, 0.8), rng.uniform(0.25, 0.8))
+            r = rng.uniform(2.5, 4.5)
+            col = shade(rng.choice([(170, 140, 255), (130, 210, 255), (220, 160, 255)]), dim)
+            gem = [(px, py - r * 1.4), (px + r, py), (px, py + r * 1.4), (px - r, py)]
+            pygame.draw.polygon(surf, col, gem)
+            pygame.draw.polygon(surf, shade(col, 0.6), gem, 1)
+            pygame.draw.line(surf, shade((255, 255, 255), dim), (px - r * 0.3, py - r * 0.6), (px, py - r * 1.2), 1)
+    elif deco == "glyphs":     # a rune cut into the stone (upright here)
+        dark = shade((118, 96, 64), dim)
+        u, v = rng.uniform(0.3, 0.7), rng.uniform(0.35, 0.65)
+        kind = rng.randint(0, 2)
+        if kind == 0:   # a diamond with a stroke through it
+            pts = [on(u, v - 0.18), on(u + 0.13, v), on(u, v + 0.18), on(u - 0.13, v)]
+            pygame.draw.polygon(surf, dark, pts, 2)
+            pygame.draw.line(surf, dark, on(u - 0.06, v - 0.1), on(u + 0.06, v + 0.1), 2)
+        elif kind == 1:   # a pillar with a crossbar
+            pygame.draw.line(surf, dark, on(u, v - 0.2), on(u, v + 0.2), 2)
+            pygame.draw.line(surf, dark, on(u - 0.1, v - 0.08), on(u + 0.1, v - 0.08), 2)
+        else:   # a zig-zag
+            pygame.draw.lines(surf, dark, False, [on(u - 0.15, v + 0.1), on(u - 0.05, v - 0.1), on(u + 0.05, v + 0.1),
+                                                  on(u + 0.15, v - 0.1)], 2)
+    elif deco == "glow":       # faint cold lights in the dark rock
+        pulse = 0.5 + 0.5 * math.sin(t * 2 + rng.random() * 6)
+        for _ in range(2):
+            px, py = on(rng.uniform(0.15, 0.85), rng.uniform(0.2, 0.85))
+            col = shade((int(60 + 80 * pulse), int(110 + 90 * pulse), 255), dim)
+            pygame.draw.circle(surf, col, (int(px), int(py)), 2)
+
+
+def draw_block_deco(surf, deco, faces, x, y, depth, t, dim=1.0):
+    """Biome detail on a block (on about a third of them - more for lava - and the same ones each frame): in
+    its top, and on some of them down its sides too. `depth` is the block's own layer, so the layer below
+    already shows the detail it will have once it's the one being dug."""
+    rng = random.Random(hash((x, y, depth, 7)))
+    if rng.random() > (LAVA_SHARE if deco == "lava" else 0.38):
+        return
+    sides = [rng.random() < SIDE_SHARE for _ in range(2)]   # (drawn first: the same rolls every frame)
+    for face, show in zip(("left", "right"), sides):
+        if show:
+            draw_side_deco(surf, deco, faces[face], random.Random(hash((x, y, depth, face))), t + x * 0.7, dim)
     top = faces["top"]
     cx = sum(p[0] for p in top) / 4
     cy = sum(p[1] for p in top) / 4
@@ -166,25 +297,16 @@ def draw_block_deco(surf, deco, faces, x, y, depth, t):
             bx, by = cx + rng.uniform(-12, 12), cy + rng.uniform(-4, 5)
             h, wd = rng.uniform(9, 17), rng.uniform(3, 5)
             lean = rng.uniform(-4, 4)
-            col = rng.choice([(170, 140, 255), (130, 210, 255), (220, 160, 255)])
+            col = shade(rng.choice([(170, 140, 255), (130, 210, 255), (220, 160, 255)]), dim)
             shard = [(bx - wd, by), (bx + lean, by - h), (bx + wd, by)]
             pygame.draw.polygon(surf, col, shard)
-            pygame.draw.line(surf, (255, 255, 255), (bx + lean * 0.4, by - h * 0.6), (bx + lean, by - h), 1)
+            pygame.draw.line(surf, shade((255, 255, 255), dim), (bx + lean * 0.4, by - h * 0.6), (bx + lean, by - h),
+                             1)
             pygame.draw.polygon(surf, shade(col, 0.6), shard, 1)
-    elif deco == "lava":     # a glowing fissure across the top
-        glow = 0.7 + 0.3 * math.sin(t * 3 + x * 1.3 + y)
-        col = (255, int(110 + 70 * glow), 40)
-        a = rng.uniform(0, math.pi)
-        px, py = cx - math.cos(a) * 13, cy - math.sin(a) * 6
-        pts = [(px, py)]
-        for _ in range(4):
-            px += math.cos(a) * 6.5 + rng.uniform(-2, 2)
-            py += math.sin(a) * 3 + rng.uniform(-1.5, 1.5)
-            pts.append((px, py))
-        pygame.draw.lines(surf, (120, 30, 10), False, [(p[0], p[1] + 1) for p in pts], 4)
-        pygame.draw.lines(surf, col, False, pts, 2)
+    elif deco == "lava":     # glowing cracks, forks and little pools of lava in the top
+        draw_lava(surf, top, rng, t + x * 1.3 + y, dim=dim)
     elif deco == "glyphs":   # a rune carved into the top (squashed to lie flat in the iso view)
-        dark = (118, 96, 64)
+        dark = shade((118, 96, 64), dim)
         kind = rng.randint(0, 2)
         if kind == 0:
             pygame.draw.polygon(surf, dark, [(cx, cy - 6), (cx + 11, cy), (cx, cy + 6), (cx - 11, cy)], 2)
@@ -199,33 +321,70 @@ def draw_block_deco(surf, deco, faces, x, y, depth, t):
         pulse = 0.5 + 0.5 * math.sin(t * 2 + x + y * 1.7)
         for _ in range(2):
             gx, gy = cx + rng.uniform(-14, 14), cy + rng.uniform(-5, 5)
-            pygame.draw.circle(surf, (int(60 + 80 * pulse), int(110 + 90 * pulse), 255), (int(gx), int(gy)), 2)
+            col = shade((int(60 + 80 * pulse), int(110 + 90 * pulse), 255), dim)
+            pygame.draw.circle(surf, col, (int(gx), int(gy)), 2)
 
 
 BONE, BONE_EDGE = (234, 226, 202), (140, 130, 108)
+BONE_SIDE_SHARE = 0.7   # bone blocks with a fossil showing in one of their sides as well
 
 
-def draw_bones(surf, faces, x, y, depth):
-    """Old bones in a block's top face: a bone, crossed bones, a skull, a ribcage or a fish skeleton.
-    Laid flat in the iso view (screen y squashed by half); the same ones each frame."""
+def draw_side_bones(surf, face, rng, dim):
+    """Bones set into a block's side face, like a fossil in the rock: a bone, a skull or a few ribs."""
+    on = face_point(face)
+    bone_col, edge = shade(BONE, dim), shade(BONE_EDGE, dim)
+    kind = rng.randint(0, 2)
+    if kind == 0:     # a long bone lying at a slant
+        u, v, a = rng.uniform(0.35, 0.65), rng.uniform(0.35, 0.65), rng.uniform(-0.6, 0.6)
+        p0, p1 = on(u - math.cos(a) * 0.3, v - math.sin(a) * 0.3), on(u + math.cos(a) * 0.3, v + math.sin(a) * 0.3)
+        pygame.draw.line(surf, edge, p0, p1, 5)
+        pygame.draw.line(surf, bone_col, p0, p1, 3)
+        for px, py in (p0, p1):
+            for dy in (-1.8, 1.8):
+                pygame.draw.circle(surf, edge, (int(px), int(py + dy)), 3)
+                pygame.draw.circle(surf, bone_col, (int(px), int(py + dy)), 2)
+    elif kind == 1:   # a skull looking out of the rock
+        px, py = on(rng.uniform(0.3, 0.7), rng.uniform(0.35, 0.6))
+        head = pygame.Rect(0, 0, 12, 11)
+        head.center = (int(px), int(py))
+        pygame.draw.ellipse(surf, edge, head.inflate(2, 2))
+        pygame.draw.ellipse(surf, bone_col, head)
+        pygame.draw.rect(surf, bone_col, (head.centerx - 3, head.bottom - 3, 6, 4))
+        for ex in (-3, 2):
+            pygame.draw.rect(surf, shade((60, 50, 44), dim), (head.centerx + ex - 1, head.centery - 2, 3, 3))
+    else:             # the curve of a few ribs
+        u, v = rng.uniform(0.3, 0.6), rng.uniform(0.3, 0.5)
+        pygame.draw.line(surf, edge, on(u, v), on(u + 0.3, v), 3)
+        for k in range(3):
+            uu = u + 0.05 + k * 0.1
+            pygame.draw.lines(surf, bone_col, False, [on(uu, v), on(uu - 0.04, v + 0.15), on(uu + 0.02, v + 0.3)], 2)
+
+
+def draw_bones(surf, faces, x, y, depth, dim=1.0):
+    """Old bones in a block's top face: a bone, crossed bones, a skull, a ribcage or a fish skeleton; most also
+    show a fossil in a side. Laid flat in the iso view (screen y squashed by half); the same ones each frame,
+    and seeded by the block's own layer so the layer below shows them before it's dug."""
     rng = random.Random(hash((x, y, depth, 3)))
+    if rng.random() < BONE_SIDE_SHARE:
+        draw_side_bones(surf, faces[rng.choice(("left", "right"))], random.Random(hash((x, y, depth, 5))), dim)
     top = faces["top"]
     cx = sum(p[0] for p in top) / 4 + rng.uniform(-6, 6)
     cy = sum(p[1] for p in top) / 4 + rng.uniform(-2, 2)
     a = rng.uniform(0, math.pi)
+    bone_col, bone_edge = shade(BONE, dim), shade(BONE_EDGE, dim)
 
     def pt(u, v):   # a point u along / v across the bone's direction, flattened onto the ground
         return (cx + u * math.cos(a) - v * math.sin(a), cy + (u * math.sin(a) + v * math.cos(a)) * 0.5)
 
     def bone(u0, v0, u1, v1, knob=2.2):
         p0, p1 = pt(u0, v0), pt(u1, v1)
-        pygame.draw.line(surf, BONE_EDGE, p0, p1, 5)
-        pygame.draw.line(surf, BONE, p0, p1, 3)
+        pygame.draw.line(surf, bone_edge, p0, p1, 5)
+        pygame.draw.line(surf, bone_col, p0, p1, 3)
         for p in (p0, p1):   # the knobbly ends
             for side in (-1, 1):
                 k = (p[0] - math.sin(a) * side * 1.8, p[1] + math.cos(a) * side * 0.9)
-                pygame.draw.circle(surf, BONE_EDGE, (int(k[0]), int(k[1])), int(knob) + 1)
-                pygame.draw.circle(surf, BONE, (int(k[0]), int(k[1])), int(knob))
+                pygame.draw.circle(surf, bone_edge, (int(k[0]), int(k[1])), int(knob) + 1)
+                pygame.draw.circle(surf, bone_col, (int(k[0]), int(k[1])), int(knob))
 
     kind = rng.randint(0, 4)
     if kind == 0:     # a single long bone
@@ -236,23 +395,23 @@ def draw_bones(surf, faces, x, y, depth):
     elif kind == 2:   # a little skull
         head = pygame.Rect(0, 0, 16, 10)
         head.center = (int(cx), int(cy))
-        pygame.draw.ellipse(surf, BONE_EDGE, head.inflate(2, 2))
-        pygame.draw.ellipse(surf, BONE, head)
-        pygame.draw.rect(surf, BONE, (head.centerx - 4, head.bottom - 3, 8, 4))
+        pygame.draw.ellipse(surf, bone_edge, head.inflate(2, 2))
+        pygame.draw.ellipse(surf, bone_col, head)
+        pygame.draw.rect(surf, bone_col, (head.centerx - 4, head.bottom - 3, 8, 4))
         for ex in (-3, 3):
-            pygame.draw.ellipse(surf, (60, 50, 44), (head.centerx + ex - 2, head.centery - 2, 4, 3))
+            pygame.draw.ellipse(surf, shade((60, 50, 44), dim), (head.centerx + ex - 2, head.centery - 2, 4, 3))
     elif kind == 3:   # a ribcage
-        pygame.draw.line(surf, BONE_EDGE, pt(-10, 0), pt(10, 0), 4)
-        pygame.draw.line(surf, BONE, pt(-10, 0), pt(10, 0), 2)
+        pygame.draw.line(surf, bone_edge, pt(-10, 0), pt(10, 0), 4)
+        pygame.draw.line(surf, bone_col, pt(-10, 0), pt(10, 0), 2)
         for u in (-6, -1, 4):
             for side in (-1, 1):
-                pygame.draw.lines(surf, BONE, False, [pt(u, 0), pt(u + 1, side * 5), pt(u + 3, side * 7)], 2)
+                pygame.draw.lines(surf, bone_col, False, [pt(u, 0), pt(u + 1, side * 5), pt(u + 3, side * 7)], 2)
     else:             # a fish skeleton
-        pygame.draw.line(surf, BONE, pt(-9, 0), pt(7, 0), 2)
+        pygame.draw.line(surf, bone_col, pt(-9, 0), pt(7, 0), 2)
         for u in (-6, -3, 0, 3):
-            pygame.draw.line(surf, BONE, pt(u, -4), pt(u, 4), 1)
-        pygame.draw.polygon(surf, BONE, [pt(7, 0), pt(12, -4), pt(12, 4)], 1)   # head
-        pygame.draw.lines(surf, BONE, False, [pt(-9, 0), pt(-13, -3), pt(-13, 3), pt(-9, 0)], 1)   # tail
+            pygame.draw.line(surf, bone_col, pt(u, -4), pt(u, 4), 1)
+        pygame.draw.polygon(surf, bone_col, [pt(7, 0), pt(12, -4), pt(12, 4)], 1)   # head
+        pygame.draw.lines(surf, bone_col, False, [pt(-9, 0), pt(-13, -3), pt(-13, 3), pt(-9, 0)], 1)   # tail
 
 
 def draw_ambient(surf, world, t):
@@ -446,29 +605,42 @@ def draw_stuns(surf, world, t):
 
 
 def draw_bone_throws(surf, world, t):
-    """Bones the Bone Tyrant hurls at the crew, spinning end over end on a high arc."""
-    for (sx, sy), target, age in world.bone_throws:
+    """Bones the Bone Tyrant hurls at the crew: a red mark on whoever it's coming for, a shadow racing across
+    the ground, and a big bone spinning end over end on a high arc with a trail of dust behind it."""
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for (sx, sy), target, age, (gx, gy) in world.bone_throws:
         q = min(1.0, age / BONE_THROW_SECS)
         tx, ty = world.entity_screen(target, 30)
-        x, y = sx + (tx - sx) * q, sy + (ty - sy) * q - math.sin(q * math.pi) * 60
-        a = age * 18
-        dx, dy = math.cos(a) * 9, math.sin(a) * 9
-        pygame.draw.line(surf, (150, 142, 120), (x - dx, y - dy), (x + dx, y + dy), 5)
-        pygame.draw.line(surf, (232, 226, 205), (x - dx, y - dy), (x + dx, y + dy), 3)
-        for ex, ey in ((x - dx, y - dy), (x + dx, y + dy)):
-            pygame.draw.circle(surf, (232, 226, 205), (int(ex), int(ey)), 3)
+        fx, fy = world.entity_screen(target)
+        pulse = 0.5 + 0.5 * math.sin(t * 16)
+        mark = pygame.Rect(0, 0, 34 + 10 * (1 - q), 14 + 4 * (1 - q))
+        mark.center = (fx, fy)
+        pygame.draw.ellipse(overlay, (255, 60, 40, int(90 + 90 * pulse)), mark, 3)
+        shadow = (gx + (fx - gx) * q, gy + (fy - gy) * q)   # the bone's shadow on the ground
+        sw = 10 + 12 * q
+        pygame.draw.ellipse(overlay, (10, 8, 12, 120), (shadow[0] - sw / 2, shadow[1] - sw / 5, sw, sw / 2.5))
+        arc = lambda k: (sx + (tx - sx) * k, sy + (ty - sy) * k - math.sin(k * math.pi) * 90)
+        for back in (0.06, 0.12, 0.18):   # dust trail
+            if q - back > 0:
+                px, py = arc(q - back)
+                pygame.draw.circle(overlay, (235, 228, 205, int(110 * (1 - back * 4))), (int(px), int(py)),
+                                   int(5 - back * 15))
+        x, y = arc(q)
+        draw_bone(surf, x, y, age * 16, 13, 5)
+    surf.blit(overlay, (0, 0))
 
 
 def draw_slam_zones(surf, world, t):
     """A boss winding up: the ground it is about to cave in glows red, filling in as the slam nears."""
-    winding = [e for e in world.enemies if e.boss and e.windup > 0]
+    winding = [e for e in world.enemies if (e.boss or e.spec.get("slam")) and e.windup > 0]   # (+ slime chunks)
     if not winding:
         return
     overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
     for e in winding:
         gx, gy = e.slam_at or (e.x, e.y)   # (a diving boss marks where it will land, not where it is)
         cx, cy = iso(gx, gy, world.column_height(*world.cell_of(gx, gy)) + world.rise)
-        full = pygame.Rect(0, 0, BOSS_SLAM_RADIUS * TILE_W * 1.42, BOSS_SLAM_RADIUS * TILE_H * 1.42)
+        radius = e.spec.get("slam_radius", BOSS_SLAM_RADIUS)
+        full = pygame.Rect(0, 0, radius * TILE_W * 1.42, radius * TILE_H * 1.42)
         full.center = (cx, cy)
         q = 1 - e.windup / e.windup_total
         pulse = 0.5 + 0.5 * math.sin(t * (10 + 20 * q))

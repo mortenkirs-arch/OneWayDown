@@ -30,6 +30,7 @@ SFX_GAIN = {
     "chest": 0.4, "jackpot": 0.4,  # rare rewards: noticeable, not jarring
     "fuse": 0.35, "boom": 0.9,     # dynamite (a demolitionist's charges go off at CHARGE_BOOM of this)
     "victory": 0.9,               # a boss defeated
+    "smash": 0.8,                 # your Charged Slam
     "windup": 0.6, "slam": 1.0,   # a boss slam: the growl while it winds up, then the impact
 }
 

@@ -15,6 +15,7 @@ each time it plays (see dig/audio.py), so repeated sounds - like spam-clicking -
   victory  a boss defeated: a deep bell toll answered by bright rising bells (in tune with the music)
   windup   a boss winding up a slam: a low, rising, strained growl, as long as a wind-up
   slam     the slam landing: a deep, heavy thump into the ground with a short rumble
+  smash    your Charged Slam: a deep thud and a crunch, then a crater's worth of rubble pattering down
 """
 import array
 import math
@@ -29,9 +30,9 @@ PITCHES = (0.94, 0.98, 1.02, 1.06)
 # Takes per sound (each given a pitch from PITCHES), and how close to full scale each sound is written. Their
 # in-game loudness is set by SFX_GAIN in dig/audio.py.
 TAKES = {"click": 4, "hit": 4, "spawn": 3, "chest": 2, "jackpot": 1, "grab": 2, "fuse": 2, "boom": 3, "victory": 1,
-         "windup": 2, "slam": 3}
+         "windup": 2, "slam": 3, "smash": 3}
 PEAK = {"click": 0.6, "hit": 0.6, "spawn": 0.95, "chest": 0.9, "jackpot": 0.9, "grab": 0.8, "fuse": 0.7, "boom": 0.95,
-        "victory": 0.95, "windup": 0.8, "slam": 0.95}
+        "victory": 0.95, "windup": 0.8, "slam": 0.95, "smash": 0.9}
 WINDUP_SECS = 1.3   # (as long as a boss wind-up: BOSS_WINDUP in dig/enemies.py; shorter ones are faded early)
 FUSE_SECS = 1.6   # (as long as a fuse burns in the game: FUSE_SECS in dig/dynamite.py)
 
@@ -231,9 +232,34 @@ def ground_pound(pitch, rng):
     return out[:-fade] + [x * (1 - i / fade) for i, x in enumerate(out[-fade:])]
 
 
+def crater(pitch, rng):
+    """Your Charged Slam: a deep sub thud and a dry crunch on impact, then loose rubble pattering down."""
+    out = [0.0] * int(1.1 * SR)
+
+    def add(start, sig, vol):
+        i0 = int(start * SR)
+        for i, x in enumerate(sig[:len(out) - i0]):
+            out[i0 + i] += x * vol
+    phase = 0.0
+    for i in range(int(0.7 * SR)):   # the thud: a sine dropping fast from a kick to a low 34Hz
+        t = i / SR
+        phase += (34 + 120 * math.exp(-t / 0.03)) * pitch / SR
+        out[i] += math.sin(2 * math.pi * phase) * env(t, 0.002, 0.18) * 1.2
+    crunch = lowpass([rng.uniform(-1, 1) for _ in range(int(0.08 * SR))], 1800 * pitch)
+    add(0, [x * env(i / SR, 0, 0.02) for i, x in enumerate(crunch)], 1.4)
+    count = 40
+    for k in range(count):   # rubble: little grains, bunched up early and thinning out
+        t0 = 0.03 + rng.uniform(0, 1.1 - 0.03 - 0.1) * (k / count) ** 0.6
+        grain = lowpass([rng.uniform(-1, 1) for _ in range(int(0.015 * SR))], rng.uniform(1000, 3500) * pitch)
+        add(t0, [x * env(i / SR, 0, 0.005) for i, x in enumerate(grain)], 1.0 - k / count * 0.7)
+    fade = int(0.1 * SR)
+    return out[:-fade] + [x * (1 - i / fade) for i, x in enumerate(out[-fade:])]
+
+
 SOUNDS = {"click": crack_hit, "hit": thwack, "spawn": ground_jolt, "chest": creak_and_shine,
           "jackpot": triple_ding, "grab": alarm_blips, "fuse": hissing_fuse, "boom": classic_boom,
-          "victory": bell_toll_victory, "windup": strained_growl, "slam": ground_pound}
+          "victory": bell_toll_victory, "windup": strained_growl, "slam": ground_pound,
+          "smash": crater}
 
 
 def write_wav(path, samples, peak):

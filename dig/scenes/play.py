@@ -324,7 +324,14 @@ class PlayScene(Scene):
         if boss.kind == "bonetyrant":
             if boss.mode == "pile":
                 return "Smash the bones before they pull themselves together!"
-            return "It hurls bones at the crew furthest away - and it won't stay down the first time"
+            if boss.mode in ("stride", "volley"):
+                return "It's hurling bones at your crew - chase it down and hit it!"
+            return "After each slam it backs off to throw bones - and it won't stay down the first time"
+        if boss.kind == "slimeking":
+            if boss.mode == "split":
+                left = sum(1 for c in boss.chunks if c in w.enemies)
+                return f"{left} chunk{'s' if left != 1 else ''} left - every one of them slams!"
+            return "At half health he bursts into 8 chunks - and every one of them slams"
         return "Click it!  Stay out of the red when it slams"
 
     def draw_hud(self, surf, mouse):

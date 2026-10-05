@@ -20,6 +20,9 @@ Each enemy type is data in ENEMY_TYPES:
                 seconds while hunting
   lifesteal     fraction of its own max hp healed by draining a whole miner
   transform     dict(into, min_depth, after): turns into another enemy after flying `after` seconds
+  split         dict(into, count): at half health it bursts into `count` smaller `into` (slimes)
+  slam, slam_radius   (non-bosses: Slime King chunks) it winds up and slams like a boss, only smaller
+  pct_scale     how much "share of max health" damage lands on it (default: all of it; see Enemy.pct_scale)
   tint          colour a grabbed miner's face fades towards
   gore          colour of the particles when it is hit
 
@@ -28,7 +31,8 @@ call in minions. Extra keys:
   look, scale   which enemy sprite to draw, and how much bigger
   slam          damage to every crew member in reach when the slam lands, as a share of a typical crew
                 member's health at the boss's depth (crew_hp_at): so slams keep pace with Hard Hats
-  minion        dict(kind, count, every): summoned around the boss every `every` seconds
+  minion        dict(kind, count, every): summoned around the boss every `every` seconds (and `plus`: one of
+                those alongside them)
   dive          (flying bosses) instead of walking up and slamming, it marks a crew member's spot and
                 swoops onto it when the wind-up ends
 Each boss also has a trick of its own, run by World.boss_special (see the BOSS TRICKS constants below):
@@ -36,7 +40,9 @@ Each boss also has a trick of its own, run by World.boss_special (see the BOSS T
   Broodmother   her slams leave webs that slow the crew; she lays egg sacs that hatch into spiders
   Vampire Lord  turns into a swarm of bats, flies to a crew member and bites them to heal
   Great Bat     dive-bombs a crew member from the air instead of slamming, and screeches to stun the crew
-  Bone Tyrant   throws bones at distant crew; its first "death" leaves a bone pile you must smash quickly
+  Bone Tyrant   after each slam it strides off and hurls a volley of bones at the crew, then marches back in;
+                its first "death" leaves a bone pile you must smash quickly
+  Slime King    at half health it bursts into chunks that each creep up and slam; beat them all to win
   Lich          curses a crew member (click them to lift it before it explodes); his wisps shield him
 
 Egg sacs (hatch=...) don't move: they hatch into `count` of `kind` after `after` seconds unless broken.
@@ -71,6 +77,13 @@ ENEMY_TYPES = {
                  reach=0.3, entrance="fade", grab="orbit", arrival="flickers in",
                  altitude=0.8, wobble=dict(amount=1.3, freq=9),
                  tint=(170, 210, 255), gore=(150, 215, 255)),
+    "slime": dict(name="Slime", hp=16, speed=0.5, dps=1.7, bounty=14, min_depth=34, weight=2,
+                  reach=0.3, entrance="dig", grab="side", arrival="oozes up",
+                  split=dict(into="slimeling", count=2),
+                  tint=(160, 230, 130), gore=(120, 220, 90)),
+    "slimeling": dict(name="Slimeling", hp=6, speed=0.8, dps=1.0, bounty=6, min_depth=0, weight=0,
+                      reach=0.25, entrance="none", grab="side", arrival="",
+                      tint=(160, 230, 130), gore=(120, 220, 90)),
     "ghost": dict(name="Ghost", hp=24, speed=0.45, dps=1.6, bounty=20, min_depth=19, weight=2,
                   reach=0.3, entrance="fade", grab="engulf", arrival="materialises",
                   altitude=0.35, wobble=dict(amount=0.35, freq=1.5), phase=dict(every=4.0, duration=1.2),
@@ -84,7 +97,7 @@ ENEMY_TYPES = {
     "broodmother": dict(name="Broodmother", hp=2000, speed=0.8, dps=0, bounty=360, min_depth=0, weight=0,
                         reach=0.9, entrance="drop", grab="head", arrival="descends", boss=True,
                         look="spider", scale=2.4, crown_lift=14, slam=0.25,
-                        minion=dict(kind="eggsac", count=2, every=9.0),
+                        minion=dict(kind="eggsac", count=2, every=9.0, plus="spider"),
                         tint=(150, 200, 120), gore=(90, 60, 120)),
     "greatbat": dict(name="Great Bat", hp=2400, speed=1.0, dps=0, bounty=380, min_depth=0, weight=0,
                      reach=0.9, entrance="swoop", grab="neck", arrival="swoops in", boss=True, dive=True,
@@ -95,6 +108,15 @@ ENEMY_TYPES = {
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
                        look="skeleton", scale=2.3, slam=0.33, minion=dict(kind="skeleton", count=2, every=12.0),
                        tint=(200, 200, 220), gore=(232, 226, 205)),
+    "slimeking": dict(name="Slime King", hp=3200, speed=0.5, dps=0, bounty=400, min_depth=0, weight=0,
+                      reach=0.9, entrance="dig", grab="side", arrival="oozes up", boss=True,
+                      look="slime", scale=2.4, crown_lift=5, slam=0.30, split=dict(into="slimechunk", count=8),
+                      pct_scale=0.025,
+                      minion=dict(kind="slime", count=2, every=12.0),
+                      tint=(160, 230, 130), gore=(120, 220, 90)),
+    "slimechunk": dict(name="Slime Chunk", hp=160, speed=0.75, dps=0, bounty=18, min_depth=0, weight=0,
+                       reach=0.6, entrance="none", grab="side", arrival="", slam=0.15, slam_radius=0.9, scale=1.4,
+                       pct_scale=0.2, tint=(160, 230, 130), gore=(150, 220, 70)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
                         reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
                         look="vampire", scale=2.0, slam=0.28, minion=dict(kind="bat", count=2, every=12.0),
@@ -111,7 +133,7 @@ ENEMY_TYPES = {
 }
 FLY_ALTITUDE = ENEMY_TYPES["bat"]["altitude"]   # bat swoop-in / transformation height
 
-BOSSES = ["zombieking", "broodmother", "greatbat", "bonetyrant", "vampirelord", "lich"]
+BOSSES = ["zombieking", "broodmother", "greatbat", "bonetyrant", "slimeking", "vampirelord", "lich"]
 BOSS_EVERY = 10              # a boss guards every 10th metre
 BOSS_TIME_LIMIT = 150.0      # seconds before an unbeaten boss retreats (no reward, but the dig goes on)
 BOSS_PCT_SCALE = 0.04        # bosses shrug off "share of max health" damage (Executioner, guards, ballista...)
@@ -147,9 +169,21 @@ SHIELD_MAX = 0.75            # ...up to this much
 SCREECH_EVERY = 13.0         # Great Bat: seconds between screeches...
 SCREECH_RADIUS = 3.5         # ...stunning the crew within this many tiles...
 SCREECH_STUN = 2.2           # ...for this long
-BONE_THROW_EVERY = 5.0       # Bone Tyrant: seconds between bones thrown at whoever is furthest away...
-BONE_THROW_SHARE = 0.2      # ...hitting for this share of a typical crew member's health
-BONE_THROW_SECS = 0.7        # (flight time)
+BONE_VOLLEY = 4              # Bone Tyrant: after each slam it strides off and throws this many bones...
+BONE_VOLLEY_HURT = 6         # ...(this many below half health)...
+BONE_THROW_SHARE = 0.12      # ...each hitting for this share of a typical crew member's health
+BONE_THROW_SECS = 0.8        # (flight time)
+THROW_ANIM_SECS = 0.5        # one throw: the arm swings back, then whips forward...
+THROW_RELEASE = 0.6          # ...letting go of the bone this far through
+VOLLEY_GAP = 0.15            # pause between throws
+STRIDE_SPEED = 1.3           # tiles/s it strides off at, to get some distance...
+STRIDE_RANGE = 3.5           # ...stopping about this far from the nearest crew member
+STALK_PATIENCE = 8.0         # stalking this long without landing a slam, it throws a volley from where it stands
+SLIME_SPLIT_AT = 0.5         # slimes burst apart at this share of their health...
+SLIME_SPLIT_HP = 0.35        # ...into blobs with this share of the slime's max health each
+CHUNK_SPLIT_HP = 0.8         # the Slime King's chunks share this much of his max health between them
+CHUNK_WINDUP = 1.1           # a chunk's wind-up...
+CHUNK_COOLDOWN = 3.0         # ...and its rest after slamming (a little random, so they don't slam together)
 PILE_SECS = 5.0              # its first "death" leaves a bone pile: smash it within this long...
 PILE_HP = 0.2                # ...(the pile has this share of its max health)...
 REFORM_HP = 0.5              # ...or it pulls itself together with this share
@@ -275,6 +309,10 @@ class Enemy:
         self.slam_at = None           # Great Bat: the spot it will dive onto when the wind-up ends
         self.reformed = False         # Bone Tyrant: already pulled itself back together once
         self.pile_timer = 0.0         # ...seconds left to smash its bone pile
+        self.volley = 0               # ...bones left to throw in this volley
+        self.throw_anim = 0.0         # ...seconds left of the current throw's animation
+        self.throw_at = None          # ...the crew member this bone is for
+        self.chunks = []              # Slime King: the chunks it burst into (the fight ends when they're all gone)
         if ENEMY_TYPES[kind]["entrance"] == "none":
             self.state = "hunting"
 
@@ -304,8 +342,8 @@ class Enemy:
         """How much of any "share of max health" damage actually lands (bosses and elites resist it): guards,
         traps, the ballista, Self Defense, charges and Executioner's minimum all go through this."""
         if self.boss:
-            return BOSS_PCT_SCALE
-        return ELITE_PCT_SCALE if self.elite else 1.0
+            return self.spec.get("pct_scale", BOSS_PCT_SCALE)
+        return self.spec.get("pct_scale", ELITE_PCT_SCALE if self.elite else 1.0)
 
     @property
     def look(self):
@@ -338,7 +376,8 @@ class Enemy:
 
     @property
     def targetable(self):
-        return self.state not in ("emerging", "transforming") and not self.phased and self.mode != "bats"
+        return (self.state not in ("emerging", "transforming") and not self.phased
+                and self.mode not in ("bats", "split"))
 
     def release(self):
         self.victim = None
@@ -372,6 +411,9 @@ class Enemy:
 
         if self.boss:
             self.update_boss(world, dt)
+            return
+        if self.spec.get("slam"):   # a Slime King chunk: a little slammer of its own
+            self.update_chunk(world, dt)
             return
         hatch = self.spec.get("hatch")
         if hatch:
@@ -437,6 +479,9 @@ class Enemy:
         if self.fight_time >= BOSS_TIME_LIMIT:
             world.boss_retreat(self)
             return
+        if self.mode == "split":   # the Slime King in pieces: its chunks do the fighting
+            world.update_split_boss(self)
+            return
         self.summon_timer -= dt
         if self.summon_timer <= 0:
             self.summon_timer = self.spec["minion"]["every"]
@@ -478,6 +523,32 @@ class Enemy:
         step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)
         self.x = min(GRID - 0.05, max(0.05, self.x + ux * step))
         self.y = min(GRID - 0.05, max(0.05, self.y + uy * step))
+
+    def update_chunk(self, world, dt):
+        """A Slime King chunk: creep up to the nearest crew member, wind up and slam (smaller than the King's)."""
+        self.hunt_time += dt
+        if self.windup > 0:
+            self.windup -= dt
+            if self.windup <= 0:
+                self.windup = 0.0
+                self.cooldown = CHUNK_COOLDOWN * random.uniform(0.8, 1.3)
+                world.chunk_slam(self)
+            return
+        self.cooldown = max(0.0, self.cooldown - dt)
+        target = world.nearest_crew(self.x, self.y)
+        if not target:
+            return
+        dx, dy = target.x - self.x, target.y - self.y
+        dist = math.hypot(dx, dy)
+        if dist > 0.03:
+            self.facing = 1 if (dx - dy) >= 0 else -1
+        if dist <= self.spec["reach"]:
+            if self.cooldown <= 0:
+                self.windup = self.windup_total = CHUNK_WINDUP
+            return
+        step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)
+        self.x = min(GRID - 0.05, max(0.05, self.x + dx / dist * step))
+        self.y = min(GRID - 0.05, max(0.05, self.y + dy / dist * step))
 
     def hover_and_dive(self, world, dt, pace):
         """A flying boss: drift about over the board, and when ready mark a crew member's spot to dive onto."""

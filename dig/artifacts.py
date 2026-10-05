@@ -17,7 +17,7 @@ STAT_KIND = {
     "miner_dmg": "mult", "swing": "mult", "walk": "mult", "miner_hp": "mult", "regen": "mult",
     "click_dmg": "mult", "monster_dmg": "mult", "gold": "mult", "bounty": "mult", "clear": "mult",
     "ore": "mult", "xp": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
-    "boss_dmg": "mult",
+    "boss_dmg": "mult", "slam_dmg": "mult",
 }
 
 ARTIFACTS = {
@@ -72,6 +72,9 @@ ARTIFACTS = {
     "jawbone": dict(name="Tyrant's Jawbone", icon="skull", color=(235, 228, 205), boss="bonetyrant",
                     lore="It chatters on its own. Mostly about weak points.",
                     bonus="Bosses take 15% more damage", effects={"boss_dmg": 1.15}),
+    "slimecore": dict(name="Slime King's Core", icon="slam", color=(150, 230, 100), boss="slimeking",
+                      lore="Wobbly, warm, and it soaks up a blow like nothing else.",
+                      bonus="Crew take 25% less damage from slams", effects={"slam_dmg": 0.75}),
     "vampfang": dict(name="Vampire Lord's Fang", icon="burst", color=(200, 40, 60), boss="vampirelord",
                      lore="It still thirsts. Your crew no longer does.",
                      bonus="Crew heal twice as fast", effects={"regen": 2.0}),

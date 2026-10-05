@@ -11,8 +11,8 @@ from .miners import MAX_LEVEL, xp_to_next
 from .upgrades import UPGRADES, ore_mult, ore_richness, value_mult
 from .world import World
 
-# A real player's game just after beating the Lich (60m), which felt about right: every other depth is scaled
-# from it. Upgrade levels:
+# A real player's game at 60m, just after beating the Lich (the boss there at the time), which felt about right:
+# every other depth is scaled from it. Upgrade levels:
 ANCHOR_DEPTH = 60
 ANCHOR_LEVELS = {
     "autotap": 5, "ballista": 1, "bigbombs": 2, "boots": 7, "bounty": 7, "chests": 2, "cleave": 5, "click": 12,

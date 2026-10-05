@@ -53,19 +53,23 @@ with its own rock, backdrop and drifting embers, sparkles or dust (purely cosmet
 `dig/biomes.py`).
 
 Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
-Great Bat (30m), the Bone Tyrant (40m), the Vampire Lord (50m) and the Lich (60m), then round
+Great Bat (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m) and the Lich (70m), then round
 again, tougher each time. A boss stalks your
 crew, winds up and slams the ground around it (get your miners out of the red), and calls in
 minions; ordinary waves pause while it's on the board. Each has a trick of its own:
 
 - **Zombie King** rallies the zombies near him (faster, and they take half damage), so pick
   them off away from him; below half health he rages and slams far more often.
-- **Broodmother** lays egg sacs that hatch into spiders unless you break them, and her slams
-  leave webs that slow your crew.
+- **Broodmother** lays egg sacs (with a spider to guard them) that hatch into spiders unless you
+  break them, and her slams leave webs that slow your crew.
 - **Great Bat** flies: instead of slamming, it marks a crew member's spot and dive-bombs it, and
   its screech stuns the crew nearby for a moment.
-- **Bone Tyrant** hurls bones at whoever is furthest away, and won't stay down: its first "death"
-  leaves a bone pile you have a few seconds to smash before it pulls itself back together.
+- **Bone Tyrant** never stands still for long: after each slam it strides off and hurls a volley of
+  bones at your crew, then marches back in. It won't stay down either: its first "death" leaves a
+  bone pile you have a few seconds to smash before it pulls itself back together.
+- **Slime King** bursts into 8 chunks at half health, and every chunk creeps up and slams on its
+  own (smaller slams, but lots of them). Beat every chunk to win. Ordinary slimes (from 34m) split
+  in two at half health as well.
 - **Vampire Lord** scatters into a swarm of bats (nothing can hit him), flies to a crew member
   and feeds on them to heal - hit him hard to make him let go.
 - **Lich** curses a crew member: click them to lift it before it bursts and hurts everyone
