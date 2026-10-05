@@ -43,19 +43,20 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     w = world
     t = time.time()
     r = w.rise
-    # Earth slab under the board
+    # Earth slab under the board: the layers below the two shown block by block, each in its own biome's earth
     bottom = -3 + r
     top0 = 0 + r
-    left_face = [iso(0, GRID, top0), iso(GRID, GRID, top0), iso(GRID, GRID, bottom), iso(0, GRID, bottom)]
-    right_face = [iso(GRID, 0, top0), iso(GRID, GRID, top0), iso(GRID, GRID, bottom), iso(GRID, 0, bottom)]
-    biome = biome_at(w.depth)
-    earth = (74, 56, 46) if w.depth < 4 else biome["earth"]   # (brown while the topsoil is still dirt)
-    pygame.draw.polygon(surf, shade(earth, 0.7), left_face)
-    pygame.draw.polygon(surf, shade(earth, 0.5), right_face)
-    for i in range(1, 3):
-        z = top0 - i
-        pygame.draw.line(surf, shade(earth, 0.4), iso(0, GRID, z), iso(GRID, GRID, z), 2)
-        pygame.draw.line(surf, shade(earth, 0.33), iso(GRID, 0, z), iso(GRID, GRID, z), 2)
+    for i in range(3):
+        depth = w.depth + 2 + i
+        earth = (74, 56, 46) if depth < 4 else biome_at(depth)["earth"]   # (brown while the topsoil is dirt)
+        hi, lo = top0 - i, top0 - i - 1
+        pygame.draw.polygon(surf, shade(earth, 0.7), [iso(0, GRID, hi), iso(GRID, GRID, hi), iso(GRID, GRID, lo),
+                                                      iso(0, GRID, lo)])
+        pygame.draw.polygon(surf, shade(earth, 0.5), [iso(GRID, 0, hi), iso(GRID, GRID, hi), iso(GRID, GRID, lo),
+                                                      iso(GRID, 0, lo)])
+        if i:   # the seam between this layer and the one above
+            pygame.draw.line(surf, shade(earth, 0.4), iso(0, GRID, hi), iso(GRID, GRID, hi), 2)
+            pygame.draw.line(surf, shade(earth, 0.33), iso(GRID, 0, hi), iso(GRID, GRID, hi), 2)
     surf.blit(_get_slab_fade(), (0, iso(GRID, GRID, bottom)[1] - 150))
 
     # Drawables sorted back-to-front: blocks of both layers + miners

@@ -20,7 +20,7 @@ CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the 
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24,
                     "zombieking": 54, "broodmother": 46, "vampirelord": 50, "lich": 50, "eggsac": 18,
                     "skeleton": 24, "greatbat": 48, "bonetyrant": 54,
-                    "slime": 20, "slimeling": 14, "slimechunk": 24, "slimeking": 54}
+                    "slime": 22, "slimeling": 20, "slimechunk": 26, "slimeking": 54}
 BONE_COL, BONE_SHADE = (232, 226, 205), (150, 142, 120)
 BOSS_CANVAS = (120, 200)   # a boss is drawn at normal size on this canvas, then scaled up
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
@@ -457,6 +457,8 @@ def _base_anchor(e, rise, t):
             mx, my = _feet(e.victim, rise)
             return mx + (struggle_shake(t) if e.victim.state == "grabbed" else 0), my - 24
     fx, fy = _feet(e, rise)
+    if e.look.startswith("slime"):   # (low blobs: the middle of the body, not head height)
+        return fx, fy - SLIME_SIZE.get(e.kind, 13) * 0.9
     if e.flying and e.state != "transforming":
         return fx, fy - e.altitude * BLOCK_H + _fly_bob(e)
     return (fx, fy - 22) if e.spec["grab"] == "side" else (fx, fy - 8)
