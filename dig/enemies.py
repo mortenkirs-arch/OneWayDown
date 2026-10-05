@@ -118,7 +118,9 @@ BOSS_PCT_SCALE = 0.04        # bosses shrug off "share of max health" damage (Ex
 BOSS_WINDUP = 1.3            # seconds of warning before a slam lands
 BOSS_SLAM_RADIUS = 1.4       # tiles: crew this close to the boss when it slams get hit
 BOSS_SLAM_COOLDOWN = 3.5     # seconds after a slam before it can wind up again
-BOSS_MAX_MINIONS = 4         # it stops calling for help with this many minions alive
+BOSS_MAX_MINIONS = 4         # it stops calling for help with this many minions alive (down to BOSS_CROWD_FROM)...
+BOSS_CROWD_FROM = 20         # ...below which the cap grows a little - and each call brings a few more - up to...
+BOSS_CROWD_CAP = 8           # ...this many by 40m. (Boss fights are only ever the boss and its own monsters.)
 DIVE_SECS = 0.35             # a diving boss swoops onto its marked spot over the last moments of the wind-up
 
 # ----- BOSS TRICKS ------------------------------------------------------------------------------
@@ -159,6 +161,16 @@ def crew_hp_at(depth):
     return MINER_MAX_HP * (1 + 0.035 * min(depth, 60))
 
 
+def boss_minion_cap(depth):
+    """Minions a boss keeps on the board: 4 down to 20m, then a few more - 6 at 30m, 8 from 40m."""
+    return min(BOSS_CROWD_CAP, BOSS_MAX_MINIONS + max(0, depth - BOSS_CROWD_FROM) // 5)
+
+
+def boss_minion_mult(depth):
+    """How many more minions each call brings than the boss's own count: 1x down to 20m, rising to 2x by 40m."""
+    return 1 + min(1.0, max(0, depth - BOSS_CROWD_FROM) / 20)
+
+
 def boss_for(depth):
     """The boss guarding this depth, or None if it isn't a boss depth."""
     if depth < BOSS_EVERY or depth % BOSS_EVERY:
@@ -169,9 +181,11 @@ GRIP_FROM = 10                # monsters' grabs hit as designed down to here, th
 
 # Waves: every spawn_interval(depth) seconds the board is topped up to max_enemies(depth).
 ENEMY_START_DEPTH = 1          # monsters arrive the moment you reach this depth (none above it)
-WAVE_INTERVAL_START = 35.0     # seconds between waves at ENEMY_START_DEPTH...
-WAVE_INTERVAL_MIN = 20.0       # ...shrinking linearly to this by WAVE_FASTEST_DEPTH, then staying there
+WAVE_INTERVAL_START = 15.0     # seconds between waves at ENEMY_START_DEPTH (small waves, often: a lively start)...
+WAVE_INTERVAL_MIN = 20.0       # ...easing to this by WAVE_FASTEST_DEPTH, then staying there (bigger waves by then)
 WAVE_FASTEST_DEPTH = 10
+WAVE_HASTE = 0.75             # waves come this much sooner once you're deep, easing in from ENEMY_START_DEPTH...
+WAVE_HASTE_DEPTH = 17         # ...to the full amount here
 MAX_ENEMIES_CAP = 8           # monsters alive after a wave, reached at 21m...
 DEEP_CAP = 12                 # ...then +1 every DEEP_CAP_EVERY metres, up to this (at 45m)
 DEEP_CAP_EVERY = 6
@@ -188,7 +202,8 @@ ELITE_SCALE = 1.35            # drawn this much bigger, in a red glow
 def spawn_interval(depth):
     t = (depth - ENEMY_START_DEPTH) / (WAVE_FASTEST_DEPTH - ENEMY_START_DEPTH)
     t = min(1.0, max(0.0, t))
-    return WAVE_INTERVAL_START + (WAVE_INTERVAL_MIN - WAVE_INTERVAL_START) * t
+    haste = min(1.0, max(0.0, (depth - ENEMY_START_DEPTH) / (WAVE_HASTE_DEPTH - ENEMY_START_DEPTH)))
+    return (WAVE_INTERVAL_START + (WAVE_INTERVAL_MIN - WAVE_INTERVAL_START) * t) * (1 + (WAVE_HASTE - 1) * haste)
 
 
 def max_enemies(depth):
@@ -456,6 +471,7 @@ class Enemy:
         if dist <= self.spec["reach"]:
             if self.cooldown <= 0:
                 self.windup = self.windup_total = BOSS_WINDUP * pace
+                world.cues.append("windup")   # the boss strains (its growl)
             return
         ux, uy = dx / dist, dy / dist
         self.heading = (ux, uy)
@@ -471,6 +487,7 @@ class Enemy:
                 target = random.choice(crew)
                 self.slam_at = (target.x, target.y)
                 self.windup = self.windup_total = BOSS_WINDUP * pace
+                world.cues.append("windup")   # the boss strains (its growl)
                 return
         if self.goal is None or math.hypot(self.goal[0] - self.x, self.goal[1] - self.y) < 0.2:
             self.goal = (random.uniform(1.5, GRID - 1.5), random.uniform(1.5, GRID - 1.5))

@@ -9,6 +9,7 @@ from ..config import GOLD, H, TEXT, W
 from ..iso import draw_cube, origin_at
 from ..ui import Button, draw_gold, draw_text
 from ..util import fmt, shade
+from ..title import Title
 from .base import Scene
 
 
@@ -21,6 +22,7 @@ class MenuScene(Scene):
     def __init__(self, game):
         super().__init__(game)
         self.confirm_new = False
+        self.title = None   # the stone "DOWN" title (see dig/title.py)
         cx, dy = W // 2 - 160, MENU_DY
         self.buttons = {
             "continue": Button((cx, 330 + dy, 320, 60), "Continue", lambda: game.switch("play")),
@@ -62,9 +64,9 @@ class MenuScene(Scene):
                 draw_cube(surf, i % 2, i // 2, 1, BLOCKS[k]["color"], BLOCKS[k].get("fleck"), seed=i + 20)
             draw_cube(surf, 1, 1, 2.3 - bob, BLOCKS["diamond"]["color"], BLOCKS["diamond"]["fleck"], seed=3)
 
-        title = "THE ONLY WAY IS DOWN"
-        draw_text(surf, self.fonts, title, 84, shade(GOLD, 0.45), (W // 2 + 4, 164 + MENU_DY), "center")
-        draw_text(surf, self.fonts, title, 84, GOLD, (W // 2, 160 + MENU_DY), "center")
+        if self.title is None:   # (built on first use: it needs the display up)
+            self.title = Title(W)
+        self.title.draw(surf, W // 2, 34 + MENU_DY, time.time())
         if self.world:
             draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.depth}m",
                       26, TEXT, (W // 2, 280 + MENU_DY), "center")

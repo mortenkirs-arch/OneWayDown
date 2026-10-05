@@ -11,7 +11,8 @@ from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, W
 from .dynamite import EXPLOSION_SECS, Bomb
 from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, CoinFly, Floater, Particle,
                       Smoke)
-from .enemies import (BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE,
+from .enemies import (boss_minion_cap, boss_minion_mult,
+                      BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE,
                       BONE_THROW_EVERY, BONE_THROW_SHARE, BONE_THROW_SECS, PILE_HP, PILE_SECS, REFORM_HP,
                       SCREECH_EVERY, SCREECH_RADIUS, SCREECH_STUN,
                       BOSS_MAX_MINIONS, BOSS_SLAM_RADIUS, BOSS_TIME_LIMIT, CURSE_EVERY, CURSE_RADIUS, CURSE_SHARE,
@@ -31,7 +32,7 @@ from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, ch
                        enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, last_stand_mult, miner_regen, miner_strike, monster_damage, ore_damage_mult,
                        ore_mult, ore_richness,
-                       demo_interval, respawn_secs, second_wind_boost, swing_time, upgrade_cost, value_mult,
+                       demo_interval, second_wind_boost, swing_time, upgrade_cost, value_mult,
                        walk_speed)
 from .util import fmt
 
@@ -56,6 +57,9 @@ XP_PER_BLOCK = 1.0           # xp for breaking a whole block (diggers, and the d
 XP_PER_MONSTER = 4.0         # xp for blows adding up to a whole monster's health (guards, crew fighting back)
 XP_PER_ORDER = 1.5           # xp for each order the foreman barks
 DEFENSE_STRIKE_SECS = 1.0    # Self Defense: a grabbed miner strikes back this often
+CHARGE_BOOM = 0.45           # a demolitionist's charge goes off this much quieter than thrown dynamite
+GRAB_SOUND_GAP = 1.0         # the "crew grabbed" alert sounds at most this often (seconds)
+RESPAWN_SECS = 15.0          # seconds before a fallen crew member's replacement arrives
 REGEN_DELAY = 5.0            # crew only start healing once they've gone this long without being hit
 ROCK_SHARE = 0.0015          # layer cleared but the boss still up: each rock a digger throws takes this share
                              # of its max health (x the thrower's level bonus)...
@@ -71,6 +75,8 @@ COMBO_CAP = 20               # ...and the most clicks that count
 GOLDEN_SECS = 6.0            # Golden Blocks: how long a golden block lasts
 SLAM_MONSTER_MULT = 2.0      # Charged Slam: a full slam hits monsters for this many monster clicks
 CHEST_PAYOUT = 15            # Buried Treasure: chest worth this many times its block's value
+DEEP_GOLD = 1.5              # all gold pays this much more once you're deep, easing in from 0m...
+DEEP_GOLD_DEPTH = 17         # ...to the full amount here
 BONE_BONUS = 2               # breaking a block with bones in it by your own click: this many times its value
 VAULT_PERIOD = 60.0          # Gold Vault: interest is paid this often (seconds)
 WHET_SHARPEN_SECS = 1.5      # time spent at the wheel
@@ -155,6 +161,8 @@ class World:
         self.boss_gate_told = False                             # told the player the boss bars the way down
         self.webs = {}                                          # Broodmother: {cell: seconds left} slowing the crew
         self.combat_tip_done = False                            # looked at the Combat upgrades during the first boss
+        self.cues = []                                          # sound effects to play this frame (see Game.update)
+        self.grab_sound_at = -1e9                               # when the last "crew grabbed" alert sounded
 
     # ----- stats ----------------------------------------------------------
     def lv(self, key): return self.levels[key]
@@ -224,11 +232,15 @@ class World:
             self.coins.append(CoinFly((x, y), GOLD_HUD_COIN, delay=i * 0.06))
 
     def earn(self, amount):
-        """Add gold from any source (Midas Touch applies to all of it). Returns the amount added."""
-        amount *= midas_mult(self.lv("midas")) * self.art_mult("gold")
+        """Add gold from any source (Midas Touch and the depth bonus apply to all of it). Returns the amount added."""
+        amount *= midas_mult(self.lv("midas")) * self.art_mult("gold") * self.depth_gold_mult()
         self.gold += amount
         self.earn_log.append((self.clock, amount))
         return amount
+
+    def depth_gold_mult(self):
+        """Gold pays more the deeper you are, up to DEEP_GOLD at DEEP_GOLD_DEPTH."""
+        return 1 + (DEEP_GOLD - 1) * min(1.0, self.depth / DEEP_GOLD_DEPTH)
 
     def gold_per_sec(self):
         now = self.clock
@@ -259,7 +271,7 @@ class World:
         """Experience for a crew member doing their job; levels up as it adds up (to MAX_LEVEL)."""
         if m.level >= MAX_LEVEL:
             return
-        m.xp += amount
+        m.xp += amount * self.art_mult("xp")   # (Veteran's Medal)
         while m.level < MAX_LEVEL and m.xp >= xp_to_next(m.level):
             m.xp -= xp_to_next(m.level)
             m.level += 1
@@ -324,12 +336,13 @@ class World:
             msg = f"{'AN' if e.elite else 'A'} {e.name.upper()} {e.spec['arrival'].upper()}!"
         else:
             msg = f"WAVE INCOMING: {count} ENEMIES!" + (f"  ({elites} ELITE)" if elites else "")
+        self.cues.append("spawn")   # one sound per wave, not per monster
         self.announcement = [msg, 2.5]   # shown as the HUD banner title
         return count
 
     def wave_interval(self):
-        """Seconds between waves at this depth (the Cursed Idol brings them sooner)."""
-        return spawn_interval(self.depth) * self.art_mult("wave")
+        """Seconds between waves at this depth."""
+        return spawn_interval(self.depth)
 
     # ----- bosses ---------------------------------------------------------
     def boss(self):
@@ -369,6 +382,7 @@ class World:
         self.notice = [f"Boss! Defeat the {spec['name']} within {int(BOSS_TIME_LIMIT)}s for a trophy", 6.0, ""]
         self.boss_gate_told = False
         self.shake, self.shake_power = 0.6, 6
+        self.cues.append("spawn")
 
     def boss_summon(self, boss):
         """The boss calls in a few of its kind around it."""
@@ -376,15 +390,18 @@ class World:
             return
         minion = boss.spec["minion"]
         alive = sum(1 for e in self.enemies if not e.boss)
-        count = min(minion["count"], BOSS_MAX_MINIONS - alive)
+        # deeper bosses call a few more (and keep a few more around)
+        count = min(round(minion["count"] * boss_minion_mult(self.depth)), boss_minion_cap(self.depth) - alive)
         if count <= 0:
             return
         cx, cy = self.cell_of(boss.x, boss.y)
         near = [(x, y) for x in range(cx - 2, cx + 3) for y in range(cy - 2, cy + 3)
                 if 0 <= x < GRID and 0 <= y < GRID and (x, y) != (cx, cy)]
         for i, cell in enumerate(random.sample(near, min(count, len(near)))):
+            # (elite minions too, deep down - but never elite eggs)
+            elite = minion["kind"] != "eggsac" and random.random() < elite_chance(self.depth)
             self.enemies.append(Enemy(minion["kind"], self.depth, cell, self.column_height(*cell), delay=i * 0.3,
-                                      hp_mult=self.art_mult("enemy_hp")))
+                                      hp_mult=self.art_mult("enemy_hp"), elite=elite))
         px, py = enemy_anchor(boss, self.rise, time.time())
         text = ("She lays her eggs! Break them!" if minion["kind"] == "eggsac"
                 else f"The {boss.spec['name']} calls for help!")
@@ -392,6 +409,7 @@ class World:
 
     def boss_slam(self, boss):
         """The wind-up ends: the ground around the boss caves in, hurting every crew member in reach."""
+        self.cues += ["-windup", "slam"]   # (the growl ends as the slam lands)
         fx, fy = self.entity_screen(boss)
         self.shake, self.shake_power = 0.35, 7
         self.rings.append([fx, fy, 0.0, 150, (255, 90, 60)])
@@ -570,6 +588,7 @@ class World:
 
     def collapse(self, boss):
         """The Bone Tyrant falls apart - for now: a heap of bones you have a few seconds to smash."""
+        self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
         boss.reformed = True
         boss.mode, boss.pile_timer = "pile", PILE_SECS
         boss.hp = boss.max_hp * PILE_HP
@@ -661,6 +680,7 @@ class World:
 
     def boss_retreat(self, boss):
         """Time's up: the boss withdraws into the dark. No trophy, but the dig can go on."""
+        self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
         self.enemies.remove(boss)
         self.end_bite(boss)
         px, py = enemy_anchor(boss, self.rise, time.time())
@@ -672,7 +692,9 @@ class World:
 
     def boss_defeated(self, boss):
         """A boss falls: its trophy the first time, otherwise an artifact still out there, or more gold."""
+        self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
         self.floaters.append(Floater(f"{boss.spec['name'].upper()} DEFEATED!", W / 2, 210, GOLD, life=3.0, size=44))
+        self.cues.append("victory")
         self.shake, self.shake_power = 0.5, 6
         self.flash = 0.12
         px, py = enemy_anchor(boss, self.rise, time.time())
@@ -796,6 +818,9 @@ class World:
             enemy.facing = -side
         enemy.victim = miner
         enemy.state = "attacking"
+        if self.clock - self.grab_sound_at >= GRAB_SOUND_GAP:   # one alert, however many grabs at once
+            self.grab_sound_at = self.clock
+            self.cues.append("grab")
         miner.state = "grabbed"
         miner.attacker = enemy
         px, py = self.entity_screen(miner, 60)
@@ -805,7 +830,7 @@ class World:
         """Death is permanent: the miner is buried, and a new recruit arrives when the timer runs out."""
         miner.state = "down"
         miner.curse = 0.0
-        miner.respawn = respawn_secs(self.lv("firstaid"))
+        miner.respawn = RESPAWN_SECS
         miner.attacker = None
         miner.target = None
         self.bury(miner, killer)
@@ -1080,6 +1105,7 @@ class World:
         return 1 + combo_step(self.lv("combo")) * min(self.combo, COMBO_CAP)
 
     def golden_jackpot(self, cell, block):
+        self.cues.append("jackpot")
         jackpot = self.earn(block.value * value_mult(self.lv("value")) * golden_payout(self.lv("goldblock")))
         px, py = self.cell_screen(cell)
         self.floaters.append(Floater(f"JACKPOT! +{fmt(jackpot)}", px, py - 50, GOLD, life=2.2, size=36, coin=True))
@@ -1131,6 +1157,7 @@ class World:
         z = self.column_height(cx, cy) + self.rise
         px, py = iso(cx + 0.5, cy + 0.5, z)
         charge = bomb.owner is not None   # a demolitionist's planted charge: smaller and targeted
+        self.cues.append(("boom", CHARGE_BOOM if charge else 1.0))
         size = 36 if charge else 46 + 26 * radius
         self.explosions.append([px, py - 10, 0.0, size])
         if self.shake < 0.25:
@@ -1184,6 +1211,7 @@ class World:
             self.fly_coins(px, py, 6)
             self.rings.append([px, py, 0.0, 90, GOLD])
         if block.chest:   # Buried Treasure
+            self.cues.append("chest")
             treasure = block.value * value_mult(self.lv("value")) * CHEST_PAYOUT
             earned += treasure
             self.chest_fx.append([px, py, 0.0])
@@ -1703,7 +1731,8 @@ class World:
             self.boss_auras()
             for e in list(self.enemies):
                 e.update(self, dt)
-            if self.depth >= ENEMY_START_DEPTH and not self.boss():   # waves keep coming while enemies remain
+            # waves keep coming while enemies remain (but a boss fight is just the boss and its own monsters)
+            if self.depth >= ENEMY_START_DEPTH and not self.boss():
                 self.enemy_timer -= dt
                 if self.enemy_timer <= 0:
                     self.enemy_timer = self.wave_interval()
@@ -1722,6 +1751,10 @@ class World:
                 self.throw_dynamite()
         for bomb in list(self.bombs):
             bomb.age += dt
+            if bomb.landed and not getattr(bomb, "hissing", False):   # the fuse is lit: it hisses...
+                bomb.hissing = True
+                if not any(b is not bomb and b.landed for b in self.bombs):   # ...one hiss at a time, not a static
+                    self.cues.append("fuse")
             if bomb.landed and random.random() < dt * 30:   # sparks fizzing off the fuse
                 sx, sy = bomb_fuse_tip(bomb, self)
                 self.particles.append(Particle(sx, sy, random.choice([(255, 230, 120), (255, 160, 60)])))
@@ -1790,7 +1823,8 @@ class World:
         w.total_blocks = d.get("total_blocks", 0)
         w.clock = d.get("clock", 0.0)
         w.graveyard = d.get("graveyard", [])
-        w.artifacts = [k for k in d.get("artifacts", []) if k in ARTIFACTS]
+        renamed = {"idol": "medal"}   # (the Cursed Idol was retired; its finders get the Veteran's Medal)
+        w.artifacts = [k for k in (renamed.get(k, k) for k in d.get("artifacts", [])) if k in ARTIFACTS]
         w.refresh_artifacts()
         w.boss_done = d.get("boss_done", w.depth if boss_for(w.depth) else -1)   # older saves: no boss mid-layer
         if d.get("grid", 8) == GRID:

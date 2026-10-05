@@ -16,7 +16,7 @@ STAT_KIND = {
     "crit": "add",          # added to the miners' crit chance
     "miner_dmg": "mult", "swing": "mult", "walk": "mult", "miner_hp": "mult", "regen": "mult",
     "click_dmg": "mult", "monster_dmg": "mult", "gold": "mult", "bounty": "mult", "clear": "mult",
-    "ore": "mult", "wave": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
+    "ore": "mult", "xp": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
     "boss_dmg": "mult",
 }
 
@@ -55,10 +55,9 @@ ARTIFACTS = {
     "heart": dict(name="Heart of the Mountain", icon="gem", color=(240, 90, 120),
                   lore="It beats once a minute, deep and slow.",
                   bonus="Layer clear bonuses x2", effects={"clear": 2.0}),
-    "idol": dict(name="Cursed Idol", icon="skull", color=(170, 120, 230),
-                 lore="It promised riches. It didn't mention the company.",
-                 bonus="+50% gold from everything, but waves come 25% sooner",
-                 effects={"gold": 1.5, "wave": 0.75}),
+    "medal": dict(name="Veteran's Medal", icon="helmet", color=(205, 160, 255),
+                  lore="Pinned on a miner who came back up. Twice.",
+                  bonus="Crew gain experience 50% faster", effects={"xp": 1.5}),
 
     # ----- trophies: dropped by bosses ------------------------------------
     "kingcrown": dict(name="Zombie King's Crown", icon="crown", color=(255, 205, 70), boss="zombieking",

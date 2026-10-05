@@ -19,7 +19,7 @@ from ..iso import origin_at
 from ..biomes import biome_at
 from ..render import draw_ambient, draw_board, draw_flying_coins, pick_block
 from ..sprites import pick_enemy
-from ..ui import Button, draw_callout, draw_coin, draw_glow, draw_panel, draw_pointer, draw_text
+from ..ui import Button, draw_callout, draw_coin, draw_glow, draw_panel, draw_pointer, draw_text, wrap_text
 from ..upgrades import BRANCHES, UPGRADE_BY_KEY, UPGRADES, enemy_hit_floor, next_milestone
 from ..util import fmt
 from .base import Scene
@@ -69,10 +69,12 @@ class PlayScene(Scene):
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
                 self.world.player_hit_enemy(enemy)
+                self.game.audio.play("hit")   # (blocks: "click")
                 return
             hit = pick_block(self.world, event.pos)
             if hit:
                 self.world.player_hit(hit[0], manual=True)
+                self.game.audio.play("click")
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.world.combo_held = False
             if self.charge:
@@ -121,48 +123,64 @@ class PlayScene(Scene):
         if w.reveals:
             self.draw_reveal(surf, w, mouse)
 
-    @staticmethod
-    def reveal_rect():
-        return pygame.Rect(0, 0, 560, 170).move(W // 2 - 280, 150)
+    REVEAL_W = 250   # the found-artifact notification: a slim card down the left side, beside the board
+
+    def reveal_lines(self, art):
+        """The notification's text, wrapped to its width: (text, size, colour) per line."""
+        f = self.fonts
+        inner = self.REVEAL_W - 28
+        lines = [(t, 24, art["color"]) for t in wrap_text(f[24], art["name"], inner - 56)]
+        lines += [(t, 20, TEXT) for t in wrap_text(f[20], art["bonus"], inner)]
+        lines += [(t, 18, MUTED) for t in wrap_text(f[18], art["lore"], inner)]
+        return lines
+
+    def reveal_rect(self):
+        key = self.world.reveals[0][0]
+        lines = self.reveal_lines(ARTIFACTS[key])
+        height = 102 + sum(size + 2 for _, size, _ in lines if size != 24) + 40
+        return pygame.Rect(16, TOP_PANEL.bottom + 14, self.REVEAL_W, max(150, height))
 
     def reveal_close_rect(self):
         box = self.reveal_rect()
-        return pygame.Rect(box.right - 40, box.top + 8, 32, 32)
+        return pygame.Rect(box.right - 36, box.top + 8, 28, 28)
 
     def draw_reveal(self, surf, w, mouse):
-        """The card that pops up when an artifact is found: icon, name, what it does, a line of lore."""
+        """A found artifact: a notification down the left side - clear of the fight - with its icon, name, what
+        it does and a line of lore. It slides in, and stays until its X is clicked."""
         key, shown = w.reveals[0]
         art = ARTIFACTS[key]
         f = self.fonts
         box = self.reveal_rect()
-        grow = min(1.0, shown / REVEAL_POP_SECS)              # pops in, then stays until the X is clicked
+        slide = min(1.0, shown / REVEAL_POP_SECS)
+        slide = 1 - (1 - slide) ** 3                              # eases in from off the left edge
         layer = pygame.Surface(box.size, pygame.SRCALPHA)
-        pygame.draw.rect(layer, (*PANEL, 245), layer.get_rect(), border_radius=14)
-        pygame.draw.rect(layer, art["color"], layer.get_rect(), 3, border_radius=14)
-        trophy = "boss" in art
-        draw_text(layer, f, "BOSS TROPHY!" if trophy else "ARTIFACT FOUND!", 24, GOLD, (box.w // 2, 20), "center")
-        t = time.time()
-        ic = (70, 96)
-        glow = pygame.Surface((110, 110), pygame.SRCALPHA)
-        pygame.draw.circle(glow, (*art["color"], int(60 + 30 * math.sin(t * 4))), (55, 55), 50)
-        layer.blit(glow, (ic[0] - 55, ic[1] - 55))
-        draw_icon(layer, art["icon"], ic, 30, art["color"])
-        draw_text(layer, f, art["name"], 32, art["color"], (130, 58), "midleft")
-        draw_text(layer, f, art["bonus"], 24, TEXT, (130, 94), "midleft")
-        draw_text(layer, f, art["lore"], 20, MUTED, (130, 126), "midleft")
+        pygame.draw.rect(layer, (*PANEL, 245), layer.get_rect(), border_radius=12)
+        pygame.draw.rect(layer, art["color"], layer.get_rect(), 3, border_radius=12)
+        draw_text(layer, f, "BOSS TROPHY!" if "boss" in art else "ARTIFACT FOUND!", 22, GOLD, (14, 22), "midleft")
+        lines = self.reveal_lines(art)
+        ic = (36, 66)   # the icon, glowing, beside the name
+        glow = pygame.Surface((70, 70), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (*art["color"], int(60 + 30 * math.sin(time.time() * 4))), (35, 35), 30)
+        layer.blit(glow, (ic[0] - 35, ic[1] - 35))
+        draw_icon(layer, art["icon"], ic, 18, art["color"])
+        y = 44
+        for text, size, color in lines:
+            x = 70 if size == 24 else 14   # (the name sits beside the icon; the rest uses the full width)
+            if size != 24 and y < 102:   # (below the icon)
+                y = 102
+            draw_text(layer, f, text, size, color, (x, y))
+            y += size + 2
         more = len(w.reveals) - 1
-        footer = (f"{more} more to see  -  " if more else "") + "see them all with A"
-        draw_text(layer, f, footer, 18, GOLD if more else MUTED, (box.w - 14, box.h - 12), "bottomright")
+        footer = (f"{more} more to see  -  " if more else "") + "see all with A"
+        draw_text(layer, f, footer, 18, GOLD if more else MUTED, (box.w - 12, box.h - 12), "bottomright")
         close = self.reveal_close_rect().move(-box.x, -box.y)   # the X, top right
-        hot = grow >= 1 and self.reveal_close_rect().collidepoint(mouse)
-        pygame.draw.rect(layer, (90, 50, 60) if hot else (56, 46, 72), close, border_radius=8)
-        pygame.draw.rect(layer, (255, 150, 150) if hot else PANEL_EDGE, close, 2, border_radius=8)
-        cx, cy, d = close.centerx, close.centery, 7
+        hot = slide >= 1 and self.reveal_close_rect().collidepoint(mouse)
+        pygame.draw.rect(layer, (90, 50, 60) if hot else (56, 46, 72), close, border_radius=7)
+        pygame.draw.rect(layer, (255, 150, 150) if hot else PANEL_EDGE, close, 2, border_radius=7)
+        cx, cy, d = close.centerx, close.centery, 6
         for a, b in (((cx - d, cy - d), (cx + d, cy + d)), ((cx - d, cy + d), (cx + d, cy - d))):
             pygame.draw.line(layer, (255, 255, 255) if hot else TEXT, a, b, 3)
-        if grow < 1:
-            layer = pygame.transform.smoothscale(layer, (max(1, int(box.w * grow)), max(1, int(box.h * grow))))
-        surf.blit(layer, layer.get_rect(center=box.center))
+        surf.blit(layer, (box.x - (1 - slide) * (box.right + 10), box.y))
 
     def draw_milestone(self, surf, w):
         """Bottom of the top panel: the next depth that unlocks upgrades, and progress towards it."""

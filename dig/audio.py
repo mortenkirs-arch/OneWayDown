@@ -5,13 +5,13 @@ Volumes are 0..1 and saved to settings.json (separate from the save game, so the
   music    the background music (heard at master x music)
   sfx      sound effects (heard at master x sfx)
 
-Sound effects: drop a WAV into assets/sfx/ and call `audio.play("name")` - it's loaded once, played at the
-effects volume, and quietly skipped if the file isn't there or there's no audio device.
+Sound effects: drop a WAV into assets/sfx/ (or several takes, name_1.wav, name_2.wav, ...) and call
+`audio.play("name")` - it's loaded once, played at the effects volume (times its SFX_GAIN), a random take
+each time, and quietly skipped if the file isn't there or there's no audio device.
 """
-import array
 import json
-import math
 import os
+import random
 
 import pygame
 
@@ -21,6 +21,17 @@ SETTINGS_PATH = os.path.join(PROJECT_ROOT, "settings.json")
 SFX_DIR = os.path.join(PROJECT_ROOT, "assets", "sfx")
 DEFAULTS = {"master": 0.8, "music": 0.6, "sfx": 0.8}
 CHANNELS = [("master", "Master volume"), ("music", "Music"), ("sfx", "Sound effects")]
+# How loud each effect sits under the effects volume. Kept low for frequent sounds, so spam-clicking doesn't
+# drown out the music. (Sounds themselves are made by tools/make_sfx.py.)
+SFX_GAIN = {
+    "click": 0.35, "hit": 0.35,   # your clicks on blocks / monsters: frequent, so soft
+    "spawn": 1.0,                 # monsters arriving: loud on purpose - a wave is coming
+    "grab": 0.6,                  # a crew member grabbed: an alert, but frequent deep down
+    "chest": 0.4, "jackpot": 0.4,  # rare rewards: noticeable, not jarring
+    "fuse": 0.35, "boom": 0.9,     # dynamite (a demolitionist's charges go off at CHARGE_BOOM of this)
+    "victory": 0.9,               # a boss defeated
+    "windup": 0.6, "slam": 1.0,   # a boss slam: the growl while it winds up, then the impact
+}
 
 
 class Audio:
@@ -28,6 +39,7 @@ class Audio:
         self.path = path
         self.volume = dict(DEFAULTS)
         self.sounds = {}
+        self.playing = {}   # the channel each sound last played on (so it can be cut short)
         self.load()
 
     # ----- settings -------------------------------------------------------
@@ -64,34 +76,40 @@ class Audio:
         if self.ready():
             pygame.mixer.music.set_volume(self.level("music"))
 
-    def play(self, name):
-        """Play sound effect `name` (assets/sfx/<name>.wav) at the effects volume."""
+    def play(self, name, vol=1.0):
+        """Play sound effect `name` at the effects volume: assets/sfx/<name>.wav, or - if there are several
+        takes, <name>_1.wav, <name>_2.wav, ... - one of them at random, so repeats don't sound identical.
+        `vol` scales it further (e.g. a smaller version of a sound)."""
         if not self.ready():
             return
-        sound = self.sounds.get(name)
-        if sound is None:
-            path = os.path.join(SFX_DIR, name + ".wav")
-            if name == "tick":
-                sound = _tick()
-            elif os.path.exists(path):
+        takes = self.sounds.get(name)
+        if takes is None:
+            takes = self.sounds[name] = self._load(name)
+        if not takes:
+            return
+        sound = random.choice(takes)
+        sound.set_volume(min(1.0, self.level("sfx") * SFX_GAIN.get(name, 1.0) * vol))
+        self.playing[name] = sound.play()
+
+    def stop(self, name, fade_ms=80):
+        """Cut `name` short with a quick fade, if it's still playing (e.g. a wind-up that ended early)."""
+        channel = self.playing.pop(name, None)
+        if channel is not None and channel.get_busy():
+            channel.fadeout(fade_ms)
+
+    @staticmethod
+    def _load(name):
+        paths = [os.path.join(SFX_DIR, name + ".wav")]
+        k = 1
+        while os.path.exists(os.path.join(SFX_DIR, f"{name}_{k}.wav")):
+            paths.append(os.path.join(SFX_DIR, f"{name}_{k}.wav"))
+            k += 1
+        takes = []
+        for path in paths:
+            if os.path.exists(path):
                 try:
-                    sound = pygame.mixer.Sound(path)
+                    takes.append(pygame.mixer.Sound(path))
                 except pygame.error:
-                    return
-            else:
-                return
-            self.sounds[name] = sound
-        sound.set_volume(self.level("sfx"))
-        sound.play()
+                    pass
+        return takes
 
-
-def _tick():
-    """A short soft blip, made on the spot: lets the effects slider be heard before there are real effects."""
-    rate, size, channels = pygame.mixer.get_init()
-    samples = array.array("h")
-    n = int(rate * 0.07)
-    for i in range(n):
-        t = i / rate
-        v = math.sin(2 * math.pi * 880 * t) * math.exp(-t / 0.018) * 0.6
-        samples.extend([int(v * 32000)] * channels)
-    return pygame.mixer.Sound(buffer=samples.tobytes())

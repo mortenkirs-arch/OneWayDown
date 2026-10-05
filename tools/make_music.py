@@ -7,10 +7,13 @@ Writes, as seamless loops:
                           Am - F - C - G (the opening of the "Lantern Light" sketch)
   assets/music/game.wav   the in-game theme: a quick plucked arpeggio and a short sine bass over
                           Em - C - Am - B, a little tense (the "D3, E minor tense" sketch)
+  assets/music/boss.wav   while a boss is up: the game theme driven harder - 128 BPM, an eighth-note bass,
+                          kick, snare and hats (the "B1, theme driven" sketch)
 """
 import array
 import math
 import os
+import random
 import wave
 
 SR = 22050
@@ -40,6 +43,7 @@ class Mix:
     def __init__(self, secs):
         self.n = int(secs * SR)
         self.buf = [0.0] * self.n
+        self.rng = random.Random(1)   # (drum noise: the same every time, so the music regenerates exactly)
 
     def note(self, start, dur, midi, kind="tri", vol=0.2, attack=0.01, decay=0.1, sustain=0.7, release=0.08,
              pluck=False, detune=0.0):
@@ -65,6 +69,33 @@ class Mix:
             if detune:   # a second, slightly detuned voice: a fuller, chorused sound
                 s = 0.5 * (s + osc(kind, f * (1 + detune) * t))
             self.buf[i] += s * env * vol
+
+    def kick(self, start, vol=0.5):
+        """A kick drum: a sine whose pitch drops fast."""
+        i0 = int(start * SR)
+        phase = 0.0
+        for k in range(int(0.25 * SR)):
+            i = i0 + k
+            if i >= self.n:
+                break
+            t = k / SR
+            phase += (45 + 110 * math.exp(-t / 0.035)) / SR
+            self.buf[i] += math.sin(2 * math.pi * phase) * math.exp(-t / 0.09) * vol
+
+    def noise(self, start, dur, vol=0.12, tone=0.0):
+        """Hats and snares: hissy noise with a fast decay; `tone` mixes in a pitched body (a snare)."""
+        i0 = int(start * SR)
+        last = 0.0
+        for k in range(int(dur * SR)):
+            i = i0 + k
+            if i >= self.n:
+                break
+            t = k / SR
+            white = self.rng.uniform(-1, 1)
+            hp = white - last   # a crude high-pass: brighter, hissier
+            last = white
+            body = math.sin(2 * math.pi * 180 * t) * tone
+            self.buf[i] += (hp * (1 - tone) + body) * math.exp(-t / (dur * 0.3)) * vol
 
     def echo(self, delay, feedback, mix):
         d = int(delay * SR)
@@ -128,8 +159,36 @@ def game_theme(bpm=104):
     return m.buf[round(unit * SR):round(2 * unit * SR)]
 
 
+def boss_theme(bpm=128):
+    """While a boss is up: the game theme's chords and arpeggio, driven by an eighth-note bass, kick, snare and
+    hats. Bars are a whole number of samples long, so the loop joins exactly."""
+    prog = [chord(64, "m"), chord(60), chord(57, "m"), chord(59)]   # Em C Am B (as the game theme)
+    spb = round(60 / bpm * 4 * SR) / SR
+    s16 = spb / 16
+    unit = len(prog) * spb
+    m = Mix(unit * 3 + 0.01)
+    for rep in range(3):
+        for b, ch in enumerate(prog):
+            t0 = (rep * len(prog) + b) * spb
+            ripple = [ch[0], ch[1], ch[2], ch[0] + 12, ch[2], ch[1], ch[0] + 12, ch[2]]
+            for k, n in enumerate(ripple * 2):   # the arpeggio
+                m.note(t0 + k * s16, s16 * 2, n, "tri", vol=0.07, pluck=True, decay=0.16)
+            for k in range(8):   # the bass, in eighths
+                m.note(t0 + k * s16 * 2, s16 * 1.6, ch[0] - 24, "tri", vol=0.2, attack=0.003, decay=0.05, sustain=0.8,
+                       release=0.02)
+            for beat in range(4):   # kick on 1 and 3, snare on 2 and 4, hats on the off-beats
+                if beat % 2 == 0:
+                    m.kick(t0 + beat * s16 * 4, vol=0.45)
+                else:
+                    m.noise(t0 + beat * s16 * 4, 0.13, vol=0.17, tone=0.4)
+                m.noise(t0 + beat * s16 * 4 + s16 * 2, 0.03, vol=0.05)
+            m.kick(t0 + s16 * 10, vol=0.3)   # an extra push before beat 4
+    m.echo(0.24, 0.2, 0.15)
+    return m.buf[round(unit * SR):round(2 * unit * SR)]
+
+
 if __name__ == "__main__":
-    for name, theme in (("menu", menu_theme), ("game", game_theme)):
+    for name, theme in (("menu", menu_theme), ("game", game_theme), ("boss", boss_theme)):
         path = os.path.join(MUSIC_DIR, name + ".wav")
         loop = theme()
         write_wav(path, loop)

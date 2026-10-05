@@ -63,9 +63,12 @@ class Game:
     # ----- music ----------------------------------------------------------
     def wanted_music(self):
         """The track for the current screen: the menu theme on the main menu (and on the upgrades or settings
-        when opened from it), the game theme everywhere in the game - the dig site and its menus alike."""
+        when opened from it), the game theme everywhere in the game - the dig site and its menus alike - and
+        the boss theme instead while a boss is on the board (if there is one: assets/music/boss.wav)."""
         if self.scene is self.scenes["menu"] or getattr(self.scene, "return_to", None) == "menu":
             return "menu"
+        if self.world and self.world.boss() and os.path.exists(os.path.join(MUSIC_DIR, "boss.wav")):
+            return "boss"
         return "game"
 
     def update_music(self):
@@ -164,8 +167,17 @@ class Game:
             self.start_music()
         if self.world and self.scene.simulate:
             self.world.update(dt, combat=self.scene.combat)
+            for cue in self.world.cues:   # sounds the world asked for: a name, (name, volume), or "-name" to stop
+                if isinstance(cue, tuple):
+                    self.audio.play(*cue)
+                elif cue.startswith("-"):
+                    self.audio.stop(cue[1:])
+                else:
+                    self.audio.play(cue)
+            self.world.cues.clear()
             if time.time() - self.last_save > AUTOSAVE_SECS:
                 self.save()
+        self.update_music()   # (a boss arriving or falling mid-game changes the track, not just a new screen)
         self.scene.update(dt)
         if self.toast:
             self.toast = (self.toast[0], self.toast[1] - dt) if self.toast[1] > dt else None

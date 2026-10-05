@@ -11,13 +11,27 @@ from .miners import MAX_LEVEL, xp_to_next
 from .upgrades import UPGRADES, ore_mult, ore_richness, value_mult
 from .world import World
 
-# Upgrades a player leans on, as (level at the depth it unlocks, levels gained per metre after that).
-# Everything else that's unlocked gets 1 level, plus 1 every 6 metres.
-CORE = {
-    "miners": (2, 0.25), "power": (2, 0.55), "speed": (1, 0.4), "boots": (1, 0.2), "click": (1, 0.45),
-    "value": (1, 0.3), "slayer": (2, 0.45), "executioner": (1, 0.3), "defense": (1, 0.2), "hardhats": (1, 0.15),
-    "firstaid": (1, 0.12), "smite": (1, 0.15),
+# A real player's game just after beating the Lich (60m), which felt about right: every other depth is scaled
+# from it. Upgrade levels:
+ANCHOR_DEPTH = 60
+ANCHOR_LEVELS = {
+    "autotap": 5, "ballista": 1, "bigbombs": 2, "boots": 7, "bounty": 7, "chests": 2, "cleave": 5, "click": 12,
+    "combo": 3, "crit": 2, "deepstrike": 1, "defense": 7, "demolition": 2, "diamond": 3, "double": 2, "driller": 4,
+    "dynamite": 2, "executioner": 11, "firstaid": 5, "foreman": 1, "goldblock": 3, "golddust": 5, "golden": 7,
+    "goldrush": 1, "guard": 4, "hardhats": 5, "laststand": 2, "masterwork": 1, "midas": 1, "miners": 9,
+    "nightshift": 2, "power": 7, "prospector": 5, "quake": 1, "secondwind": 3, "shockwave": 5, "slam": 1,
+    "slayer": 12, "smite": 7, "speed": 4, "spiritlantern": 2, "steady": 3, "streak": 2, "surveyor": 3,
+    "teamwork": 4, "traps": 2, "treasure": 5, "value": 8, "vault": 1, "vein": 1, "whetstone": 1,
 }
+# ...the common artifacts, in the order they were found...
+ANCHOR_COMMONS = ["medal", "gauntlet", "boots", "heart", "amulet", "pickhead", "compass", "claw", "horseshoe"]
+# ...and the crew's levels by role.
+ANCHOR_CREW = {
+    "miner": [5, 5, 4, 4, 3, 2, 2, 2, 2, 1, 1], "driller": [6, 5, 4, 2], "guard": [6, 6, 5, 3],
+    "demolitionist": [7], "foreman": [7],
+}
+CURVE = 0.75     # progress isn't linear: cheap early levels go fast, so a player is further along than depth/60
+BUY_AFTER = 3    # metres after an upgrade unlocks before a player has bought its first level
 TEST_SAVE_DIR = "saves"
 
 
@@ -37,15 +51,24 @@ def boss_depth(key):
     return (BOSSES.index(key) + 1) * BOSS_EVERY
 
 
+def progress(depth, start=0):
+    """How far along a player at `depth` is towards the anchor game, for something that began at `start`: 0 there,
+    1 at the anchor depth, a little more past it."""
+    if depth <= start:
+        return 0.0
+    return ((depth - start) / max(1, ANCHOR_DEPTH - start)) ** CURVE
+
+
 def test_levels(depth):
     """Upgrade levels for a player who has reached `depth` (only upgrades they could have bought)."""
     levels = {}
     for up in UPGRADES:
-        if depth < up["depth"]:
+        top = ANCHOR_LEVELS.get(up["key"], 0)
+        if depth < up["depth"] or not top:
             continue
-        since = depth - up["depth"]
-        base, rate = CORE.get(up["key"], (1, 1 / 6))
-        lv = int(base + rate * since)
+        lv = round(top * progress(depth, up["depth"]))
+        if depth >= up["depth"] + BUY_AFTER:
+            lv = max(1, lv)
         levels[up["key"]] = min(lv, up["max"]) if up["max"] else lv
     changed = True
     while changed:   # drop anything whose prerequisites ended up missing
@@ -69,12 +92,18 @@ def test_world(depth, gold=None, seed=None):
     w.next = generate_layer(depth + 1, ore_mult(prospector), rng=rng, richness=ore_richness(prospector))
     w.layer_value = layer_value(w.current)
     beaten = [b for b in BOSSES[:max(0, depth - 1) // BOSS_EVERY]]   # bosses already behind them
-    w.artifacts = [TROPHY_OF[b] for b in beaten] + rng.sample(COMMON, min(len(COMMON), depth // 6))
+    found = min(len(COMMON), round(len(ANCHOR_COMMONS) * depth / ANCHOR_DEPTH))
+    others = [a for a in COMMON if a not in ANCHOR_COMMONS]
+    commons = ANCHOR_COMMONS[:found] + rng.sample(others, max(0, found - len(ANCHOR_COMMONS)))
+    w.artifacts = [TROPHY_OF[b] for b in beaten] + commons
     w.refresh_artifacts()
     w.boss_done = depth - 1
     w.sync_miners()
-    for m in w.miners:   # a crew that's been around a while
-        m.level = min(MAX_LEVEL, 1 + depth // 10 + rng.randint(0, 2))
+    by_role = {}
+    for m in w.miners:   # a crew that's been around a while: the anchor crew's levels, scaled to this depth
+        spread = ANCHOR_CREW.get(m.role, ANCHOR_CREW["miner"])
+        k = by_role[m.role] = by_role.get(m.role, -1) + 1
+        m.level = min(MAX_LEVEL, 1 + round((spread[min(k, len(spread) - 1)] - 1) * progress(depth)))
         m.xp = rng.uniform(0, xp_to_next(m.level)) if m.level < MAX_LEVEL else 0.0
     w.gold = layer_value(w.current) * value_mult(w.lv("value")) * 3 if gold is None else gold
     w.enemy_timer = w.wave_interval()

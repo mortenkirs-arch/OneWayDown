@@ -1039,7 +1039,7 @@ def _draw_skeleton(surf, e, rise, t, hovered, dy=0):
     for ex in (-2, 2):
         pygame.draw.circle(surf, (40, 30, 34), (head[0] + ex + e.facing, head[1] - 1), 2)
         pygame.draw.circle(surf, (255, 60, 50), (head[0] + ex + e.facing, head[1] - 1), 1)
-    if not entering:
+    if not entering and getattr(e, "show_hp", True):   # (not on the title screen)
         _hp_bar(surf, head[0], head[1] - 11, e.hp / e.max_hp, BAD)
 
 

@@ -45,7 +45,6 @@ def enemy_hit_floor(lv): return min(0.25, 0.08 + 0.01 * lv)   # min share of an 
 def miner_strike(lv): return 0.0 if lv == 0 else 0.02 + 0.004 * lv  # share of attacker's max hp per strike
 def last_stand_mult(lv): return 1 + 0.5 * lv           # Last Stand: strikes this much harder when desperate
 def miner_max_hp(lv): return 10 * (1 + 0.25 * lv)
-def respawn_secs(lv): return 15 - 1.5 * lv
 def miner_regen(lv): return 0.015 + 0.0075 * lv       # share of max health healed per second
 def wisp_slow(lv): return 0.15 * lv                   # Spirit Lantern: wisps near the crew slow down
 def trap_share(lv): return 0.05 * lv                  # Booby Traps: share of max hp taken on arrival
@@ -196,8 +195,8 @@ UPGRADES = [
     _up("hardhats", "Hard Hats", "combat", "helmet", (2.5, 2), [("defense", 1)], 200, 1.8, 8,
         "Miners survive longer when grabbed.", lambda l: f"{miner_max_hp(l):.1f} miner hp"),
     _up("firstaid", "First Aid", "combat", "cross", (2.5, 3), [("hardhats", 1)], 700, 2.0, 6,
-        "Miners heal faster, and replacements for the fallen arrive sooner.",
-        lambda l: f"{respawn_secs(l):.1f}s to replace, heal {100 * miner_regen(l):.1f}% of health/s"),
+        "Miners heal faster once they've had a breather.",
+        lambda l: f"heal {100 * miner_regen(l):.1f}% of health/s"),
     _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (1.5, 1), [("slayer", 1)], 500, 2.2, 3,
         "Blue spirit-light on every helmet: ghosts can't fade out, and wisps slow down near the crew.",
         lambda l: "no lanterns" if l == 0 else f"ghosts can't phase, wisps -{round(100 * wisp_slow(l))}% speed"),
@@ -225,7 +224,7 @@ UNLOCK_DEPTH = {
     # Tools
     "power": 0, "speed": 1, "diamond": 3, "crit": 6, "deepstrike": 9, "quake": 14, "masterwork": 25,
     # Hands
-    "click": 2, "golden": 0, "shockwave": 4, "steady": 7, "autotap": 10, "dynamite": 18, "bigbombs": 30,
+    "click": 2, "golden": 0, "shockwave": 3, "steady": 7, "autotap": 10, "dynamite": 18, "bigbombs": 30,
     # Fortune
     "value": 0, "bounty": 3, "prospector": 5, "double": 9, "golddust": 12, "goldrush": 20, "midas": 32,
     # Combat (monsters show up from depth 1)

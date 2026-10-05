@@ -16,8 +16,8 @@ From depth 16, a bat left flying for 3 seconds turns into a vampire, which heals
 as it drains a miner - so swat bats fast. Ghosts phase out and can't be clicked for a
 moment every few seconds, so time your clicks. A grabbed miner is choked until you click the enemy to death;
 if you are too slow the miner dies - for good. They're buried in the graveyard and a new
-recruit takes their place 15 seconds later. The Combat menu lets your miners fight back,
-survive longer and get replaced sooner.
+recruit takes their place 15 seconds later. The Combat menu lets your miners fight back
+and survive longer.
 
 The Foreman upgrade hires a foreman who walks the site barking orders: the crew swings
 faster while they're alive (and faster still near them), but monsters can kill them too.
@@ -41,10 +41,11 @@ The Crew page (`C`) tracks every miner's level and experience, blocks mined, gol
 monsters fought off, times saved and time on the job, and its Graveyard tab remembers the
 fallen. Enemies only act while you are on the dig site.
 
-Waves arrive every 35s at depth 1, speeding up steadily to every 20s by depth 10 (and
-staying at 20s after that). Each wave tops the board up to the enemy cap - 1 enemy at
-depth 1, +1 every 3 levels, up to 8 - so enemies you leave alive count toward the next
-wave. Tuning lives at the top of `dig/enemies.py`.
+Waves arrive every 15s at depth 1 - small and frequent, to get things going - easing to every 20s by
+depth 10 (and staying at 20s after that, as the waves themselves grow). Each wave tops the board up to
+the enemy cap - 1 enemy at depth 1, +1 every 3 levels up to 8 at 21m, then +1 every 6 metres up to 12 -
+so enemies you leave alive count toward the next wave. From 25m some arrive as elites: bigger, much
+tougher and harder-gripping, worth a bigger bounty. Tuning lives at the top of `dig/enemies.py`.
 
 The mine changes as you go down: every 10 metres you break into a new biome - the Topsoil, the
 Stone Caverns, the Crystal Grotto, the Magma Depths, the Ancient Ruins and finally the Abyss - each
@@ -95,8 +96,10 @@ The main menu plays `assets/music/menu.wav` and the game itself (the dig site an
 synthesiser in `tools/make_music.py` (no samples or downloads). Regenerate it with `uv run tools/make_music.py`.
 
 Volumes (master, music, sound effects) are set from **Settings** on the main menu and saved to
-`settings.json`. Sound effects go through `dig/audio.py`: drop a WAV into `assets/sfx/` and call
-`game.audio.play("name")`.
+`settings.json`. Sound effects go through `dig/audio.py`: drop a WAV into `assets/sfx/` (or several takes,
+`name_1.wav`, `name_2.wav`... - one is picked at random each time) and call `game.audio.play("name")`;
+`SFX_GAIN` there sets how loud each sits. The click when you hit a block or a monster is made by
+`tools/make_sfx.py` (`uv run tools/make_sfx.py`).
 
 ## Testing
 

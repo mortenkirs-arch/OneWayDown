@@ -47,8 +47,8 @@ class SettingsScene(Scene):
         elif event.type == pygame.MOUSEMOTION and self.dragging:
             self.slide(self.dragging, event.pos[0])
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging:
-            if self.dragging in ("sfx", "master"):   # a blip, so you can hear the new effects level
-                self.audio.play("tick")
+            if self.dragging in ("sfx", "master"):   # a click, so you can hear the new effects level
+                self.audio.play("click")
             self.dragging = None
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.close()
