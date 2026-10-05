@@ -42,14 +42,15 @@ def vault_rate(lv): return 0.01 * lv                  # Gold Vault: interest per
 # Combat (your clicks on MONSTERS, and miners fighting back)
 def monster_damage(lv): return (4 + 4 * lv) * 1.12 ** lv
 def enemy_hit_floor(lv): return min(0.25, 0.08 + 0.01 * lv)   # min share of an enemy's max hp per hit
-def miner_strike(lv): return 0.0 if lv == 0 else 0.01 + 0.01 * lv  # share of attacker's max hp per swing
+def miner_strike(lv): return 0.0 if lv == 0 else 0.02 + 0.004 * lv  # share of attacker's max hp per strike
+def last_stand_mult(lv): return 1 + 0.5 * lv           # Last Stand: strikes this much harder when desperate
 def miner_max_hp(lv): return 10 * (1 + 0.25 * lv)
 def respawn_secs(lv): return 15 - 1.5 * lv
 def miner_regen(lv): return 0.015 + 0.0075 * lv       # share of max health healed per second
 def wisp_slow(lv): return 0.15 * lv                   # Spirit Lantern: wisps near the crew slow down
-def trap_share(lv): return 0.08 * lv                  # Booby Traps: share of max hp taken on arrival
+def trap_share(lv): return 0.05 * lv                  # Booby Traps: share of max hp taken on arrival
 def ballista_interval(lv): return max(1.2, 3.2 - 0.4 * lv)
-def ballista_share(lv): return 0.08 + 0.02 * lv       # Ballista: share of max hp per bolt
+def ballista_share(lv): return 0.06 + 0.015 * lv      # Ballista: share of max hp per bolt
 
 
 TABS = ["crew", "tools", "hands", "fortune", "combat"]
@@ -190,8 +191,8 @@ UPGRADES = [
     _up("cleave", "Cleave", "combat", "slash", (0.5, 3), [("smite", 1)], 1200, 2.1, 5,
         "Hitting a monster also hits other monsters close by.", lambda l: f"{20 * l}% to monsters nearby"),
     _up("defense", "Self Defense", "combat", "shield", (2.5, 1), [("slayer", 1)], 80, 1.7, 10,
-        "Grabbed miners fight back, striking their attacker every swing.",
-        lambda l: "miners can't fight back" if l == 0 else f"{miner_strike(l):.0%} of attacker hp / swing"),
+        "Grabbed miners fight back, striking their attacker once a second: it buys time until help arrives.",
+        lambda l: "miners can't fight back" if l == 0 else f"{100 * miner_strike(l):.1f}% of attacker hp / strike"),
     _up("hardhats", "Hard Hats", "combat", "helmet", (2.5, 2), [("defense", 1)], 200, 1.8, 8,
         "Miners survive longer when grabbed.", lambda l: f"{miner_max_hp(l):.1f} miner hp"),
     _up("firstaid", "First Aid", "combat", "cross", (2.5, 3), [("hardhats", 1)], 700, 2.0, 6,
@@ -209,7 +210,7 @@ UPGRADES = [
         f"a bolt every {ballista_interval(l):.1f}s, {round(100 * ballista_share(l))}% of max hp"),
     _up("laststand", "Last Stand", "combat", "fist", (1.5, 4), [("cleave", 1), ("firstaid", 1)],
         10000, 2.8, 3, "Miners below 30% health fight back far harder.",
-        lambda l: f"x{1 + l} strike when desperate"),
+        lambda l: f"x{last_stand_mult(l):.1f} strike when desperate"),
 ]
 # Depth milestones: an upgrade can't be bought until you've dug this deep (as well as owning its
 # prerequisites). Gives you something to dig towards - capstones only open up deep down.
@@ -224,7 +225,7 @@ UNLOCK_DEPTH = {
     # Tools
     "power": 0, "speed": 1, "diamond": 3, "crit": 6, "deepstrike": 9, "quake": 14, "masterwork": 25,
     # Hands
-    "click": 3, "golden": 0, "shockwave": 4, "steady": 7, "autotap": 10, "dynamite": 18, "bigbombs": 30,
+    "click": 2, "golden": 0, "shockwave": 4, "steady": 7, "autotap": 10, "dynamite": 18, "bigbombs": 30,
     # Fortune
     "value": 0, "bounty": 3, "prospector": 5, "double": 9, "golddust": 12, "goldrush": 20, "midas": 32,
     # Combat (monsters show up from depth 1)

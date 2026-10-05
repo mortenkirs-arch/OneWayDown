@@ -8,10 +8,14 @@ import time
 import pygame
 
 from .biomes import BIOMES, biome_at
-from .config import AUTOSAVE_SECS, FPS, GOLD, H, PANEL, SAVE_PATH, W
-from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, UpgradeScene
+from .audio import Audio
+from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_PATH, W
+from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, SettingsScene, UpgradeScene
 from .ui import Fonts
 from .world import World
+
+MUSIC_FADE_OUT_MS = 700    # changing tracks: the old one fades out over this...
+MUSIC_FADE_IN_MS = 1500    # ...then the new one fades in over this
 
 
 class Game:
@@ -20,7 +24,8 @@ class Game:
         (a developer's test game) instead of loading the save and opening the menu."""
         self.save_path = save_path
         pygame.init()
-        pygame.display.set_caption("Keep Digging")
+        pygame.display.set_caption("The Only Way Is Down")
+        self.audio = Audio()   # volume settings, music and sound effects
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.fonts = Fonts()
@@ -42,13 +47,48 @@ class Game:
             "upgrades": UpgradeScene(self),
             "crew": CrewScene(self),
             "artifacts": ArtifactScene(self),
+            "settings": SettingsScene(self),
         }
         self.scene = self.scenes["play" if world else "menu"]
+        self.music = None   # which track is playing (None = silence)
+        self.music_start_at = 0.0   # when a track waiting for the last one to fade out should start
+        self.update_music()
 
     # ----- scene control --------------------------------------------------
     def switch(self, name):
         self.scene = self.scenes[name]
         self.scene.enter()
+        self.update_music()
+
+    # ----- music ----------------------------------------------------------
+    def wanted_music(self):
+        """The track for the current screen: the menu theme on the main menu (and on the upgrades or settings
+        when opened from it), the game theme everywhere in the game - the dig site and its menus alike."""
+        if self.scene is self.scenes["menu"] or getattr(self.scene, "return_to", None) == "menu":
+            return "menu"
+        return "game"
+
+    def update_music(self):
+        """Move to the track the current screen wants: the old one fades out, then the new one fades in.
+        Quietly does nothing without an audio device."""
+        want = self.wanted_music()
+        if want == self.music or not pygame.mixer.get_init():
+            return
+        self.music = want
+        if pygame.mixer.music.get_busy():   # let the old track fade before the new one starts
+            pygame.mixer.music.fadeout(MUSIC_FADE_OUT_MS)
+            self.music_start_at = time.time() + MUSIC_FADE_OUT_MS / 1000
+        else:
+            self.music_start_at = 0.0
+            self.start_music()
+
+    def start_music(self):
+        try:
+            pygame.mixer.music.load(os.path.join(MUSIC_DIR, self.music + ".wav"))
+            pygame.mixer.music.set_volume(self.audio.level("music"))
+            pygame.mixer.music.play(loops=-1, fade_ms=MUSIC_FADE_IN_MS)   # a seamless loop, repeated for ever
+        except pygame.error:   # (missing file, or the device went away)
+            self.music = None
 
     def new_game(self):
         self.world = World()
@@ -63,10 +103,17 @@ class Game:
         if self.world:
             self.switch("artifacts")
 
+    def open_settings(self, came_from="menu"):
+        self.scenes["settings"].return_to = came_from
+        self.switch("settings")
+
     def open_upgrades(self, came_from):
         if not self.world:
             self.world = World()
-        self.scenes["upgrades"].return_to = came_from
+        upgrades = self.scenes["upgrades"]
+        upgrades.return_to = came_from
+        if came_from == "play" and self.world.combat_tip():   # pointed here by the first boss's tip: Combat
+            upgrades.switch_tab("combat")
         self.switch("upgrades")
 
     def to_menu(self):
@@ -112,6 +159,9 @@ class Game:
             pygame.display.flip()
 
     def update(self, dt):
+        if self.music_start_at and time.time() >= self.music_start_at:   # the old track has faded: start the new
+            self.music_start_at = 0.0
+            self.start_music()
         if self.world and self.scene.simulate:
             self.world.update(dt, combat=self.scene.combat)
             if time.time() - self.last_save > AUTOSAVE_SECS:

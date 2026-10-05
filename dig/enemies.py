@@ -5,7 +5,8 @@ can kill the crew while you are browsing menus.
 
 Each enemy type is data in ENEMY_TYPES:
   hp, bounty    base values, scaled by depth when the enemy appears
-  speed, dps    tiles/s, and damage per second to a grabbed miner (MINER_MAX_HP = 10)
+  speed, dps    tiles/s, and damage per second to a grabbed miner near the surface (MINER_MAX_HP = 10);
+                past GRIP_FROM metres it grows with a typical crew member's health (crew_hp_at)
   min_depth     shallowest depth it can spawn at; weight = relative spawn chance (0 = never spawns directly)
   reach         how close it must get to grab a miner
   entrance      spawn animation: "dig" (claws out of the ground), "drop" (silk thread), "swoop" (flies in),
@@ -25,7 +26,8 @@ Each enemy type is data in ENEMY_TYPES:
 Bosses (boss=True) never grab: they stalk the crew, wind up and slam the ground around them, and
 call in minions. Extra keys:
   look, scale   which enemy sprite to draw, and how much bigger
-  slam          damage to every crew member in reach when the slam lands (MINER_MAX_HP = 10)
+  slam          damage to every crew member in reach when the slam lands, as a share of a typical crew
+                member's health at the boss's depth (crew_hp_at): so slams keep pace with Hard Hats
   minion        dict(kind, count, every): summoned around the boss every `every` seconds
   dive          (flying bosses) instead of walking up and slamming, it marks a crew member's spot and
                 swoops onto it when the wind-up ends
@@ -45,6 +47,7 @@ import random
 
 from .blocks import hp_scale, value_scale
 from .config import GRID
+from .miners import MINER_MAX_HP
 
 ENEMY_TYPES = {
     "zombie": dict(name="Zombie", hp=14, speed=0.55, dps=1.3, bounty=12, min_depth=1, weight=3,
@@ -76,30 +79,30 @@ ENEMY_TYPES = {
     # ----- bosses: one every BOSS_EVERY metres, in this order, then round again ----------------
     "zombieking": dict(name="Zombie King", hp=2200, speed=0.45, dps=0, bounty=360, min_depth=0, weight=0,
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
-                       look="zombie", scale=2.2, slam=4.0, minion=dict(kind="zombie", count=2, every=14.0),
+                       look="zombie", scale=2.2, slam=0.32, minion=dict(kind="zombie", count=2, every=14.0),
                        tint=(150, 130, 210), gore=(120, 190, 80)),
     "broodmother": dict(name="Broodmother", hp=2000, speed=0.8, dps=0, bounty=360, min_depth=0, weight=0,
                         reach=0.9, entrance="drop", grab="head", arrival="descends", boss=True,
-                        look="spider", scale=2.4, crown_lift=14, slam=3.0,
+                        look="spider", scale=2.4, crown_lift=14, slam=0.25,
                         minion=dict(kind="eggsac", count=2, every=9.0),
                         tint=(150, 200, 120), gore=(90, 60, 120)),
     "greatbat": dict(name="Great Bat", hp=2400, speed=1.0, dps=0, bounty=380, min_depth=0, weight=0,
                      reach=0.9, entrance="swoop", grab="neck", arrival="swoops in", boss=True, dive=True,
-                     altitude=1.1, look="bat", scale=2.4, crown_lift=16, slam=4.0,
+                     altitude=1.1, look="bat", scale=2.4, crown_lift=16, slam=0.30,
                      minion=dict(kind="bat", count=3, every=11.0),
                      tint=(228, 228, 238), gore=(70, 50, 80)),
     "bonetyrant": dict(name="Bone Tyrant", hp=2400, speed=0.5, dps=0, bounty=400, min_depth=0, weight=0,
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
-                       look="skeleton", scale=2.3, slam=5.0, minion=dict(kind="skeleton", count=2, every=12.0),
+                       look="skeleton", scale=2.3, slam=0.33, minion=dict(kind="skeleton", count=2, every=12.0),
                        tint=(200, 200, 220), gore=(232, 226, 205)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
                         reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
-                        look="vampire", scale=2.0, slam=4.0, minion=dict(kind="bat", count=2, every=12.0),
+                        look="vampire", scale=2.0, slam=0.28, minion=dict(kind="bat", count=2, every=12.0),
                         tint=(228, 228, 238), gore=(160, 30, 45)),
     "lich": dict(name="Lich", hp=2600, speed=0.4, dps=0, bounty=420, min_depth=0, weight=0,
                  reach=0.9, entrance="fade", grab="engulf", arrival="materialises", boss=True,
                  altitude=0.35, wobble=dict(amount=0.2, freq=1.0),
-                 look="ghost", scale=2.2, slam=5.0, minion=dict(kind="wisp", count=3, every=10.0),
+                 look="ghost", scale=2.2, slam=0.33, minion=dict(kind="wisp", count=3, every=10.0),
                  boss_tint=(205, 160, 255),
                  tint=(160, 190, 230), gore=(200, 170, 255)),
     "eggsac": dict(name="Egg Sac", hp=10, speed=0, dps=0, bounty=4, min_depth=0, weight=0,
@@ -129,12 +132,12 @@ WEB_SLOW = 0.35              # ...and crew crossing them move at this share of t
 BAT_FORM_EVERY = 14.0        # Vampire Lord: seconds between turning into a swarm of bats
 BAT_FORM_SPEED = 3.2         # tiles/s the swarm flies (nothing can hit it)
 BITE_SECS = 3.5              # how long he feeds on the crew member he lands on...
-BITE_DPS = 2.2               # ...draining this much health a second...
+BITE_SHARE = 0.08           # ...draining this share of a typical crew member's health a second...
 BITE_HEAL = 0.012            # ...and healing this share of his max health a second
 BITE_BREAK = 0.04            # taking this share of his max health while biting makes him let go
 CURSE_EVERY = 9.0            # Lich: seconds between curses
 CURSE_SECS = 4.5             # a curse bursts this long after it lands, unless you click the crew member
-CURSE_DMG = 6.0              # damage to every crew member within CURSE_RADIUS when it bursts
+CURSE_SHARE = 0.4           # damage to every crew member within CURSE_RADIUS when it bursts (share, as above)
 CURSE_RADIUS = 1.5
 CURSE_WARD = 0.3             # Spirit Lantern weakens the burst by this share per level
 SHIELD_PER_WISP = 0.25       # each wisp alive takes this share off the damage the Lich takes...
@@ -143,11 +146,17 @@ SCREECH_EVERY = 13.0         # Great Bat: seconds between screeches...
 SCREECH_RADIUS = 3.5         # ...stunning the crew within this many tiles...
 SCREECH_STUN = 2.2           # ...for this long
 BONE_THROW_EVERY = 5.0       # Bone Tyrant: seconds between bones thrown at whoever is furthest away...
-BONE_THROW_DMG = 3.0         # ...hitting for this much
+BONE_THROW_SHARE = 0.2      # ...hitting for this share of a typical crew member's health
 BONE_THROW_SECS = 0.7        # (flight time)
 PILE_SECS = 5.0              # its first "death" leaves a bone pile: smash it within this long...
 PILE_HP = 0.2                # ...(the pile has this share of its max health)...
 REFORM_HP = 0.5              # ...or it pulls itself together with this share
+
+
+def crew_hp_at(depth):
+    """A typical crew member's health at this depth (with the Hard Hats a player has usually bought by then):
+    what boss attacks are measured against, so they stay a threat all the way down."""
+    return MINER_MAX_HP * (1 + 0.035 * min(depth, 60))
 
 
 def boss_for(depth):
@@ -156,12 +165,24 @@ def boss_for(depth):
         return None
     return BOSSES[(depth // BOSS_EVERY - 1) % len(BOSSES)]
 
+GRIP_FROM = 10                # monsters' grabs hit as designed down to here, then harder with depth
+
 # Waves: every spawn_interval(depth) seconds the board is topped up to max_enemies(depth).
 ENEMY_START_DEPTH = 1          # monsters arrive the moment you reach this depth (none above it)
 WAVE_INTERVAL_START = 35.0     # seconds between waves at ENEMY_START_DEPTH...
 WAVE_INTERVAL_MIN = 20.0       # ...shrinking linearly to this by WAVE_FASTEST_DEPTH, then staying there
 WAVE_FASTEST_DEPTH = 10
-MAX_ENEMIES_CAP = 8
+MAX_ENEMIES_CAP = 8           # monsters alive after a wave, reached at 21m...
+DEEP_CAP = 12                 # ...then +1 every DEEP_CAP_EVERY metres, up to this (at 45m)
+DEEP_CAP_EVERY = 6
+ELITE_FROM = 25               # elite monsters: from this depth...
+ELITE_CHANCE = (0.10, 0.25)   # ...this chance per wave monster, rising over ELITE_RAMP metres
+ELITE_RAMP = 25
+ELITE_HP = 4.0                # much tougher...
+ELITE_GRIP = 1.6              # ...grab harder...
+ELITE_BOUNTY = 4.0            # ...and pay more
+ELITE_PCT_SCALE = 0.4         # they shrug off "share of max health" damage: this much of it lands
+ELITE_SCALE = 1.35            # drawn this much bigger, in a red glow
 
 
 def spawn_interval(depth):
@@ -171,8 +192,20 @@ def spawn_interval(depth):
 
 
 def max_enemies(depth):
-    """Enemies alive after each wave: 1 at depth 1, +1 every 3 levels, up to MAX_ENEMIES_CAP."""
-    return min(MAX_ENEMIES_CAP, 1 + depth // 3)
+    """Enemies alive after each wave: 1 at depth 1, +1 every 3 levels up to MAX_ENEMIES_CAP (at 21m), then +1
+    every DEEP_CAP_EVERY metres up to DEEP_CAP."""
+    cap = min(MAX_ENEMIES_CAP, 1 + depth // 3)
+    if cap == MAX_ENEMIES_CAP:
+        cap = min(DEEP_CAP, MAX_ENEMIES_CAP + max(0, depth - 21) // DEEP_CAP_EVERY)
+    return cap
+
+
+def elite_chance(depth):
+    """Chance a wave monster at this depth is an elite."""
+    if depth < ELITE_FROM:
+        return 0.0
+    lo, hi = ELITE_CHANCE
+    return lo + (hi - lo) * min(1.0, (depth - ELITE_FROM) / ELITE_RAMP)
 
 
 def choose_kind(depth):
@@ -196,8 +229,9 @@ TRANSFORM_SECS = 0.8   # bat -> vampire smoke transformation
 
 
 class Enemy:
-    def __init__(self, kind, depth, cell, ground_z, delay=0.0, hp_mult=1.0):
+    def __init__(self, kind, depth, cell, ground_z, delay=0.0, hp_mult=1.0, elite=False):
         self.depth = depth
+        self.elite = elite            # a bigger, tougher, harder-gripping version (deep waves only)
         self.hp_mult = hp_mult        # (Zombie King's Crown)
         self.become(kind)
         self.x, self.y = cell[0] + 0.5, cell[1] + 0.5
@@ -233,18 +267,30 @@ class Enemy:
         """Set the enemy type, with full health for that type at this depth."""
         spec = ENEMY_TYPES[kind]
         self.kind = kind
-        self.max_hp = spec["hp"] * hp_scale(self.depth) * self.hp_mult
+        self.max_hp = spec["hp"] * hp_scale(self.depth) * self.hp_mult * (ELITE_HP if self.elite else 1)
         self.hp = self.max_hp
-        self.bounty_base = spec["bounty"] * 2 * value_scale(self.depth)
+        self.bounty_base = spec["bounty"] * 2 * value_scale(self.depth) * (ELITE_BOUNTY if self.elite else 1)
 
     @property
     def boss(self):
         return self.spec.get("boss", False)
 
     @property
+    def draw_scale(self):
+        """How much bigger than its regular sprite this one is drawn (bosses and elites), or None."""
+        return self.spec.get("scale") or (ELITE_SCALE if self.elite else None)
+
+    @property
+    def name(self):
+        return ("Elite " if self.elite else "") + self.spec["name"]
+
+    @property
     def pct_scale(self):
-        """How much of any "share of max health" damage actually lands (bosses resist it)."""
-        return BOSS_PCT_SCALE if self.boss else 1.0
+        """How much of any "share of max health" damage actually lands (bosses and elites resist it): guards,
+        traps, the ballista, Self Defense, charges and Executioner's minimum all go through this."""
+        if self.boss:
+            return BOSS_PCT_SCALE
+        return ELITE_PCT_SCALE if self.elite else 1.0
 
     @property
     def look(self):
@@ -325,8 +371,13 @@ class Enemy:
                 self.release()
                 return
             self.x, self.y = v.x + self.grab_offset[0], v.y + self.grab_offset[1]
-            drained = min(v.hp, self.spec["dps"] * dt * world.art_mult("grab_dmg"))   # (Broodmother's Silk)
+            # the grip tightens past GRIP_FROM metres: drains keep pace with a typical crew member's health
+            dps = self.spec["dps"] * max(1.0, crew_hp_at(self.depth) / crew_hp_at(GRIP_FROM))
+            if self.elite:
+                dps *= ELITE_GRIP
+            drained = min(v.hp, dps * dt * world.art_mult("grab_dmg"))   # (Broodmother's Silk)
             v.hp -= drained
+            v.last_hurt = world.clock
             if self.spec.get("lifesteal"):
                 self.hp = min(self.max_hp, self.hp + drained / v.max_hp * self.max_hp * self.spec["lifesteal"])
                 world.blood_drip(v, self)

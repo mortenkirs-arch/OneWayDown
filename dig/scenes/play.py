@@ -114,6 +114,7 @@ class PlayScene(Scene):
         self.draw_hud(surf, mouse)
         draw_flying_coins(surf, w.coins)   # over the HUD, so they visibly drop into the counter
         self.draw_first_hire_guide(surf, w)
+        self.draw_combat_tip(surf, w)
         self.draw_charge_and_combo(surf, w, mouse)
         if w.notice:
             self.draw_notice(surf, w)
@@ -224,6 +225,20 @@ class PlayScene(Scene):
                                         ("Open Upgrades (U) to hire them", TEXT)],
                      (btn.left - 60, btn.centery + 6), "midright")
 
+    def draw_combat_tip(self, surf, w):
+        """The first boss is a wall without combat upgrades: glow the Upgrades button and say where to look."""
+        if not w.combat_tip():
+            return
+        t = time.time()
+        btn = self.buttons[0]
+        draw_glow(surf, btn.rect, t)
+        crew_bottom = self.buttons[2].rect.bottom   # (below the right-hand buttons, clear of the boss bar)
+        draw_callout(surf, self.fonts, [("The Zombie King is tough!", BAD),
+                                        ("Combat upgrades bring it down faster:", TEXT),
+                                        ("Upgrades (U)  >  Combat:  Monster Slayer, Executioner", GOLD),
+                                        ("(the fight waits while you shop)", MUTED)],
+                     (W - 16, crew_bottom + 14), "topright", size=22)
+
     def draw_notice(self, surf, w):
         """Banner at the bottom: new upgrades at a depth milestone, or news of a boss."""
         text, left, *hint = w.notice   # (an optional third item replaces the "Press U" hint)
@@ -253,8 +268,12 @@ class PlayScene(Scene):
         pygame.draw.rect(surf, BAD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=5)
         pygame.draw.rect(surf, (255, 200, 190), bar.inflate(4, 4), 2, border_radius=6)
         left = max(0, math.ceil(BOSS_TIME_LIMIT - boss.fight_time))
-        hint = "It's coming..." if boss.state == "emerging" else f"{self.boss_tip(boss)}  -  retreats in {left}s"
-        draw_text(surf, f, hint, 20, BAD if left <= 15 else MUTED, (cx, 84), "center")
+        hint = "It's coming..." if boss.state == "emerging" else self.boss_tip(boss)
+        room = 2 * (cx - TOP_PANEL.right) - 24   # (between the top-left panel and the buttons)
+        size = next((n for n in (20, 18, 16) if f[n].size(hint)[0] <= room), 16)
+        draw_text(surf, f, hint, size, MUTED, (cx, 84), "center")
+        if boss.state != "emerging":
+            draw_text(surf, f, f"retreats in {left}s", 18, BAD if left <= 15 else MUTED, (cx, 104), "center")
 
     def boss_tip(self, boss):
         """What to do about this boss right now."""

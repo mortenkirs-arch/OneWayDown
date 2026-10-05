@@ -53,7 +53,7 @@ class UpgradeScene(Scene):
         self.tab = TABS[0]
         # each tab remembers its own selected node; starts on the tab's root
         roots = {tab: [u for u in UPGRADES_BY_TAB[tab] if not tree_requires(u)] for tab in TABS}
-        # each tab opens on its earliest root (Hands: Golden Touch, until Power Gloves opens at 3m)
+        # each tab opens on its earliest root (Hands: Golden Touch, until Power Gloves opens at 2m)
         self.selected_in = {tab: min(roots[tab], key=lambda u: u["depth"])["key"] for tab in TABS}
         self.particles = []
         self.coins = []                  # spent coins flying from the gold counter to an upgrade
@@ -163,6 +163,8 @@ class UpgradeScene(Scene):
         self.bursts = [b for b in self.bursts if b[0] > 0]
 
     def draw(self, s):
+        if self.tab == "combat":   # (the first boss's "get some combat upgrades" tip has done its job)
+            self.world.combat_tip_done = True
         w = self.world
         f = self.fonts
         mouse = pygame.mouse.get_pos()

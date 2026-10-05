@@ -1,4 +1,4 @@
-# Keep Digging
+# The Only Way Is Down
 
 An isometric incremental mining game built with pygame (pygame-ce).
 
@@ -88,6 +88,16 @@ Requires [uv](https://docs.astral.sh/uv/):
 uv run main.py
 ```
 
+## Music
+
+The main menu plays `assets/music/menu.wav` and the game itself (the dig site and its menus) plays
+`assets/music/game.wav`, crossfading between them. Both are original seamless loops made by a small
+synthesiser in `tools/make_music.py` (no samples or downloads). Regenerate it with `uv run tools/make_music.py`.
+
+Volumes (master, music, sound effects) are set from **Settings** on the main menu and saved to
+`settings.json`. Sound effects go through `dig/audio.py`: drop a WAV into `assets/sfx/` and call
+`game.audio.play("name")`.
+
 ## Testing
 
 Jump straight to any depth or boss with a fresh test game, set up about how a player would have it by
@@ -119,7 +129,7 @@ uv run main.py --save saves/depth_39.json   # carry on a test game later (or use
 Progress auto-saves to `savegame.json` every 10 seconds and on exit.
 
 The window opens at the largest of 1600x900, 1440x810 or 1280x720 that fits your screen
-(set `KEEP_DIGGING_RES=1280x720` to force a size). Depth milestones live in `UNLOCK_DEPTH`
+(set `THE_ONLY_WAY_IS_DOWN_RES=1280x720` to force a size). Depth milestones live in `UNLOCK_DEPTH`
 in `dig/upgrades.py`.
 
 ## Project layout

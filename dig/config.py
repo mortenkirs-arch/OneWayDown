@@ -5,13 +5,13 @@ import pygame
 
 # The window is the largest of these that fits the desktop. Text stays the same size; the board
 # scales up with the window so there's more room around the (fixed-size) characters.
-# Override with e.g. KEEP_DIGGING_RES=1280x720.
+# Override with e.g. THE_ONLY_WAY_IS_DOWN_RES=1280x720.
 RESOLUTIONS = [(1600, 900), (1440, 810), (1280, 720)]
 BASE_W = 1280                 # the layout was designed at 1280x720
 
 
 def _pick_resolution():
-    forced = os.environ.get("KEEP_DIGGING_RES")
+    forced = os.environ.get("THE_ONLY_WAY_IS_DOWN_RES")
     if forced:
         w, h = forced.lower().split("x")
         return int(w), int(h)
@@ -43,6 +43,7 @@ GOLD_HUD_COIN = (52, 44)      # where the HUD's gold coin sits; earned coins fly
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_PATH = os.path.join(PROJECT_ROOT, "savegame.json")
 AUTOSAVE_SECS = 10
+MUSIC_DIR = os.path.join(PROJECT_ROOT, "assets", "music")   # (regenerate with: uv run tools/make_music.py)
 
 PANEL = (38, 32, 52)
 PANEL_EDGE = (78, 66, 104)

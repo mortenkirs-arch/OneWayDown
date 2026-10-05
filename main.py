@@ -1,4 +1,4 @@
-"""Keep Digging - an isometric incremental mining game.
+"""The Only Way Is Down - an isometric incremental mining game.
 
 Run with:  uv run main.py
 
@@ -17,7 +17,7 @@ from dig.config import PROJECT_ROOT, SAVE_PATH
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Keep Digging", epilog="With no options, plays your own save.")
+    parser = argparse.ArgumentParser(description="The Only Way Is Down", epilog="With no options, plays your own save.")
     start = parser.add_mutually_exclusive_group()
     start.add_argument("--depth", type=int, metavar="N", help="start a fresh test game at depth N")
     start.add_argument("--boss", metavar="NAME", help="start a fresh test game at a boss (see --list)")

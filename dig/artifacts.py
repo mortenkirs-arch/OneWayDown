@@ -85,4 +85,5 @@ TROPHY_OF = {a["boss"]: k for k, a in ARTIFACTS.items() if "boss" in a}
 
 ARTIFACT_MIN_DEPTH = 3     # no artifacts in the first few metres
 ARTIFACT_CHANCE = 0.12     # chance a new layer hides one (while undiscovered common artifacts remain)
+FIRST_ARTIFACT_BY = 7      # the layer at this depth always hides one if none has been found yet
 REVEAL_POP_SECS = 0.25     # the "artifact found" card pops in this fast (it stays until closed)

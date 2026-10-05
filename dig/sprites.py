@@ -6,7 +6,7 @@ import pygame
 
 from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
 from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
-from .enemies import ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, TRANSFORM_SECS
+from .enemies import ELITE_SCALE, ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, TRANSFORM_SECS
 from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
 
@@ -429,7 +429,7 @@ def enemy_anchor(e, rise, t):
         fx, fy = _feet(e, rise)
         return fx, fy - 12
     ax, ay = _base_anchor(e, rise, t)
-    scale = e.spec.get("scale")
+    scale = e.draw_scale
     if scale:   # bosses are drawn scaled up around their feet
         fx, fy = _feet(e, rise)
         return fx + (ax - fx) * scale, fy + (ay - fy) * scale
@@ -463,13 +463,13 @@ def pick_enemy(world, pos, t):
         if not e.targetable:
             continue
         ax, ay = enemy_anchor(e, world.rise, t)
-        if math.hypot(pos[0] - ax, pos[1] - ay) <= ENEMY_HIT_RADIUS[e.kind]:
+        if math.hypot(pos[0] - ax, pos[1] - ay) <= ENEMY_HIT_RADIUS[e.kind] * (ELITE_SCALE if e.elite else 1):
             return e
     return None
 
 
 def draw_enemy(surf, e, rise, t, hovered=False):
-    scale = e.spec.get("scale")
+    scale = e.draw_scale
     if scale:
         _draw_boss(surf, e, rise, t, hovered, scale)
     else:
@@ -494,7 +494,8 @@ def _draw_boss(surf, e, rise, t, hovered, scale):
         pulse = 0.5 + 0.5 * math.sin(t * 4)
         rx, ry = 34 * scale * 0.5, 12 * scale * 0.5
         aura = pygame.Surface((int(rx * 2 + 8), int(ry * 2 + 8)), pygame.SRCALPHA)
-        pygame.draw.ellipse(aura, (150, 20, 30, int(70 + 50 * pulse)), aura.get_rect().inflate(-8, -8))
+        glow = (235, 60, 40) if e.elite else (150, 20, 30)   # (elites: a brighter, angrier red)
+        pygame.draw.ellipse(aura, (*glow, int(70 + 50 * pulse)), aura.get_rect().inflate(-8, -8))
         surf.blit(aura, (fx - aura.get_width() / 2, fy - aura.get_height() / 2))
     if e.mode == "pile":   # the Bone Tyrant in pieces, rattling as it tries to pull itself together
         _draw_bone_pile(surf, e, rise, t, hovered)
@@ -511,7 +512,7 @@ def _draw_boss(surf, e, rise, t, hovered, scale):
     if tint:
         big.fill(tint, special_flags=pygame.BLEND_RGB_MULT)
     surf.blit(big, (fx - ax * scale, fy - ay * scale))
-    if e.state != "emerging":
+    if e.state != "emerging" and e.boss:
         bx, by = enemy_anchor(e, rise, t)
         _draw_crown(surf, bx, by - e.spec.get("crown_lift", 40) * scale, t)
 

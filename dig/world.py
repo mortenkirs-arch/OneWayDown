@@ -3,7 +3,7 @@ import math
 import random
 import time
 
-from .artifacts import (ARTIFACT_CHANCE, ARTIFACT_MIN_DEPTH, ARTIFACTS, COMMON, STAT_KIND,
+from .artifacts import (ARTIFACT_CHANCE, ARTIFACT_MIN_DEPTH, ARTIFACTS, COMMON, FIRST_ARTIFACT_BY, STAT_KIND,
                         TROPHY_OF)
 from .biomes import biome_at, block_color
 from .blocks import BLOCKS, Block, generate_layer, layer_value
@@ -11,12 +11,13 @@ from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, W
 from .dynamite import EXPLOSION_SECS, Bomb
 from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SECS, QUAKE_SPEED, CoinFly, Floater, Particle,
                       Smoke)
-from .enemies import (BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_DPS, BITE_HEAL, BITE_SECS,
-                      BONE_THROW_DMG, BONE_THROW_EVERY, BONE_THROW_SECS, PILE_HP, PILE_SECS, REFORM_HP,
+from .enemies import (BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE,
+                      BONE_THROW_EVERY, BONE_THROW_SHARE, BONE_THROW_SECS, PILE_HP, PILE_SECS, REFORM_HP,
                       SCREECH_EVERY, SCREECH_RADIUS, SCREECH_STUN,
-                      BOSS_MAX_MINIONS, BOSS_SLAM_RADIUS, BOSS_TIME_LIMIT, CURSE_DMG, CURSE_EVERY, CURSE_RADIUS,
+                      BOSS_MAX_MINIONS, BOSS_SLAM_RADIUS, BOSS_TIME_LIMIT, CURSE_EVERY, CURSE_RADIUS, CURSE_SHARE,
                       CURSE_SECS, CURSE_WARD, ENEMY_START_DEPTH, ENEMY_TYPES, ENRAGE_AT, RALLY_RADIUS, RALLY_SPEED,
                       RALLY_TOUGH, SHIELD_MAX, SHIELD_PER_WISP, WEB_SECS, WEB_SLOW, Enemy, boss_for, choose_kind,
+                      crew_hp_at, elite_chance,
                       edge_cells, max_enemies, spawn_interval)
 from .iso import iso
 from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS, WHETSTONE_POS
@@ -28,7 +29,8 @@ from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, ch
                        trap_share, vault_rate, vein_share, whetstone_boost, wisp_slow,
                        bounty_mult, click_damage, depth_reached, dynamite_interval,
                        enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
-                       miner_max_hp, miner_regen, miner_strike, monster_damage, ore_damage_mult, ore_mult, ore_richness,
+                       miner_max_hp, last_stand_mult, miner_regen, miner_strike, monster_damage, ore_damage_mult,
+                       ore_mult, ore_richness,
                        demo_interval, respawn_secs, second_wind_boost, swing_time, upgrade_cost, value_mult,
                        walk_speed)
 from .util import fmt
@@ -45,13 +47,16 @@ FOREMAN_BARKS = ["Faster!", "Put your backs into it!", "That ore won't dig itsel
 DRILL_HITS_PER_SWING = 7.5   # a driller lands this many small hits in the time a miner swings once...
 DRILL_SHARE = 0.25           # ...each worth this much of a miner's hit: ~1.9x a miner's digging
 GUARD_SWING = 0.7            # seconds between a guard's shovel blows
-GUARD_SHARE = 0.14           # each blow takes this share of a monster's max health (~5s to fell one alone)
+GUARD_SHARE = 0.08           # each blow takes this share of a monster's max health (~9s to fell one alone)...
+GUARD_XP_SHARE = 0.5         # ...and experience counts for half as much as for other crew (x1.5 at most)
 GUARD_RUSH = 1.4             # guards break into a run when there's a monster to fight
 GUARD_REACH = 0.45           # how close a guard gets before swinging
 GUARD_ASSIST_SECS = 3.0      # a guard who hit a monster this recently gets the kill, whoever lands the last blow
 XP_PER_BLOCK = 1.0           # xp for breaking a whole block (diggers, and the demolitionist's charges)
 XP_PER_MONSTER = 4.0         # xp for blows adding up to a whole monster's health (guards, crew fighting back)
 XP_PER_ORDER = 1.5           # xp for each order the foreman barks
+DEFENSE_STRIKE_SECS = 1.0    # Self Defense: a grabbed miner strikes back this often
+REGEN_DELAY = 5.0            # crew only start healing once they've gone this long without being hit
 ROCK_SHARE = 0.0015          # layer cleared but the boss still up: each rock a digger throws takes this share
                              # of its max health (x the thrower's level bonus)...
 ROCK_EVERY = (2.0, 3.0)      # ...one every this many seconds (random in the range)...
@@ -72,6 +77,8 @@ WHET_SHARPEN_SECS = 1.5      # time spent at the wheel
 WHET_SHARP_SECS = 45.0       # how long a sharpened pick stays sharp
 WHET_GAP = 3.0               # seconds between sending miners to the wheel
 LANTERN_RADIUS = 2.5         # Spirit Lantern: wisps this close to the crew are slowed
+COMBAT_TIP_CLICKS = 100      # the first boss suggests Combat upgrades if your clicks would take more than this
+                             # many to bring it down
 SAVE_VERSION = 2         # bump when the save format changes meaning (see from_dict migrations)
    # cap on coins in the air at once (late game breaks blocks very fast)
 
@@ -147,6 +154,7 @@ class World:
         self.boss_done = -1                                     # deepest boss depth already fought (won or fled)
         self.boss_gate_told = False                             # told the player the boss bars the way down
         self.webs = {}                                          # Broodmother: {cell: seconds left} slowing the crew
+        self.combat_tip_done = False                            # looked at the Combat upgrades during the first boss
 
     # ----- stats ----------------------------------------------------------
     def lv(self, key): return self.levels[key]
@@ -303,16 +311,19 @@ class World:
         if count <= 0:
             return 0
         kinds = [choose_kind(self.depth) for _ in range(count)]
+        elites = 0
         for i, cell in enumerate(edge_cells(count)):
             # stagger the emergence so a big wave pops out one after another
+            elite = random.random() < elite_chance(self.depth)
+            elites += elite
             enemy = Enemy(kinds[i], self.depth, cell, self.column_height(*cell), delay=i * 0.35,
-                          hp_mult=self.art_mult("enemy_hp"))
+                          hp_mult=self.art_mult("enemy_hp"), elite=elite)
             self.enemies.append(enemy)
         if count == 1:
-            spec = ENEMY_TYPES[kinds[0]]
-            msg = f"A {spec['name'].upper()} {spec['arrival'].upper()}!"
+            e = self.enemies[-1]
+            msg = f"{'AN' if e.elite else 'A'} {e.name.upper()} {e.spec['arrival'].upper()}!"
         else:
-            msg = f"WAVE INCOMING: {count} ENEMIES!"
+            msg = f"WAVE INCOMING: {count} ENEMIES!" + (f"  ({elites} ELITE)" if elites else "")
         self.announcement = [msg, 2.5]   # shown as the HUD banner title
         return count
 
@@ -324,6 +335,21 @@ class World:
     def boss(self):
         """The boss on the board, or None."""
         return next((e for e in self.enemies if e.boss), None)
+
+    def combat_tip(self):
+        """Whether to nudge the player towards the Combat upgrades: during the first boss fight (the Zombie King
+        at 10m), if their clicks would take a long while to bring it down and they haven't looked yet."""
+        boss = self.boss()
+        if (boss is None or boss.kind != "zombieking" or self.depth != 10 or boss.state == "emerging"
+                or self.combat_tip_done):
+            return False
+        per_click = self.enemy_hit_damage(boss, self.monster_hit_damage()) * self.art_mult("boss_dmg")
+        return boss.max_hp / per_click > COMBAT_TIP_CLICKS
+
+    def hurt(self, m, dmg):
+        """A crew member takes damage (and won't start healing again until they've had a breather)."""
+        m.hp -= dmg
+        m.last_hurt = self.clock
 
     def nearest_crew(self, x, y):
         """Nearest crew member still standing (bosses go for anyone, grabbed or not)."""
@@ -384,11 +410,12 @@ class World:
         for m in self.miners:
             if m.state == "down" or math.hypot(m.x - boss.x, m.y - boss.y) > BOSS_SLAM_RADIUS:
                 continue
-            m.hp -= boss.spec["slam"]
+            dmg = boss.spec["slam"] * crew_hp_at(boss.depth)
+            self.hurt(m, dmg)
             if boss.spec.get("lifesteal"):   # the Vampire Lord feeds on every crew member it hits
                 boss.hp = min(boss.max_hp, boss.hp + boss.max_hp * boss.spec["lifesteal"])
             px, py = self.entity_screen(m, 50)
-            self.floaters.append(Floater(f"-{boss.spec['slam']:.0f}", px, py, BAD, life=1.0, size=24))
+            self.floaters.append(Floater(f"-{dmg:.0f}", px, py, BAD, life=1.0, size=24))
             if m.hp <= 0:
                 if m.attacker:   # whatever had hold of them lets go
                     m.attacker.release()
@@ -473,7 +500,7 @@ class World:
             self.end_bite(boss)
             return False
         boss.x, boss.y = min(GRID - 0.05, v.x + 0.45), max(0.05, v.y - 0.45)
-        v.hp -= BITE_DPS * dt * self.art_mult("grab_dmg")
+        self.hurt(v, BITE_SHARE * crew_hp_at(boss.depth) * dt * self.art_mult("grab_dmg"))
         boss.hp = min(boss.max_hp, boss.hp + boss.max_hp * BITE_HEAL * dt)
         self.blood_drip(v, boss)
         boss.timer -= dt
@@ -574,7 +601,7 @@ class World:
 
     def curse_burst(self, cursed, boss):
         m_lv = self.lv("spiritlantern")
-        dmg = CURSE_DMG * max(0.0, 1 - CURSE_WARD * m_lv)   # Spirit Lantern weakens the curse
+        dmg = CURSE_SHARE * crew_hp_at(boss.depth) * max(0.0, 1 - CURSE_WARD * m_lv)   # (Spirit Lantern weakens it)
         cursed.curse = 0.0
         px, py = self.entity_screen(cursed, 30)
         self.rings.append([px, py, 0.0, 120, (190, 120, 255)])
@@ -588,7 +615,7 @@ class World:
         for m in self.miners:
             if m.state == "down" or math.hypot(m.x - cursed.x, m.y - cursed.y) > CURSE_RADIUS:
                 continue
-            m.hp -= dmg
+            self.hurt(m, dmg)
             if m.hp <= 0:
                 if m.attacker:
                     m.attacker.release()
@@ -676,8 +703,12 @@ class World:
         return [k for k in COMMON if k not in self.artifacts]
 
     def bury_artifact(self, layer, depth):
-        """Now and then a new layer hides an artifact in one of its blocks (a glint gives it away)."""
-        if depth < ARTIFACT_MIN_DEPTH or not layer or not self.undiscovered() or random.random() >= ARTIFACT_CHANCE:
+        """Now and then a new layer hides an artifact in one of its blocks (a glint gives it away). The layer at
+        FIRST_ARTIFACT_BY always does if none has turned up yet, so every player finds one early on."""
+        if depth < ARTIFACT_MIN_DEPTH or not layer or not self.undiscovered():
+            return
+        first = depth == FIRST_ARTIFACT_BY and not self.artifacts
+        if not first and random.random() >= ARTIFACT_CHANCE:
             return
         layer[random.choice(list(layer))].artifact = True
 
@@ -852,7 +883,7 @@ class World:
         if not enemy or share <= 0 or not enemy.targetable:
             return
         if miner.hp < miner.max_hp * LAST_STAND_HP:
-            share *= 1 + self.lv("laststand")
+            share *= last_stand_mult(self.lv("laststand"))
         miner.anim = 1.0
         self.give_xp(miner, share * XP_PER_MONSTER)
         share *= level_mult(miner.level)
@@ -1373,7 +1404,7 @@ class World:
         guard.anim = 1.0
         enemy.guard_hit = (guard, self.clock)   # (for the kill credit)
         self.give_xp(guard, GUARD_SHARE * XP_PER_MONSTER)
-        share = GUARD_SHARE * level_mult(guard.level)
+        share = GUARD_SHARE * (1 + (level_mult(guard.level) - 1) * GUARD_XP_SHARE)
         self.hit_enemy(enemy, enemy.max_hp * share * enemy.pct_scale, floor=False, ring=(120, 150, 220), by=guard)
 
     def charge_target(self, demo):
@@ -1527,9 +1558,10 @@ class World:
             throw[2] += dt
             target = throw[1]
             if throw[2] >= BONE_THROW_SECS and target.state != "down":
-                target.hp -= BONE_THROW_DMG
+                dmg = BONE_THROW_SHARE * crew_hp_at(self.depth)
+                self.hurt(target, dmg)
                 px, py = self.entity_screen(target, 40)
-                self.floaters.append(Floater(f"-{BONE_THROW_DMG:.0f}", px, py, BAD, life=1.0, size=22))
+                self.floaters.append(Floater(f"-{dmg:.0f}", px, py, BAD, life=1.0, size=22))
                 if target.hp <= 0:
                     if target.attacker:
                         target.attacker.release()
@@ -1596,13 +1628,14 @@ class World:
                     if m.swing <= 0:
                         m.swing += GUARD_SWING
                         self.guard_strike(m, m.attacker)
-                elif combat and self.lv("defense"):   # Self Defense: swing at the attacker
-                    m.swing -= dt
+                elif combat and self.lv("defense"):   # Self Defense: a strike at the attacker every second
+                    m.swing -= dt   # (a steady rhythm: faster picks don't make for faster fighting)
                     if m.swing <= 0:
-                        m.swing += swing
+                        m.swing += DEFENSE_STRIKE_SECS
                         self.miner_strike(m)
                 continue
-            m.hp = min(m.max_hp, m.hp + regen * m.max_hp * dt)
+            if self.clock - m.last_hurt >= REGEN_DELAY:   # (no healing in the thick of it)
+                m.hp = min(m.max_hp, m.hp + regen * m.max_hp * dt)
             mspeed = speed * self.web_slow(m)
             if m.stun > 0:   # reeling from the Great Bat's screech
                 m.stun = max(0.0, m.stun - dt)

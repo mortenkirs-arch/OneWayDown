@@ -5,7 +5,7 @@ import time
 import pygame
 
 from ..blocks import BLOCKS
-from ..config import GOLD, H, MUTED, TEXT, W
+from ..config import GOLD, H, TEXT, W
 from ..iso import draw_cube, origin_at
 from ..ui import Button, draw_gold, draw_text
 from ..util import fmt, shade
@@ -26,7 +26,9 @@ class MenuScene(Scene):
             "continue": Button((cx, 330 + dy, 320, 60), "Continue", lambda: game.switch("play")),
             "new": Button((cx, 405 + dy, 320, 60), "New Game", self.new_game),
             "upgrades": Button((cx, 480 + dy, 320, 60), "Upgrades", lambda: game.open_upgrades("menu")),
-            "quit": Button((cx, 555 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
+            "settings": Button((cx, 555 + dy, 320, 60), "Settings", lambda: game.open_settings("menu"),
+                               color=(64, 84, 110)),
+            "quit": Button((cx, 630 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
         }
 
     def enter(self):
@@ -60,10 +62,9 @@ class MenuScene(Scene):
                 draw_cube(surf, i % 2, i // 2, 1, BLOCKS[k]["color"], BLOCKS[k].get("fleck"), seed=i + 20)
             draw_cube(surf, 1, 1, 2.3 - bob, BLOCKS["diamond"]["color"], BLOCKS["diamond"]["fleck"], seed=3)
 
-        title = "KEEP DIGGING"
-        draw_text(surf, self.fonts, title, 120, shade(GOLD, 0.45), (W // 2 + 4, 154 + MENU_DY), "center")
-        draw_text(surf, self.fonts, title, 120, GOLD, (W // 2, 150 + MENU_DY), "center")
-        draw_text(surf, self.fonts, "an isometric incremental mining game", 30, MUTED, (W // 2, 225 + MENU_DY), "center")
+        title = "THE ONLY WAY IS DOWN"
+        draw_text(surf, self.fonts, title, 84, shade(GOLD, 0.45), (W // 2 + 4, 164 + MENU_DY), "center")
+        draw_text(surf, self.fonts, title, 84, GOLD, (W // 2, 160 + MENU_DY), "center")
         if self.world:
             draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.depth}m",
                       26, TEXT, (W // 2, 280 + MENU_DY), "center")

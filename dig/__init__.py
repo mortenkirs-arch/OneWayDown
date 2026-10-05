@@ -1,1 +1,1 @@
-"""Keep Digging game package."""
+"""The Only Way Is Down: the game package."""
