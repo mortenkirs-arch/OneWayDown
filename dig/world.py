@@ -23,19 +23,23 @@ from .enemies import (boss_minion_cap, boss_minion_mult,
                       crew_hp_at, elite_chance,
                       edge_cells, max_enemies, spawn_interval)
 from .iso import iso
-from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS, WHETSTONE_POS
+from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
+                           STEAM_SECS, WHETSTONE_POS)
 from .miners import (CRIT_ANIM_SECS, MAX_LEVEL, ROLES, Miner, base_name, level_mult, new_stats, numbered_name,
                      xp_to_next)
 from .sprites import bomb_fuse_tip, enemy_anchor
 from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, chest_chance, clear_share,
                        combo_step, dust_share, golden_interval, golden_payout, milestone_mult, slam_mult, streak_bonus,
+                       PHANTOM_CHARGE, PHANTOM_WINDUP, phantom_interval,
                        trap_share, vault_rate, vein_share, whetstone_boost, wisp_slow,
+                       garlic_delay, garlic_ward, holy_bonus, salt_shrivel, salt_single, torch_grip, torch_singe,
+                       SPREE_CAP, SPREE_WINDOW, spree_step, trophy_mult, boiler_charge,
                        bounty_mult, click_damage, depth_reached, dynamite_interval,
                        enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, last_stand_mult, miner_regen, miner_strike, monster_damage, ore_damage_mult,
                        ore_mult, ore_richness,
-                       demo_interval, second_wind_boost, swing_time, upgrade_cost, value_mult,
-                       walk_speed)
+                       COFFEE_BOOST, COFFEE_SECS, coffee_cups, coffee_interval, demo_interval, medic_heal, second_wind_boost, swing_time, upgrade_cost, value_mult,
+                       veteran_level, walk_speed)
 from .util import fmt
 
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1))
@@ -58,6 +62,12 @@ GUARD_ASSIST_SECS = 3.0      # a guard who hit a monster this recently gets the 
 XP_PER_BLOCK = 1.0           # xp for breaking a whole block (diggers, and the demolitionist's charges)
 XP_PER_MONSTER = 4.0         # xp for blows adding up to a whole monster's health (guards, crew fighting back)
 XP_PER_ORDER = 1.5           # xp for each order the foreman barks
+XP_PER_HEAL = 3.0            # xp for healing a whole health bar's worth (the medic)
+MEDIC_REACH = 0.55           # how close the medic gets to a patient to treat them
+MEDIC_RUSH = 1.3             # the medic breaks into a run for a patient being grabbed...
+MEDIC_GRABBED = 0.5          # ...but heals someone in a monster's grip at this share of the rate
+MEDIC_XP_SHARE = 0.5         # the medic's experience counts for half (x1.5 healing at most)
+GHOST_POWER = 0.75           # Graveyard Shift: a ghost digs this hard (x the level they died at)
 DEFENSE_STRIKE_SECS = 1.0    # Self Defense: a grabbed miner strikes back this often
 CHARGE_BOOM = 0.45           # a demolitionist's charge goes off this much quieter than thrown dynamite
 GRAB_SOUND_GAP = 1.0         # the "crew grabbed" alert sounds at most this often (seconds)
@@ -86,6 +96,7 @@ WHET_SHARP_SECS = 45.0       # how long a sharpened pick stays sharp
 WHET_GAP = 3.0               # seconds between sending miners to the wheel
 LANTERN_RADIUS = 2.5         # Spirit Lantern: wisps this close to the crew are slowed
 COMBAT_TIP_CLICKS = 100      # the first boss suggests Combat upgrades if your clicks would take more than this
+COMBAT_TIP_ORDER = ["slayer", "executioner", "smite", "cleave", "defense", "hardhats"]   # ...these first (vs a boss)
                              # many to bring it down
 SAVE_VERSION = 2         # bump when the save format changes meaning (see from_dict migrations)
    # cap on coins in the air at once (late game breaks blocks very fast)
@@ -116,6 +127,7 @@ class World:
         self.clock = 0.0                   # game-time seconds; stands still while paused
         self.graveyard = []                # records of every miner who has died (see bury())
         self.miners = []
+        self.ghosts = []                   # Graveyard Shift: fallen crew back to dig (never grabbed, never saved)
         self.sync_miners()
         self.rise = 0.0                    # layer-shift animation offset (in blocks)
         self.particles = []
@@ -129,6 +141,12 @@ class World:
         self.enemy_timer = spawn_interval(ENEMY_START_DEPTH)   # seconds until the next wave
         self.announcement = None                                # [text, seconds left]
         self.second_wind = 0.0                                  # seconds of Second Wind left
+        self.coffee_timer = 0.0                                 # Coffee Break: seconds since the last cup
+        self.phantom_timer = 0.0                                # Phantom Slam: seconds since the last one...
+        self.phantom = None                                     # ...and [cell, seconds charging] once it's chosen
+        self.spree, self.spree_at = 0, -1e9                     # Killing Spree: kills in a row, and when the last was
+        self.boiler = 0.0                                       # Steam Boiler: pressure, 0..1 (full: ready to vent)
+        self.steam = None                                       # ...and seconds since it last vented (the steam fx)
         self.in_vein = False                                    # Vein Follower: chain guard
         self.bombs = []                                         # dynamite in flight / on a lit fuse
         self.explosions = []                                    # [x, y, age, size_px] fireballs
@@ -162,7 +180,6 @@ class World:
         self.boss_done = -1                                     # deepest boss depth already fought (won or fled)
         self.boss_gate_told = False                             # told the player the boss bars the way down
         self.webs = {}                                          # Broodmother: {cell: seconds left} slowing the crew
-        self.combat_tip_done = False                            # looked at the Combat upgrades during the first boss
         self.cues = []                                          # sound effects to play this frame (see Game.update)
         self.grab_sound_at = -1e9                               # when the last "crew grabbed" alert sounded
 
@@ -186,7 +203,7 @@ class World:
 
     def crew_size(self):
         """How many diggers (the foreman is extra)."""
-        return miner_count(self.lv("miners")) + self.lv("nightshift") + int(self.art_add("miners"))
+        return miner_count(self.lv("miners")) + int(self.art_add("miners"))
 
     def workers(self):
         """Everyone the foreman supervises (the whole crew apart from the foreman)."""
@@ -199,7 +216,8 @@ class World:
     def wanted_crew(self):
         """How many of each role the upgrades call for."""
         return {"miner": self.crew_size(), "driller": self.lv("driller"), "guard": self.lv("guard"),
-                "demolitionist": 1 if self.lv("demolition") else 0, "foreman": 1 if self.lv("foreman") else 0}
+                "demolitionist": 1 if self.lv("demolition") else 0, "foreman": 1 if self.lv("foreman") else 0,
+                "medic": 1 if self.lv("medic") else 0}   # (only ever one medic: levels make them better)
 
     def foreman(self):
         """The foreman on site and alive, or None (their bonuses only apply while they are)."""
@@ -207,7 +225,7 @@ class World:
 
     def miner_hit_damage(self):
         """Miner damage to blocks (before the Diamond Tips bonus on ore)."""
-        team = 1 + 0.03 * self.lv("teamwork") * len(self.diggers())
+        team = 1 + 0.03 * self.lv("teamwork") * (len(self.diggers()) + len(self.ghosts))
         return (miner_damage(self.lv("power")) * team * masterwork_mult(self.lv("masterwork"))
                 * self.art_mult("miner_dmg"))
 
@@ -269,9 +287,28 @@ class World:
                     self.floaters.append(Floater(text, px, py, GOOD if role == "miner" else GOLD,
                                                  life=2.2, size=24))
 
+    def sync_ghosts(self, announce=True):
+        """Graveyard Shift: a ghost per level, raised from the graveyard (the most experienced first)."""
+        wanted = min(self.lv("graveyardshift"), len(self.graveyard))
+        if len(self.ghosts) >= wanted:
+            return
+        risen = {g.name for g in self.ghosts}
+        dead = sorted((r for r in self.graveyard if r["name"] not in risen), key=lambda r: -r.get("level", 1))
+        for record in dead[:wanted - len(self.ghosts)]:
+            ghost = Miner(role="ghost")
+            ghost.apply_saved(record)
+            ghost.draw_z = self.column_height(*self.cell_of(ghost.x, ghost.y))
+            self.ghosts.append(ghost)
+            if announce:
+                px, py = self.entity_screen(ghost, 60)
+                self.floaters.append(Floater(f"{ghost.name} rises for the graveyard shift", px, py, (170, 210, 255),
+                                             life=2.4, size=24))
+                for _ in range(14):
+                    self.particles.append(Particle(px, py + 30, random.choice([(170, 210, 255), (230, 240, 255)])))
+
     def give_xp(self, m, amount):
         """Experience for a crew member doing their job; levels up as it adds up (to MAX_LEVEL)."""
-        if m.level >= MAX_LEVEL:
+        if m.level >= MAX_LEVEL or m.role == "ghost":   # (ghosts stay at the level they died at)
             return
         m.xp += amount * self.art_mult("xp")   # (Veteran's Medal)
         while m.level < MAX_LEVEL and m.xp >= xp_to_next(m.level):
@@ -297,6 +334,7 @@ class World:
             miner.name = numbered_name(miner.name, fallen)
         miner.max_hp = miner.hp = self.max_hp_for(role)
         miner.stats = new_stats(self.depth, self.clock)
+        miner.level = veteran_level(self.lv("veterans"))   # Veterans: they turn up already trained
         return miner
 
     def column_height(self, cx, cy):
@@ -352,14 +390,21 @@ class World:
         return next((e for e in self.enemies if e.boss), None)
 
     def combat_tip(self):
-        """Whether to nudge the player towards the Combat upgrades: during the first boss fight (the Zombie King
-        at 10m), if their clicks would take a long while to bring it down and they haven't looked yet."""
+        """During the first boss fight (the Zombie King at 10m): while your clicks would still take a long while to
+        bring it down and you can afford a Combat upgrade, (clicks needed, [those upgrades, best for a boss first]).
+        Otherwise None. It keeps nudging after a visit to the upgrades: buying a little isn't always enough."""
         boss = self.boss()
-        if (boss is None or boss.kind != "zombieking" or self.depth != 10 or boss.state == "emerging"
-                or self.combat_tip_done):
-            return False
+        if boss is None or boss.kind != "zombieking" or self.depth != 10 or boss.state == "emerging":
+            return None
         per_click = self.enemy_hit_damage(boss, self.monster_hit_damage()) * self.art_mult("boss_dmg")
-        return boss.max_hp / per_click > COMBAT_TIP_CLICKS
+        clicks = math.ceil(boss.hp / per_click)
+        if clicks <= COMBAT_TIP_CLICKS:
+            return None
+        affordable = [u for u in UPGRADES if u["branch"] == "combat" and self.can_buy(u)]
+        if not affordable:
+            return None
+        affordable.sort(key=lambda u: COMBAT_TIP_ORDER.index(u["key"]) if u["key"] in COMBAT_TIP_ORDER else 99)
+        return clicks, affordable
 
     def hurt(self, m, dmg):
         """A crew member takes damage (and won't start healing again until they've had a breather)."""
@@ -465,6 +510,9 @@ class World:
         on (unseen) until they're all beaten."""
         split = slime.spec["split"]
         share = CHUNK_SPLIT_HP / split["count"] if slime.boss else SLIME_SPLIT_HP
+        count = split["count"]
+        if not slime.boss and self.lv("salt") and random.random() < salt_single(self.lv("salt")):
+            count = 1   # Rock Salt: it only manages one
         v = slime.victim
         if v is not None and v.attacker is slime:   # whoever it had hold of slips free
             v.state, v.attacker = "working", None
@@ -472,8 +520,8 @@ class World:
         cell = self.cell_of(slime.x, slime.y)
         spread = 0.9 if slime.boss else 0.3
         children = []
-        for i in range(split["count"]):
-            a = i / split["count"] * math.tau + random.uniform(-0.3, 0.3)
+        for i in range(count):
+            a = i / count * math.tau + random.uniform(-0.3, 0.3)
             child = Enemy(split["into"], self.depth, cell, self.column_height(*cell), elite=slime.elite)
             child.max_hp = child.hp = slime.max_hp * share
             child.state = "hunting"
@@ -928,6 +976,41 @@ class World:
             self.particles.append(Particle(px, py, (150, 145, 160)))
         self.rings.append([px, py, 0.0, 40, (200, 195, 210)])
         self.spring_trap(enemy)
+        if self.lv("torches") and enemy.kind == "spider" and enemy in self.enemies:   # Torches: singed on landing
+            for _ in range(14):
+                self.particles.append(Particle(px, py - 8, random.choice([(255, 170, 60), (255, 230, 120), (220, 80, 40)])))
+            self.floaters.append(Floater("Singed!", px, py - 30, (255, 170, 60), life=0.9, size=22))
+            self.hit_enemy(enemy, enemy.max_hp * torch_singe(self.lv("torches")) * enemy.pct_scale, floor=False,
+                           ring=(255, 150, 60))
+
+    # ----- specialist counters (regular monsters only: bosses shrug them off) ---------------------------------
+    def grip_ward(self, enemy):
+        """How hard a grabbing monster still drains (and a vampire heals): Garlic Garlands, Torches."""
+        if enemy.kind == "vampire" and self.lv("garlic"):
+            return 1 - garlic_ward(self.lv("garlic"))
+        if enemy.kind == "spider" and self.lv("torches"):
+            return torch_grip(self.lv("torches"))
+        return 1.0
+
+    def turn_delay(self):
+        """Garlic Garlands: bats take this many times longer to turn into vampires."""
+        return garlic_delay(self.lv("garlic")) if self.lv("garlic") else 1.0
+
+    def holy(self, enemy):
+        """Holy Water: how much harder the undead (zombies and skeletons, never a boss) are hit."""
+        if enemy.kind in ("zombie", "skeleton") and self.lv("holywater"):
+            return 1 + holy_bonus(self.lv("holywater"))
+        return 1.0
+
+    def shrivel(self, enemy, dt):
+        """Rock Salt: slimelings dry up and shrivel away."""
+        if enemy.kind == "slimeling" and self.lv("salt") and enemy.targetable:
+            enemy.hp -= enemy.max_hp * salt_shrivel(self.lv("salt")) * dt
+            if random.random() < dt * 4:   # flecks of salt crust flaking off
+                px, py = enemy_anchor(enemy, self.rise, time.time())
+                self.particles.append(Particle(px, py, (240, 240, 230)))
+            if enemy.hp <= 0:
+                self.kill_enemy(enemy)
 
     def transform_enemy(self, enemy, into):
         """e.g. a bat that flew free too long becomes a vampire (full health for the new form)."""
@@ -1011,13 +1094,16 @@ class World:
         `by` is the miner landing the hit (None = you / your dynamite), credited with the kill."""
         if enemy not in self.enemies or enemy.mode == "split":   # (the split Slime King: hit its chunks)
             return
-        enemy.hp -= ((self.enemy_hit_damage(enemy, dmg) if floor else dmg) * enemy.dmg_taken
+        holy = self.holy(enemy)
+        enemy.hp -= ((self.enemy_hit_damage(enemy, dmg) if floor else dmg) * enemy.dmg_taken * holy
                      * (self.art_mult("boss_dmg") if enemy.boss else 1))
         enemy.flash = 0.12
         px, py = enemy_anchor(enemy, self.rise, time.time())
         self.rings.append([px, py + 18, 0.0, 30, ring])
         for _ in range(6):
             self.particles.append(Particle(px, py, enemy.spec["gore"]))
+        if holy > 1 and random.random() < 0.5:   # a hiss of holy water
+            self.particles.append(Particle(px, py, random.choice([(220, 235, 255), (255, 245, 200)])))
         split = enemy.spec.get("split")   # slimes burst apart at half health (the King always does)
         if split and enemy.mode != "split" and enemy.hp <= enemy.max_hp * SLIME_SPLIT_AT and \
                 (enemy.hp > 0 or enemy.boss):
@@ -1075,9 +1161,30 @@ class World:
                 return guard
         return by
 
+    def kill_bonus(self, enemy):
+        """Trophy Hunter and Killing Spree: how many times its bounty this kill pays (bosses: just the bounty)."""
+        if enemy.boss:
+            return 1.0
+        mult = 1.0
+        px, py = enemy_anchor(enemy, self.rise, time.time())
+        if enemy.elite and self.lv("trophy"):
+            mult *= trophy_mult(self.lv("trophy"))
+            self.floaters.append(Floater("TROPHY!", px, py - 48, GOLD, life=1.4, size=32))
+            self.rings.append([px, py, 0.0, 90, GOLD])
+            for _ in range(24):
+                self.particles.append(Particle(px, py, random.choice([GOLD, (255, 235, 150), (255, 255, 255)]), big=True))
+        if self.lv("spree"):
+            self.spree = self.spree + 1 if self.clock - self.spree_at <= SPREE_WINDOW else 1
+            self.spree_at = self.clock
+            n = min(self.spree, SPREE_CAP)
+            mult *= 1 + spree_step(self.lv("spree")) * (n - 1)
+            if n >= 2:
+                self.floaters.append(Floater(f"SPREE x{n}", px, py - 70, (255, 120, 90), life=1.0, size=22 + 2 * n))
+        return mult
+
     def kill_enemy(self, enemy, by=None):
         self.enemies.remove(enemy)
-        bounty = self.earn(self.bounty_worth(enemy))
+        bounty = self.earn(self.bounty_worth(enemy) * self.kill_bonus(enemy))
         credit = self.kill_credit(enemy, by)
         if credit:   # a guard who was fighting it, or a miner who fought it off themselves
             credit.stats["monsters"] += 1
@@ -1159,6 +1266,8 @@ class World:
         if not block:
             return
         dmg = self.miner_hit_damage() * self.pick_bonus(miner, cell, 1.0) * (level_mult(miner.level) if miner else 1)
+        if miner and miner.role == "ghost":
+            dmg *= GHOST_POWER
         if is_ore(block):
             dmg *= ore_damage_mult(self.lv("diamond"))
         crit = random.random() < 0.05 * self.lv("crit") + self.art_add("crit")
@@ -1287,6 +1396,45 @@ class World:
             if self.depth != depth:
                 return
             self.damage(c, dmg * 0.5, sparks=2)
+
+    def vent_boiler(self):
+        """Steam Boiler: a full head of steam scalds every monster on the board (bosses, and the Slime King's
+        chunks, stand firm). Bounties are paid, anyone grabbed is freed, and the next wave holds back."""
+        if self.boiler < 1.0:
+            return False
+        self.boiler, self.steam = 0.0, 0.0
+        self.cues += [("fuse", 1.0), ("boom", 0.5)]
+        self.shake, self.shake_power = 0.4, 5
+        for e in list(self.enemies):
+            if not e.boss and not e.spec.get("slam") and e in self.enemies:
+                self.kill_enemy(e)
+        self.enemy_timer = max(self.enemy_timer, self.wave_interval())   # a reprieve before the next wave
+        self.floaters.append(Floater("STEAM!", W / 2, 230, (225, 235, 245), life=1.6, size=48))
+        return True
+
+    def phantom_target(self):
+        """Where a slam does the most: the block with the most (ore counting extra) in the 3x3 around it."""
+        def score(c):
+            around = [self.current.get((c[0] + dx, c[1] + dy)) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+            return sum(1.5 if is_ore(b) else 1.0 for b in around if b) + random.random() * 0.5
+        return max(self.current, key=score) if self.current else None
+
+    def update_phantom(self, dt):
+        """Phantom Slam: the ghostly hand picks a block, hangs over it charging, then slams it."""
+        self.phantom_timer += dt
+        interval = phantom_interval(self.lv("phantom"))
+        if self.phantom_timer < interval - PHANTOM_WINDUP:
+            return
+        if self.phantom is None or self.phantom[0] not in self.current:   # (its block broke: find another)
+            cell = self.phantom_target()
+            self.phantom = [cell, 0.0] if cell else None
+            if not self.phantom:
+                return
+        self.phantom[1] += dt
+        if self.phantom_timer >= interval:
+            cell = self.phantom[0]
+            self.phantom, self.phantom_timer = None, 0.0
+            self.slam(cell, PHANTOM_CHARGE)
 
     def throw_dynamite(self):
         """Toss a lit bundle onto a random block; it goes off when the fuse burns down."""
@@ -1474,7 +1622,7 @@ class World:
     def pick_target(self, miner):
         if not self.current:
             return None
-        claimed = {m.target for m in self.miners if m is not miner and m.target}
+        claimed = {m.target for m in self.miners + self.ghosts if m is not miner and m.target}
         seek_ore = self.lv("treasure") > 0
         best, best_d = None, 1e9
         for cell, block in self.current.items():
@@ -1572,6 +1720,44 @@ class World:
             guard.goal = (min(GRID - 0.5, max(0.5, near.x + random.uniform(-1.5, 1.5))),
                           min(GRID - 0.5, max(0.5, near.y + random.uniform(-1.5, 1.5))))
         self.walk_to(guard, *guard.goal, speed * 0.6, dt)
+
+    def coffee_break(self):
+        """Coffee Break: a round of coffee - a few diggers at work down a mug and swing faster for a while."""
+        thirsty = [m for m in self.diggers() if m.state == "working" and m.coffee <= 0 and m.stun <= 0]
+        for m in random.sample(thirsty, min(len(thirsty), coffee_cups(self.lv("coffee")))):
+            m.coffee = COFFEE_SECS
+            px, py = self.entity_screen(m, 56)
+            self.floaters.append(Floater("Coffee!", px, py, (230, 190, 130), life=1.2, size=22))
+
+    def update_medic(self, medic, dt, speed):
+        """Run to whoever is hurt - anyone in a monster's grip first, then the worst off - and patch them up;
+        with no one to treat, keep close to the crew."""
+        medic.anim = max(0.0, medic.anim - dt * 3)
+        hurt = [m for m in self.miners if m is not medic and m.state != "down" and m.hp < m.max_hp]
+        if hurt:
+            patient = min(hurt, key=lambda m: (m.state != "grabbed", m.hp / m.max_hp))
+            medic.task, medic.goal = "healing", patient
+            grabbed = patient.state == "grabbed"
+            if self.walk_to(medic, patient.x, patient.y, speed * (MEDIC_RUSH if grabbed else 1), dt,
+                            stop=MEDIC_REACH):
+                rate = medic_heal(self.lv("medic")) * (1 + (level_mult(medic.level) - 1) * MEDIC_XP_SHARE)
+                healed = min(patient.max_hp - patient.hp,
+                             rate * (MEDIC_GRABBED if grabbed else 1) * patient.max_hp * dt)
+                patient.hp += healed
+                medic.anim = 1.0
+                self.give_xp(medic, healed / patient.max_hp * XP_PER_HEAL)
+                if random.random() < dt * 6:   # little green crosses rising off the patient
+                    px, py = self.entity_screen(patient, 34)
+                    self.particles.append(Particle(px + random.uniform(-8, 8), py, (120, 230, 140)))
+            return
+        medic.task_timer -= dt
+        if medic.task != "on call" or medic.task_timer <= 0 or not isinstance(medic.goal, tuple):
+            crew = [m for m in self.workers() if m is not medic and m.state != "down"]
+            near = random.choice(crew) if crew else medic
+            medic.task, medic.task_timer = "on call", random.uniform(4.0, 8.0)
+            medic.goal = (min(GRID - 0.5, max(0.5, near.x + random.uniform(-1.2, 1.2))),
+                          min(GRID - 0.5, max(0.5, near.y + random.uniform(-1.2, 1.2))))
+        self.walk_to(medic, *medic.goal, speed * 0.6, dt)
 
     def guard_strike(self, guard, enemy):
         if not enemy or enemy not in self.enemies or not enemy.targetable:
@@ -1784,16 +1970,22 @@ class World:
         """Advance the simulation. With combat=False enemies freeze and none spawn."""
         self.clock += dt
         self.sync_miners()
+        self.sync_ghosts()
         if self.rise < 0:
             self.rise = min(0.0, self.rise + dt * 2.5)
         self.second_wind = max(0.0, self.second_wind - dt)
+        if self.lv("coffee"):
+            self.coffee_timer += dt
+            if self.coffee_timer >= coffee_interval(self.lv("coffee")):
+                self.coffee_timer = 0.0
+                self.coffee_break()
         speed = walk_speed(self.lv("boots")) * self.art_mult("walk")
         swing = self.miner_swing_time()
         regen = miner_regen(self.lv("firstaid")) * self.art_mult("regen")
         boss = self.foreman()
         boss_here = boss if boss and boss.state == "working" else None
         holdout = None if self.current else self.boss_target()   # layer cleared, boss still standing
-        for m in self.miners:
+        for m in self.miners + self.ghosts:   # (ghosts dig with the rest)
             if m.state == "down":
                 m.respawn -= dt
                 if m.respawn <= 0:
@@ -1822,11 +2014,12 @@ class World:
                 m.anim = 0.0
                 continue
             if not m.digs:   # specialists with their own jobs
-                {"foreman": self.update_foreman, "guard": self.update_guard,
+                {"foreman": self.update_foreman, "guard": self.update_guard, "medic": self.update_medic,
                  "demolitionist": self.update_demolitionist}[m.role](m, dt, mspeed * ROLES[m.role]["speed"])
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
                 continue
             m.sharp = max(0.0, m.sharp - dt)
+            m.coffee = max(0.0, m.coffee - dt)
             if m.task in ("whetstone", "sharpening"):   # off to the sharpening wheel
                 self.update_whetstone_trip(m, dt, mspeed)
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
@@ -1838,6 +2031,8 @@ class World:
             my_swing = swing   # pep talk: miners near the foreman swing faster still
             if boss_here and math.hypot(m.x - boss_here.x, m.y - boss_here.y) <= PEP_TALK_RADIUS:
                 my_swing = swing / (1 + (PEP_TALK_BOOST - 1) * level_mult(boss_here.level))
+            if m.coffee > 0:   # Coffee Break
+                my_swing /= 1 + COFFEE_BOOST
             if m.target is None or m.target not in self.current:
                 m.target = self.pick_target(m)
             m.anim = max(0.0, m.anim - dt * 4)
@@ -1880,6 +2075,8 @@ class World:
         if combat:
             for e in self.enemies:
                 self.ward(e)
+            for e in [e for e in self.enemies if e.kind == "slimeling"]:
+                self.shrivel(e, dt)
             self.boss_auras()
             for e in list(self.enemies):
                 e.update(self, dt)
@@ -1896,6 +2093,19 @@ class World:
                 self.tap_timer -= 1
                 self.player_hit(random.choice(list(self.current)), sparks=3,
                                 ring_color=BRANCHES["hands"]["color"])
+        if self.lv("phantom"):
+            self.update_phantom(dt)
+        if self.lv("boiler"):   # Steam Boiler: pressure builds slowly
+            was = self.boiler
+            self.boiler = min(1.0, self.boiler + dt / boiler_charge(self.lv("boiler")))
+            if was < 1.0 <= self.boiler:   # a whistle when it's ready
+                px, py = iso(BOILER_POS[0], BOILER_POS[1], self.column_height(*self.cell_of(*BOILER_POS)) + self.rise)
+                self.floaters.append(Floater("Steam's up! Click the boiler", px, py - 70, (225, 235, 245),
+                                             life=2.4, size=24))
+        if self.steam is not None:
+            self.steam += dt
+            if self.steam >= STEAM_SECS:
+                self.steam = None
         if self.lv("dynamite"):
             self.dynamite_timer += dt
             if self.dynamite_timer >= dynamite_interval(self.lv("dynamite")):
@@ -1968,6 +2178,8 @@ class World:
         w.gold = d["gold"]
         w.depth = d["depth"]
         w.levels.update({k: v for k, v in d["levels"].items() if k in w.levels})
+        if "nightshift" in d["levels"]:   # Night Shift became the Graveyard Shift: same slot and price
+            w.levels["graveyardshift"] = d["levels"]["nightshift"]
         if "pockets" in d["levels"]:   # Deep Pockets (offline income) became Gold Dust: same slot and price
             w.levels["golddust"] = d["levels"]["pockets"]
         if d.get("version", 1) < 2:   # v1: Hire Miner level 0 meant one miner; now it means none
@@ -1998,6 +2210,7 @@ class World:
             theirs = [c for c in saved_crew if c.get("role", "miner") == role]
             for miner, data in zip(ours, theirs):
                 miner.apply_saved(data)
+        w.sync_ghosts(announce=False)
         w.gps_cached = d.get("gps", 0.0)
         w.enemy_timer = w.wave_interval()   # first wave on the saved depth's schedule, not depth 1's
         if boss_for(w.depth) and w.boss_done < w.depth:   # saved mid boss fight: it comes back

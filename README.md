@@ -3,10 +3,11 @@
 An isometric incremental mining game built with pygame (pygame-ce).
 
 Your miners dig down through a 10x10 board, layer by layer. Break blocks for gold,
-spend it across five upgrade menus (Crew, Tools, Hands, Fortune and Combat), and go deeper
-for richer ore. Clearing a layer pays a bonus of a quarter of everything it held, doubled on
-every 5th metre. Prices climb steeply the more you own, so pick what to push, and most upgrades
-only unlock once you've dug deep enough - the HUD shows the next depth milestone.
+spend it on a star map of upgrades in five branches (Crew, Tools, Hands, Fortune and Combat),
+whose paths cross where the branches meet, and go deeper for richer ore. Clearing a layer pays a
+bonus of a quarter of everything it held, doubled on every 5th metre. Prices climb steeply the
+more you own, so pick what to push, and most upgrades only unlock once you've dug deep enough -
+the HUD shows the next depth milestone.
 
 From depth 1, enemies invade in waves and go after your miners - the first one arrives
 the moment you get there. Zombies claw out of the ground (depth 1+), bats swoop in (depth 3+),
@@ -23,19 +24,30 @@ The Foreman upgrade hires a foreman who walks the site barking orders: the crew 
 faster while they're alive (and faster still near them), but monsters can kill them too.
 
 Every menu has a middle path of its own: Tools (Hot Streak, Vein Follower, Whetstone),
-Hands (Combo Clicks, Golden Blocks, Charged Slam - hold the mouse anywhere on the dig), Fortune
-(Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Spirit Lantern, Booby Traps,
-Ballista). The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
+Hands (Combo Clicks, Golden Blocks, Charged Slam - hold the mouse anywhere on the dig - and, at the
+top, Phantom Slam, where the Auto-Tapper's ghostly hand charges up and slams on its own), Fortune
+(Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Booby Traps, Ballista, and a Steam
+Boiler in the corner that slowly builds up pressure: click it when it's full to scald every regular
+monster off the board). Combat's fourth path, Holy Water (zombies and skeletons take more damage), fans
+out into specialist counters for the regular monsters (bosses shrug them off): Spirit Lantern (ghosts and wisps), Torches
+(spiders are singed as they land), Garlic Garlands (vampires drain less, bats are slower to turn) and
+Rock Salt (slimes split into fewer slimelings, which shrivel). The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
 fast), guards (patrol and fight monsters on their own) and a demolitionist (charges that level
-a whole 3x3 of blocks wherever they are thickest).
+a whole 3x3 of blocks wherever they are thickest). Next to Combat, a single medic runs to whoever is
+hurt - anyone being grabbed first - and patches them up. Now and then a Coffee Break sends a
+digger swinging faster for a few seconds. At the top of the Crew branch, Veterans
+brings new crew in already trained, and the Graveyard Shift raises fallen crew from the graveyard
+as ghosts that dig on at the level they died at, beyond the reach of any monster.
 
 Your crew get better the longer they survive. Every crew member earns experience doing their
 job - diggers by breaking blocks, guards (and miners fighting back) by hitting monsters, the
-demolitionist through what their charges destroy, the foreman by barking orders - and levels
+demolitionist through what their charges destroy, the foreman by barking orders, the medic by
+healing - and levels
 up to a master at level 10, by which point they're twice as good at it (diggers hit twice as
 hard, guards strike twice as hard, the demolitionist sets charges twice as often, the foreman's
 pep talk is twice as strong). The first levels come within a few minutes; the last take the
-best part of an hour. A replacement starts over, so keeping veterans alive pays.
+best part of an hour. A replacement starts over (from level 1, or higher with Veterans), so keeping
+your best crew alive pays.
 
 The Crew page (`C`) tracks every miner's level and experience, blocks mined, gold earned,
 monsters fought off, times saved and time on the job, and its Graveyard tab remembers the
@@ -129,8 +141,10 @@ uv run main.py --save saves/depth_39.json   # carry on a test game later (plays 
 | `U` | Open / close the upgrades (pauses the game) |
 | `C` | Open / close the Crew page and graveyard (pauses the game) |
 | `A` | Open / close the Artifacts page (pauses the game) |
-| `1`-`5` / `Tab` in upgrades | Switch upgrade menu |
-| Right-click / `Enter` in upgrades | Buy the selected upgrade |
+| Drag (either button) / `WASD` / arrows in upgrades | Move about the star map |
+| Wheel / `Q` `E` / `+` `-` in upgrades | Zoom in and out (`H` or `Home`: back to the middle) |
+| `1`-`5` / `Tab` in upgrades | Fly to a branch |
+| Click / right-click / `Enter` in upgrades | Select a star / buy it / buy the selected one |
 | `Esc` | Back / main menu |
 
 There are three save slots (`savegame.json`, `savegame_2.json` and `savegame_3.json`). **Continue**
@@ -150,7 +164,7 @@ dig/
   util.py            number formatting, colour shading
   iso.py             isometric projection, cube drawing, hit-testing
   blocks.py          block types and layer generation
-  upgrades.py        the five upgrade menus, stat formulas and pricing
+  upgrades.py        the upgrade star map's branches and stars, stat formulas and pricing
   effects.py         particles and floating text
   miners.py          miner state: health, grabbed/down, respawn
   enemies.py         enemy types, spawning, hunt/grab AI
@@ -164,5 +178,5 @@ dig/
 
 To add a screen, subclass `dig.scenes.base.Scene` and register it in `Game.scenes`.
 To add an upgrade, append an entry to `UPGRADES` in `dig/upgrades.py` (its `branch` picks
-the menu, `pos` its spot in that menu's tree) and read its
+the sector of the star map, `pos` its angle and ring there) and read its
 level via `world.lv("key")` wherever it takes effect.

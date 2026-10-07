@@ -153,7 +153,7 @@ class Game:
         upgrades = self.scenes["upgrades"]
         upgrades.return_to = came_from
         if came_from == "play" and self.world.combat_tip():   # pointed here by the first boss's tip: Combat
-            upgrades.switch_tab("combat")
+            upgrades.focus_branch("combat")
         self.switch("upgrades")
 
     def to_menu(self):

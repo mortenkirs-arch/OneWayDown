@@ -16,10 +16,10 @@ from .world import World
 ANCHOR_DEPTH = 60
 ANCHOR_LEVELS = {
     "autotap": 5, "ballista": 1, "bigbombs": 2, "boots": 7, "bounty": 7, "chests": 2, "cleave": 5, "click": 12,
-    "combo": 3, "crit": 2, "deepstrike": 1, "defense": 7, "demolition": 2, "diamond": 3, "double": 2, "driller": 4,
+    "coffee": 3, "combo": 3, "crit": 2, "deepstrike": 1, "defense": 7, "demolition": 2, "diamond": 3, "double": 2, "driller": 4,
     "dynamite": 2, "executioner": 11, "firstaid": 5, "foreman": 1, "goldblock": 3, "golddust": 5, "golden": 7,
     "goldrush": 1, "guard": 4, "hardhats": 5, "laststand": 2, "masterwork": 1, "midas": 1, "miners": 9,
-    "nightshift": 2, "power": 7, "prospector": 5, "quake": 1, "secondwind": 3, "shockwave": 5, "slam": 1,
+    "graveyardshift": 2, "medic": 2, "veterans": 1, "power": 7, "prospector": 5, "quake": 1, "secondwind": 3, "shockwave": 5, "slam": 1,
     "slayer": 12, "smite": 7, "speed": 4, "spiritlantern": 2, "steady": 3, "streak": 2, "surveyor": 3,
     "teamwork": 4, "traps": 2, "treasure": 5, "value": 8, "vault": 1, "vein": 1, "whetstone": 1,
 }
@@ -28,7 +28,7 @@ ANCHOR_COMMONS = ["medal", "gauntlet", "boots", "heart", "amulet", "pickhead", "
 # ...and the crew's levels by role.
 ANCHOR_CREW = {
     "miner": [5, 5, 4, 4, 3, 2, 2, 2, 2, 1, 1], "driller": [6, 5, 4, 2], "guard": [6, 6, 5, 3],
-    "demolitionist": [7], "foreman": [7],
+    "demolitionist": [7], "foreman": [7], "medic": [5],
 }
 CURVE = 0.75     # progress isn't linear: cheap early levels go fast, so a player is further along than depth/60
 BUY_AFTER = 3    # metres after an upgrade unlocks before a player has bought its first level

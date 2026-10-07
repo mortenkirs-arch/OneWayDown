@@ -14,10 +14,11 @@ TOP_PANEL = pygame.Rect(16, 16, 420, 160)
 HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
 from ..enemies import BOSS_TIME_LIMIT, ENEMY_START_DEPTH, max_enemies
+from ..effects import Floater
 from ..icons import draw_icon
 from ..iso import origin_at
 from ..biomes import biome_at
-from ..render import draw_ambient, draw_board, draw_flying_coins, pick_block
+from ..render import draw_ambient, draw_board, draw_flying_coins, pick_block, pick_boiler
 from ..sprites import pick_enemy
 from ..ui import Button, draw_callout, draw_coin, draw_glow, draw_panel, draw_pointer, draw_text, wrap_text
 from ..upgrades import BRANCHES, UPGRADE_BY_KEY, UPGRADES, enemy_hit_floor, next_milestone
@@ -62,6 +63,11 @@ class PlayScene(Scene):
             self.world.combo_held = True   # ...and holding the button keeps it from running down
             if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
                 self.charge = time.time()
+            if pick_boiler(self.world, event.pos):   # Steam Boiler: vent it once it's full
+                if not self.world.vent_boiler():
+                    self.world.floaters.append(Floater(f"Pressure {round(100 * self.world.boiler)}%",
+                                                       event.pos[0], event.pos[1] - 30, MUTED, life=1.0, size=22))
+                return
             cursed = self.world.pick_cursed(event.pos)
             if cursed:   # lifting a Archlich's curse comes first
                 self.world.lift_curse(cursed)
@@ -245,15 +251,19 @@ class PlayScene(Scene):
 
     def draw_combat_tip(self, surf, w):
         """The first boss is a wall without combat upgrades: glow the Upgrades button and say where to look."""
-        if not w.combat_tip():
+        tip = w.combat_tip()
+        if not tip:
             return
+        clicks, affordable = tip
         t = time.time()
         btn = self.buttons[0]
         draw_glow(surf, btn.rect, t)
         crew_bottom = self.buttons[2].rect.bottom   # (below the right-hand buttons, clear of the boss bar)
+        names = ", ".join(u["name"] for u in affordable[:2]) + (f" +{len(affordable) - 2} more" if len(affordable) > 2 else "")
         draw_callout(surf, self.fonts, [("The Zombie King is tough!", BAD),
-                                        ("Combat upgrades bring it down faster:", TEXT),
-                                        ("Upgrades (U)  >  Combat:  Monster Slayer, Executioner", GOLD),
+                                        (f"At this rate it takes ~{clicks} clicks to bring down.", TEXT),
+                                        ("Combat upgrades you can afford now:", TEXT),
+                                        (f"Upgrades (U)  >  Combat:  {names}", GOLD),
                                         ("(the fight waits while you shop)", MUTED)],
                      (W - 16, crew_bottom + 14), "topright", size=22)
 

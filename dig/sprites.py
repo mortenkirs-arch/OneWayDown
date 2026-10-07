@@ -13,7 +13,8 @@ from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
 
 HI_VIS = (255, 140, 30)
 HELMETS = {"miner": (240, 200, 40), "foreman": (245, 245, 250), "driller": (240, 130, 40),
-           "guard": (62, 68, 86), "demolitionist": (200, 50, 45)}
+           "guard": (62, 68, 86), "demolitionist": (200, 50, 45), "medic": (245, 245, 250)}
+MEDIC_RED = (215, 45, 50)
 STEEL, DIAMOND = (190, 190, 200), (110, 235, 245)   # pick head colour, before / after Diamond Tips
 CRIT_SLAM = 0.3     # share of the crit animation spent slamming down (the rest is the recoil)
 CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the shoulder
@@ -154,6 +155,10 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
     pygame.draw.ellipse(surf, HELMETS.get(role, HELMETS["miner"]), (head[0] - 9, head[1] - 10, 18, 9))
     if foreman:
         pygame.draw.line(surf, HI_VIS, (head[0] - 6, head[1] - 7), (head[0] + 6, head[1] - 7), 2)
+    elif role == "medic":   # a red cross on the front of the helmet
+        pygame.draw.line(surf, MEDIC_RED, (head[0] - 2 * m.facing, head[1] - 9), (head[0] - 2 * m.facing, head[1] - 4), 2)
+        pygame.draw.line(surf, MEDIC_RED, (head[0] - 2 * m.facing - 2, head[1] - 7),
+                         (head[0] - 2 * m.facing + 2, head[1] - 7), 2)
     lamp = (head[0] + 5 * m.facing, head[1] - 6)
     if role == "guard":   # a proper lantern on the helmet, glowing
         pygame.draw.circle(surf, (255, 220, 120), lamp, 4)
@@ -167,6 +172,8 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         _draw_mohawk(surf, m, head)
     if foreman:
         _draw_clipboard(surf, m, fx, fy - bob - lift, skin, grabbed, t)
+    elif role == "medic":
+        _draw_medkit(surf, m, fx, fy - bob - lift, skin, grabbed, t)
     elif role == "driller":
         _draw_jackhammer(surf, m, fx, fy - max(0, bob), grabbed, t)
     elif role == "demolitionist":
@@ -211,6 +218,14 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
             for i, (gx, gy) in enumerate(tips):
                 if math.sin(t * 5 + i * 2.1 + m.x * 3) > 0.75:
                     pygame.draw.circle(surf, (255, 255, 255), (int(gx), int(gy)), 2)
+    if getattr(m, "coffee", 0) > 0 and not grabbed:   # Coffee Break: a steaming mug in the other hand
+        mx, my = int(fx - 8 * m.facing), int(fy - 18 - bob - lift)
+        pygame.draw.rect(surf, (240, 236, 228), (mx - 3, my - 3, 6, 6), border_radius=1)
+        pygame.draw.rect(surf, (120, 70, 40), (mx - 2, my - 2, 4, 2))
+        pygame.draw.arc(surf, (240, 236, 228), (mx - 3 - 3 * m.facing, my - 2, 4, 4), 0, math.tau, 1)
+        for k in range(2):   # curls of steam
+            sy = my - 5 - ((t * 14 + k * 5) % 10)
+            pygame.draw.circle(surf, (225, 225, 235), (mx - 1 + k * 2 + int(math.sin(t * 6 + k) * 1.5), int(sy)), 1)
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 46 - lift, m.hp / m.max_hp, GOOD, 26)
     if grabbed and int(t * 4) % 2 == 0:
@@ -235,6 +250,13 @@ def _draw_outfit(surf, m, role, body, fx):
         pygame.draw.rect(surf, (52, 62, 100), coat, border_radius=4)
         pygame.draw.circle(surf, (255, 205, 70), (fx - 4 * m.facing, coat.y + 6), 2)
         pygame.draw.line(surf, (30, 30, 40), (coat.x, coat.bottom - 2), (coat.right - 1, coat.bottom - 2), 2)
+    elif role == "medic":   # white coat with a red cross on the chest
+        coat = pygame.Rect(body.x, body.y, body.w, body.h - 7)
+        pygame.draw.rect(surf, (238, 240, 244), coat, border_radius=4)
+        pygame.draw.line(surf, (190, 195, 205), (fx, coat.y + 1), (fx, coat.bottom - 1), 1)
+        cx, cy = fx + 3 * m.facing, coat.y + 6
+        pygame.draw.line(surf, MEDIC_RED, (cx, cy - 3), (cx, cy + 3), 2)
+        pygame.draw.line(surf, MEDIC_RED, (cx - 3, cy), (cx + 3, cy), 2)
     elif role == "demolitionist":   # leather vest with a bandolier of dynamite
         vest = pygame.Rect(body.x, body.y + 1, body.w, body.h - 9)
         pygame.draw.rect(surf, (115, 75, 45), vest, border_radius=3)
@@ -273,6 +295,42 @@ def _draw_charge_stick(surf, m, fx, top, skin, grabbed, t):
     if planting and int(t * 12) % 2:
         pygame.draw.circle(surf, (255, 220, 120), (int(cx + 2 * f), int(cy - 9)), 2)
     pygame.draw.circle(surf, skin, (int(cx), int(cy + 3)), 2)
+
+
+def _draw_medkit(surf, m, fx, top, skin, grabbed, t):
+    """The medic's first-aid bag: carried at the side, held out over a patient, swung when grabbed."""
+    f = m.facing
+    if grabbed:   # swinging the bag at the monster
+        ang = math.sin(t * 16) * 1.3
+        cx, cy = fx + 8 * f + math.sin(ang) * 10, top - 24 - math.cos(ang) * 8
+    elif m.anim > 0.2:   # treating someone: bag held out, a hand in it
+        cx, cy = fx + 11 * f, top - 18 + math.sin(t * 9) * 1.5
+    else:
+        cx, cy = fx + 8 * f, top - 12
+    bag = pygame.Rect(0, 0, 11, 8)
+    bag.center = (int(cx), int(cy))
+    pygame.draw.arc(surf, (120, 30, 34), (bag.centerx - 3, bag.y - 4, 7, 7), 0, math.pi, 2)
+    pygame.draw.rect(surf, MEDIC_RED, bag, border_radius=2)
+    pygame.draw.line(surf, (255, 255, 255), (bag.centerx, bag.y + 1), (bag.centerx, bag.bottom - 2), 2)
+    pygame.draw.line(surf, (255, 255, 255), (bag.centerx - 2, bag.centery), (bag.centerx + 2, bag.centery), 2)
+    pygame.draw.circle(surf, skin, (int(cx - 3 * f), int(cy - 3)), 2)
+
+
+def draw_ghost(surf, fonts, g, rise, t, pick_level=0):
+    """Graveyard Shift: a fallen crew member back at work, pale blue and see-through, drifting a little."""
+    fx, fy = _feet(g, rise)
+    img = pygame.Surface((96, 104), pygame.SRCALPHA)
+    ox, oy = current_origin()
+    with origin_at((ox + 48 - fx, oy + 88 - fy - 4 - math.sin(t * 2 + g.x * 3) * 2)):
+        draw_miner(img, fonts, g, rise, t, pick_level)
+    img = pygame.transform.grayscale(img)
+    img.fill((150, 195, 255), special_flags=pygame.BLEND_RGB_MULT)
+    img.fill((60, 70, 90), special_flags=pygame.BLEND_RGB_ADD)
+    img.set_alpha(150)
+    surf.blit(img, (fx - 48, fy - 88))
+    for k in range(3):   # a few motes of cold light trailing off them
+        a = t * 1.5 + k * 2.1 + g.y
+        pygame.draw.circle(surf, (190, 225, 255), (int(fx + math.sin(a) * 9), int(fy - 20 - (a * 9) % 30)), 1)
 
 
 def _draw_clipboard(surf, m, fx, top, skin, grabbed, t):

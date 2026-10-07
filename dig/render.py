@@ -11,10 +11,13 @@ from .config import GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
 from .enemies import BONE_THROW_SECS, BOSS_SLAM_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS
 from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
+from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bone, draw_bomb, draw_enemy, draw_miner, enemy_anchor
-from .world_layout import BALLISTA_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS, WHETSTONE_POS
+from .sprites import draw_bone, draw_bomb, draw_enemy, draw_ghost, draw_miner, enemy_anchor
+from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
+                           STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
+from .upgrades import PHANTOM_WINDUP
 from .util import shade
 
 _slab_fade = None
@@ -42,6 +45,7 @@ def pick_block(world, pos):
 def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     w = world
     t = time.time()
+    hover_boiler = pick_boiler(w, pygame.mouse.get_pos())
     r = w.rise
     # Earth slab under the board: the layers below the two shown block by block, each in its own biome's earth
     bottom = -3 + r
@@ -69,6 +73,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     for m in w.miners:
         miner_key[id(m)] = m.x + m.y - 0.5
         items.append((miner_key[id(m)], 2, "miner", m))
+    for g in w.ghosts:   # (Graveyard Shift)
+        items.append((g.x + g.y - 0.5, 2, "ghost", g))
     for e in w.enemies:
         if e.state == "attacking" and e.victim and e.spec["grab"] in ("head", "neck", "orbit", "engulf"):
             items.append((miner_key[id(e.victim)], 3, "enemy", e))   # clinging on: drawn over its victim
@@ -83,6 +89,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         items.append((WHETSTONE_POS[0] + WHETSTONE_POS[1] - 0.4, 2, "whetstone", None))
     if w.lv("ballista"):
         items.append((BALLISTA_POS[0] + BALLISTA_POS[1] - 0.4, 2, "ballista", None))
+    if w.lv("boiler"):
+        items.append((BOILER_POS[0] + BOILER_POS[1] - 0.4, 2, "boiler", None))
     items.sort(key=lambda t: (t[0], t[1]))
 
     for _, _, kind, data in items:
@@ -113,6 +121,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         elif kind == "miner":   # rides the quake heave with the block underfoot
             draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"),
                        spirit=w.lv("spiritlantern") > 0)
+        elif kind == "ghost":
+            draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
         elif kind == "whetstone":
@@ -120,12 +130,16 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             draw_whetstone(surf, _anchor(w, WHETSTONE_POS), t, busy)
         elif kind == "ballista":
             draw_ballista(surf, _anchor(w, BALLISTA_POS), w.ballista_aim, w.ballista_timer, t)
+        elif kind == "boiler":
+            draw_boiler(surf, _anchor(w, BOILER_POS), w.boiler, t, hover_boiler)
         else:
             draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
 
     draw_blast_zones(surf, w, t)
     draw_webs(surf, w)
     draw_slam_zones(surf, w, t)
+    draw_phantom(surf, w, t)
+    draw_steam(surf, w, t)
     draw_boss_auras(surf, w, t)
     draw_curses(surf, w, t)
     draw_stuns(surf, w, t)
@@ -652,6 +666,31 @@ def draw_slam_zones(surf, world, t):
     surf.blit(overlay, (0, 0))
 
 
+def draw_phantom(surf, world, t):
+    """Phantom Slam charging: a ghostly purple hand hangs over its block, rising as the glow beneath it grows."""
+    if not world.phantom:
+        return
+    cell, age = world.phantom
+    q = min(1.0, age / PHANTOM_WINDUP)
+    cx, cy = world.cell_screen(cell)
+    overlay = pygame.Surface((180, 220), pygame.SRCALPHA)
+    ox, oy = 90, 170   # the block's top sits here on the overlay
+    pulse = 0.5 + 0.5 * math.sin(t * (8 + 18 * q))
+    ring = pygame.Rect(0, 0, 40 + 90 * q, 20 + 45 * q)
+    ring.center = (ox, oy)
+    pygame.draw.ellipse(overlay, (190, 110, 255, int(40 + 60 * q * pulse)), ring)
+    pygame.draw.ellipse(overlay, (225, 180, 255, int(120 + 100 * q)), ring, 2)
+    hand = pygame.Surface((70, 70), pygame.SRCALPHA)
+    draw_icon(hand, "hand", (35, 35), 26, (225, 190, 255))
+    hand.set_alpha(int(110 + 110 * q))
+    lift = 40 + 30 * q + math.sin(t * 5) * 3   # drawn back up, ready to come down
+    overlay.blit(hand, hand.get_rect(center=(ox, oy - lift)))
+    for k in range(3):   # wisps streaming off it
+        a = t * 4 + k * 2.1
+        pygame.draw.circle(overlay, (210, 170, 255, 160), (int(ox + math.sin(a) * 20), int(oy - lift + 30 + (a * 8) % 20)), 2)
+    surf.blit(overlay, (cx - ox, cy - oy))
+
+
 def draw_whetstone(surf, base, t, busy):
     """A grinding wheel on a little wooden frame; spins fast while someone sharpens."""
     x, y = int(base[0]), int(base[1])
@@ -668,6 +707,69 @@ def draw_whetstone(surf, base, t, busy):
         pygame.draw.line(surf, (110, 110, 120), (cx, cy), (cx + math.cos(a) * 8, cy + math.sin(a) * 8), 2)
     pygame.draw.circle(surf, (120, 82, 44), (cx, cy), 2)
     pygame.draw.line(surf, (120, 82, 44), (cx + 10, cy), (cx + 16, cy - 6), 2)   # crank handle
+
+
+def pick_boiler(world, pos):
+    """Whether `pos` is on the Steam Boiler."""
+    if not world.lv("boiler"):
+        return False
+    x, y = _anchor(world, BOILER_POS)
+    return abs(pos[0] - x) <= 20 and y - 44 <= pos[1] <= y + 4
+
+
+def draw_boiler(surf, base, pressure, t, hovered=False):
+    """The Steam Boiler: an iron drum on legs with a chimney and a pressure gauge; puffing and whistling when full."""
+    x, y = int(base[0]), int(base[1])
+    full = pressure >= 1.0
+    pygame.draw.ellipse(surf, (16, 12, 20), (x - 17, y - 5, 34, 10))
+    for d in (-9, 9):   # legs
+        pygame.draw.line(surf, (60, 58, 66), (x + d, y - 6), (x + d, y - 1), 3)
+    drum = pygame.Rect(x - 14, y - 36, 28, 30)
+    pygame.draw.rect(surf, (96, 92, 104), drum, border_radius=8)
+    pygame.draw.rect(surf, (58, 56, 66), drum, 2, border_radius=8)
+    for ry in (drum.y + 9, drum.bottom - 9):   # riveted bands
+        pygame.draw.line(surf, (70, 68, 78), (drum.x + 2, ry), (drum.right - 3, ry), 2)
+    glow = (255, int(120 + 100 * pressure), 60)   # the firebox, brighter as the pressure builds
+    pygame.draw.rect(surf, (40, 30, 30), (x - 6, drum.bottom - 9, 12, 6), border_radius=2)
+    pygame.draw.rect(surf, glow, (x - 4, drum.bottom - 8, 8, 4), border_radius=1)
+    pygame.draw.rect(surf, (70, 66, 76), (x + 4, drum.y - 12, 6, 13))   # chimney
+    gx, gy = x - 4, drum.y + 13   # the gauge, its needle sweeping round as the pressure climbs
+    pygame.draw.circle(surf, (235, 230, 215), (gx, gy), 6)
+    pygame.draw.circle(surf, (58, 56, 66), (gx, gy), 6, 1)
+    pygame.draw.arc(surf, (220, 60, 50), (gx - 5, gy - 5, 10, 10), -0.4, 0.6, 2)   # the red zone
+    a = math.pi * (1.1 - 1.2 * pressure) + (math.sin(t * 30) * 0.08 if full else 0)
+    pygame.draw.line(surf, (30, 26, 30), (gx, gy), (gx + math.cos(a) * 5, gy - math.sin(a) * 5), 2)
+    if full:   # steam puffing from the chimney, and a glow to say "click me"
+        for k in range(3):
+            q = (t * 1.5 + k / 3) % 1
+            pygame.draw.circle(surf, (230, 235, 240), (int(x + 7 + q * 6), int(drum.y - 14 - q * 18)), int(3 + q * 5), 1)
+        pulse = 0.5 + 0.5 * math.sin(t * 6)
+        pygame.draw.rect(surf, (230, 240, 255), drum.inflate(6 + 4 * pulse, 6 + 4 * pulse), 2, border_radius=10)
+    else:   # a thin gauge bar under it shows how far along it is
+        bar = pygame.Rect(x - 14, y + 4, 28, 4)
+        pygame.draw.rect(surf, (20, 16, 24), bar.inflate(2, 2))
+        pygame.draw.rect(surf, (210, 220, 235), (bar.x, bar.y, int(bar.w * pressure), bar.h))
+    if hovered:
+        pygame.draw.rect(surf, (255, 255, 255), drum.inflate(10, 10), 1, border_radius=10)
+
+
+def draw_steam(surf, world, t):
+    """The Steam Boiler venting: a wall of scalding steam rolling out from its corner across the whole board."""
+    if world.steam is None:
+        return
+    q = world.steam / STEAM_SECS
+    rng = random.Random(9)
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    reach = GRID * 1.6 * min(1.0, q * 1.6)   # how far the front has rolled, in tiles
+    fade = 1 - max(0.0, (q - 0.45) / 0.55)
+    for _ in range(140):
+        a = rng.uniform(math.pi / 2, math.pi)   # (out across the board from its right corner)
+        d = rng.uniform(0, 1) ** 0.6 * reach
+        gx, gy = BOILER_POS[0] + math.cos(a) * d, BOILER_POS[1] + math.sin(a) * d
+        px, py = iso(gx, gy, 2.5 + world.rise)
+        r = int(16 + rng.uniform(0, 24) + 12 * q)
+        pygame.draw.circle(overlay, (235, 240, 248, int(rng.uniform(70, 130) * fade)), (int(px), int(py - 20 * q)), r)
+    surf.blit(overlay, (0, 0))
 
 
 def draw_ballista(surf, base, aim, timer, t):

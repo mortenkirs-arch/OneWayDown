@@ -15,7 +15,8 @@ from .base import Scene
 
 TABS = [("crew", "Active crew"), ("graveyard", "Graveyard")]
 ROLE_BADGES = {"foreman": ("FOREMAN", HI_VIS), "driller": ("DRILLER", (235, 160, 70)),
-               "guard": ("GUARD", (120, 150, 220)), "demolitionist": ("DEMOLITION", (225, 80, 70))}
+               "guard": ("GUARD", (120, 150, 220)), "demolitionist": ("DEMOLITION", (225, 80, 70)),
+               "medic": ("MEDIC", (120, 220, 140))}
 TAB_W, TAB_H, TAB_Y = 230, 46, 84
 LIST_TOP, LIST_BOTTOM = 196, H - 72
 ROW_H = 62
@@ -74,8 +75,8 @@ class CrewScene(Scene):
         if col:
             rows.sort(key=lambda r: self.value(r, col), reverse=desc)
         if self.tab == "crew":   # the foreman heads the list, then the specialists, then the miners
-            order = {"foreman": 0, "guard": 1, "demolitionist": 2, "driller": 3}
-            rows.sort(key=lambda r: order.get(r["role"], 4))
+            order = {"foreman": 0, "medic": 1, "guard": 2, "demolitionist": 3, "driller": 4}
+            rows.sort(key=lambda r: order.get(r["role"], 5))
         return rows
 
     @staticmethod
@@ -227,7 +228,7 @@ class CrewScene(Scene):
             # the foreman doesn't dig: show the orders they've barked in the blocks column instead
             if row["role"] == "foreman":
                 work = f"{st.get('orders', 0)} orders"
-            elif row["role"] == "guard":
+            elif row["role"] in ("guard", "medic"):
                 work = "-"
             else:
                 work = fmt(st["blocks"])
@@ -291,6 +292,10 @@ class CrewScene(Scene):
             color = ROLE_BADGES["demolitionist"][1]
         elif m.role == "driller":
             label, color = "Drilling", ROLE_BADGES["driller"][1]
+        elif m.role == "medic":
+            patient = m.goal if m.task == "healing" and m.goal in self.world.miners else None
+            label = f"Patching up {patient.name}" if patient else "On call"
+            color = ROLE_BADGES["medic"][1]
         else:
             label, color = "Working", GOOD
         draw_text(s, f, label, 24, color, (x, y - 9), "midleft")

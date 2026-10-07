@@ -432,11 +432,13 @@ class Enemy:
             dps = self.spec["dps"] * max(1.0, crew_hp_at(self.depth) / crew_hp_at(GRIP_FROM))
             if self.elite:
                 dps *= ELITE_GRIP
+            dps *= world.grip_ward(self)   # (Garlic Garlands, Torches)
             drained = min(v.hp, dps * dt * world.art_mult("grab_dmg"))   # (Broodmother's Silk)
             v.hp -= drained
             v.last_hurt = world.clock
             if self.spec.get("lifesteal"):
-                self.hp = min(self.max_hp, self.hp + drained / v.max_hp * self.max_hp * self.spec["lifesteal"])
+                heal = drained / v.max_hp * self.max_hp * self.spec["lifesteal"] * world.grip_ward(self)
+                self.hp = min(self.max_hp, self.hp + heal)
                 world.blood_drip(v, self)
             if v.hp <= 0:
                 world.miner_down(v, killer=self)
@@ -448,7 +450,7 @@ class Enemy:
         transform = self.spec.get("transform")
         if transform and self.depth >= transform["min_depth"]:
             self.flight_time += dt
-            if self.flight_time >= transform["after"]:
+            if self.flight_time >= transform["after"] * world.turn_delay():   # (Garlic Garlands)
                 world.transform_enemy(self, transform["into"])
                 return
         target = world.nearest_free_miner(self.x, self.y)

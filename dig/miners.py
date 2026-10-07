@@ -14,8 +14,10 @@ ROLES = {
     "guard":         dict(hp=1.6, speed=1.1, height=3),    # patrols and fights monsters
     "demolitionist": dict(hp=1.0, speed=1.0, height=0),    # plants charges on tough blocks
     "foreman":       dict(hp=1.0, speed=0.8, height=4),    # walks the site barking orders
+    "medic":         dict(hp=1.2, speed=1.15, height=1),   # runs to the hurt and patches them up
+    "ghost":         dict(hp=1.0, speed=1.0, height=0),    # Graveyard Shift: a fallen miner, back to dig
 }
-DIGGERS = ("miner", "driller")
+DIGGERS = ("miner", "driller", "ghost")
 CRIT_ANIM_SECS = 0.6          # a critical strike's slam-and-recoil animation
 MINER_MAX_HP = 10.0           # before Hard Hats (see upgrades.miner_max_hp)
 
@@ -115,6 +117,7 @@ class Miner:
         self.streak_cell = None  # Hot Streak: the block being hit in a row...
         self.streak = 0.0        # ...and how many hits in a row so far
         self.sharp = 0.0         # Whetstone: seconds of freshly sharpened pick left
+        self.coffee = 0.0        # Coffee Break: seconds of caffeine left
         self.curse = 0.0         # Archlich: seconds until the curse on them bursts (0 = not cursed)
         self.stun = 0.0          # Fanged Behemoth: seconds left reeling from its screech
         self.last_hurt = -1e9    # game clock when last hit (they only heal once they've had a breather)

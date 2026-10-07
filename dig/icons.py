@@ -47,6 +47,10 @@ def draw_icon(surf, kind, c, s, col):
             fx = x - s * 0.42 + i * s * 0.25
             pygame.draw.rect(surf, col, (fx, y - s * 0.75, s * 0.18, s * 0.75), border_radius=3)
         pygame.draw.rect(surf, col, (x + s * 0.35, y - s * 0.05, s * 0.4, s * 0.2), border_radius=3)
+    elif kind == "phantom":   # a ghostly hand coming down, with its trail
+        draw_icon(surf, "hand", (x, y + s * 0.15), s * 0.8, col)
+        for i in (-1, 0, 1):
+            pygame.draw.line(surf, col, (x + i * s * 0.32, y - s * 0.95), (x + i * s * 0.32, y - s * 0.6), 2)
     elif kind == "wave":
         pygame.draw.circle(surf, col, c, s * 0.2)
         for r in (0.5, 0.8):
@@ -85,6 +89,14 @@ def draw_icon(surf, kind, c, s, col):
                                         (x + s * 0.5, y + s * 0.55), (x - s * 0.3, y + s * 0.6)])
         pygame.draw.circle(surf, (255, 255, 255), (x - s * 0.1, y - s * 0.2), max(2, s * 0.12))
     # ----- crew ------------------------------------------------------------
+    elif kind == "mug":   # a steaming mug of coffee
+        cup = pygame.Rect(x - s * 0.6, y - s * 0.25, s * 0.9, s * 0.95)
+        pygame.draw.rect(surf, col, cup, border_radius=int(s * 0.18))
+        pygame.draw.circle(surf, col, (cup.right, cup.centery), s * 0.3, max(2, int(s * 0.14)))
+        pygame.draw.rect(surf, dark, (cup.x + s * 0.12, cup.y + s * 0.12, cup.w - s * 0.24, s * 0.18))
+        for i in range(2):
+            sx = x - s * 0.35 + i * s * 0.4
+            pygame.draw.arc(surf, col, (sx - s * 0.12, y - s * 0.95, s * 0.3, s * 0.55), 1.2, 4.6, 2)
     elif kind == "map":
         pygame.draw.polygon(surf, col, [(x - s * 0.75, y - s * 0.5), (x - s * 0.25, y - s * 0.65),
                                         (x + s * 0.25, y - s * 0.5), (x + s * 0.75, y - s * 0.65),
@@ -198,6 +210,75 @@ def draw_icon(surf, kind, c, s, col):
         pygame.draw.circle(surf, col, c, s * 0.7)
         pygame.draw.circle(surf, dark, (x + s * 0.3, y - s * 0.2), s * 0.6)
         pygame.draw.circle(surf, col, (x + s * 0.55, y + s * 0.45), max(1, s * 0.1))
+    elif kind == "grave":   # a headstone with a cross, a little ghost rising from it
+        stone = pygame.Rect(x - s * 0.55, y - s * 0.35, s * 0.9, s * 1.05)
+        pygame.draw.rect(surf, col, stone, border_top_left_radius=int(s * 0.45), border_top_right_radius=int(s * 0.45))
+        pygame.draw.line(surf, dark, (stone.centerx, stone.y + s * 0.2), (stone.centerx, stone.y + s * 0.75), 2)
+        pygame.draw.line(surf, dark, (stone.centerx - s * 0.2, stone.y + s * 0.4), (stone.centerx + s * 0.2, stone.y + s * 0.4), 2)
+        pygame.draw.circle(surf, col, (x + s * 0.5, y - s * 0.55), s * 0.25)
+        pygame.draw.polygon(surf, col, [(x + s * 0.25, y - s * 0.55), (x + s * 0.75, y - s * 0.55),
+                                        (x + s * 0.7, y - s * 0.1), (x + s * 0.5, y - s * 0.25), (x + s * 0.3, y - s * 0.1)])
+    elif kind == "boulder":   # a cracked boulder, shock lines coming off it
+        rock = [(x - s * 0.7, y + s * 0.6), (x - s * 0.75, y), (x - s * 0.35, y - s * 0.5), (x + s * 0.25, y - s * 0.55),
+                (x + s * 0.7, y - s * 0.1), (x + s * 0.65, y + s * 0.6)]
+        pygame.draw.polygon(surf, col, rock)
+        pygame.draw.lines(surf, dark, False, [(x - s * 0.05, y - s * 0.52), (x + s * 0.1, y - s * 0.1),
+                                              (x - s * 0.15, y + s * 0.2), (x + s * 0.05, y + s * 0.58)], 2)
+        for d in (-1, 1):   # the shock
+            pygame.draw.line(surf, col, (x + d * s * 0.9, y - s * 0.35), (x + d * s * 1.05, y - s * 0.6), 2)
+            pygame.draw.line(surf, col, (x + d * s * 0.95, y + s * 0.05), (x + d * s * 1.15, y - s * 0.05), 2)
+    elif kind == "boiler":   # a boiler drum with a chimney and a puff of steam
+        pygame.draw.rect(surf, col, (x - s * 0.6, y - s * 0.4, s * 1.1, s * 1.15), border_radius=int(s * 0.3))
+        pygame.draw.rect(surf, col, (x + s * 0.15, y - s * 0.85, s * 0.25, s * 0.5))
+        pygame.draw.circle(surf, dark, (x - s * 0.1, y + s * 0.15), max(2, s * 0.25))
+        pygame.draw.circle(surf, col, (x + s * 0.55, y - s * 0.95), max(2, s * 0.2), 2)
+        pygame.draw.circle(surf, col, (x + s * 0.85, y - s * 1.05), max(2, s * 0.14), 2)
+    elif kind == "holywater":   # a stoppered flask with a cross on it
+        pygame.draw.circle(surf, col, (x, y + s * 0.3), s * 0.6)
+        pygame.draw.rect(surf, col, (x - s * 0.2, y - s * 0.65, s * 0.4, s * 0.5))
+        pygame.draw.rect(surf, dark, (x - s * 0.26, y - s * 0.85, s * 0.52, s * 0.22), border_radius=2)
+        pygame.draw.line(surf, dark, (x, y + s * 0.05), (x, y + s * 0.6), 2)
+        pygame.draw.line(surf, dark, (x - s * 0.22, y + s * 0.22), (x + s * 0.22, y + s * 0.22), 2)
+    elif kind == "trophy":   # a cup on a stand
+        pygame.draw.polygon(surf, col, [(x - s * 0.6, y - s * 0.75), (x + s * 0.6, y - s * 0.75), (x + s * 0.4, y - s * 0.05),
+                                        (x - s * 0.4, y - s * 0.05)])
+        for d in (-1, 1):
+            pygame.draw.arc(surf, col, (x + d * s * 0.55 - s * 0.25, y - s * 0.7, s * 0.5, s * 0.5),
+                            -math.pi / 2 if d > 0 else math.pi / 2, math.pi / 2 if d > 0 else 3 * math.pi / 2, 2)
+        pygame.draw.rect(surf, col, (x - s * 0.1, y - s * 0.1, s * 0.2, s * 0.5))
+        pygame.draw.rect(surf, col, (x - s * 0.45, y + s * 0.4, s * 0.9, s * 0.25), border_radius=2)
+    elif kind == "spree":   # tally marks, struck through
+        for i in range(4):
+            px = x - s * 0.55 + i * s * 0.36
+            pygame.draw.line(surf, col, (px, y - s * 0.7), (px, y + s * 0.7), max(2, int(s * 0.16)))
+        pygame.draw.line(surf, col, (x - s * 0.8, y + s * 0.5), (x + s * 0.8, y - s * 0.5), max(2, int(s * 0.16)))
+    elif kind == "torch":
+        pygame.draw.line(surf, col, (x - s * 0.15, y + s * 0.95), (x + s * 0.15, y - s * 0.1), max(2, int(s * 0.2)))
+        flame = [(x + s * 0.2, y - s * 1.0), (x + s * 0.55, y - s * 0.35), (x + s * 0.2, y - s * 0.05),
+                 (x - s * 0.15, y - s * 0.35)]
+        pygame.draw.polygon(surf, col, flame)
+        pygame.draw.circle(surf, dark, (x + s * 0.2, y - s * 0.3), max(1, s * 0.14))
+    elif kind == "garlic":   # a bulb with its cloves and a sprout
+        pygame.draw.ellipse(surf, col, (x - s * 0.7, y - s * 0.35, s * 1.4, s * 1.1))
+        for d in (-0.3, 0.0, 0.3):
+            pygame.draw.line(surf, dark, (x + d * s, y - s * 0.25), (x + d * s * 1.4, y + s * 0.65), 1)
+        pygame.draw.polygon(surf, col, [(x - s * 0.15, y - s * 0.3), (x + s * 0.15, y - s * 0.3), (x, y - s * 0.95)])
+    elif kind == "salt":   # a heap of salt crystals with a pinch falling
+        pygame.draw.polygon(surf, col, [(x - s * 0.85, y + s * 0.7), (x, y - s * 0.2), (x + s * 0.85, y + s * 0.7)])
+        for i, (dx, dy) in enumerate(((-0.3, -0.75), (0.1, -0.9), (0.35, -0.6), (-0.05, -0.5))):
+            pygame.draw.rect(surf, col, (x + dx * s, y + dy * s, max(2, s * 0.14), max(2, s * 0.14)))
+        pygame.draw.line(surf, dark, (x - s * 0.3, y + s * 0.4), (x + s * 0.3, y + s * 0.4), 1)
+    elif kind == "medkit":   # a first-aid bag
+        bag = pygame.Rect(x - s * 0.75, y - s * 0.4, s * 1.5, s * 1.05)
+        pygame.draw.arc(surf, col, (x - s * 0.3, y - s * 0.75, s * 0.6, s * 0.7), 0, math.pi, max(2, int(s * 0.12)))
+        pygame.draw.rect(surf, col, bag, border_radius=int(s * 0.2))
+        pygame.draw.rect(surf, dark, (x - s * 0.1, bag.y + s * 0.2, s * 0.2, s * 0.65))
+        pygame.draw.rect(surf, dark, (x - s * 0.33, bag.y + s * 0.42, s * 0.66, s * 0.2))
+    elif kind == "chevrons":   # rank stripes
+        for i in range(3):
+            cy = y - s * 0.55 + i * s * 0.5
+            pygame.draw.lines(surf, col, False, [(x - s * 0.7, cy + s * 0.35), (x, cy), (x + s * 0.7, cy + s * 0.35)],
+                              max(2, int(s * 0.22)))
     # ----- tools -----------------------------------------------------------
     elif kind == "tip":
         pygame.draw.line(surf, col, (x - s * 0.7, y + s * 0.7), (x + s * 0.1, y - s * 0.1), 4)
