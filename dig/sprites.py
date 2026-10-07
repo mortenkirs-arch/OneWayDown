@@ -18,11 +18,11 @@ STEEL, DIAMOND = (190, 190, 200), (110, 235, 245)   # pick head colour, before /
 CRIT_SLAM = 0.3     # share of the crit animation spent slamming down (the rest is the recoil)
 CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the shoulder
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24,
-                    "zombieking": 54, "broodmother": 46, "vampirelord": 50, "lich": 50, "eggsac": 18,
-                    "skeleton": 24, "greatbat": 48, "bonetyrant": 54,
+                    "zombieking": 54, "broodmother": 56, "vampirelord": 54, "lich": 56, "eggsac": 18,
+                    "skeleton": 24, "greatbat": 54, "bonetyrant": 66,
                     "slime": 22, "slimeling": 20, "slimechunk": 26, "slimeking": 54}
 BONE_COL, BONE_SHADE = (232, 226, 205), (150, 142, 120)
-BOSS_CANVAS = (120, 200)   # a boss is drawn at normal size on this canvas, then scaled up
+BOSS_CANVAS = (180, 240)   # a boss is drawn on this canvas around its feet, then scaled up
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
 SPIDER_BODY = (58, 48, 70)
 SLIME_GREEN, SLIME_DARK, SLIME_ANGRY = (110, 210, 90), (46, 110, 40), (230, 100, 60)
@@ -432,8 +432,11 @@ def enemy_anchor(e, rise, t):
     if getattr(e, "mode", "") == "pile":   # the Bone Tyrant in pieces on the ground
         fx, fy = _feet(e, rise)
         return fx, fy - 12
-    ax, ay = _base_anchor(e, rise, t)
     scale = e.draw_scale
+    if e.kind in boss_sprites.DRAWERS and e.mode != "bats":   # (a boss with a sprite of its own)
+        fx, fy = _feet(e, rise)
+        return fx, fy - boss_sprites.anchor_height(e) * scale
+    ax, ay = _base_anchor(e, rise, t)
     if scale:   # bosses are drawn scaled up around their feet
         fx, fy = _feet(e, rise)
         return fx + (ax - fx) * scale, fy + (ay - fy) * scale
@@ -492,7 +495,8 @@ def _draw_enemy(surf, e, rise, t, hovered):
 
 
 def _draw_boss(surf, e, rise, t, hovered, scale):
-    """A boss: its monster's sprite drawn on a canvas around its feet, scaled up, with a crown on top."""
+    """A boss drawn on a canvas around its feet, then scaled up: its own sprite (boss_sprites.py), or the
+    Zombie King's zombie with a crown on top."""
     if e.mode == "split":   # the Slime King in pieces: only its chunks are on the board
         return
     fx, fy = _feet(e, rise)
@@ -515,14 +519,21 @@ def _draw_boss(surf, e, rise, t, hovered, scale):
     ox, oy = current_origin()
     with origin_at((ox + ax - fx, oy + ay - fy)):
         _draw_enemy(canvas, e, rise, t, hovered)
+    own = e.kind in boss_sprites.DRAWERS   # (drawn facing right, crowned, flashing by itself)
+    if own and e.facing < 0:
+        canvas = pygame.transform.flip(canvas, True, False)
+    if own and e.flash > 0:
+        canvas.fill((150, 150, 150), special_flags=pygame.BLEND_RGB_ADD)
     big = pygame.transform.scale(canvas, (int(cw * scale), int(ch * scale)))
-    tint = (255, 150, 140) if e.enraged else e.spec.get("boss_tint")
-    if tint:
-        big.fill(tint, special_flags=pygame.BLEND_RGB_MULT)
+    if e.enraged:   # (the Zombie King below half health)
+        big.fill((255, 150, 140), special_flags=pygame.BLEND_RGB_MULT)
     surf.blit(big, (fx - ax * scale, fy - ay * scale))
-    if e.state != "emerging" and e.boss:
+    if own:
+        if e.targetable:
+            _hp_bar(surf, fx, fy - boss_sprites.bar_height(e) * scale, e.hp / e.max_hp, BAD, 60)
+    elif e.state != "emerging" and e.boss:
         bx, by = enemy_anchor(e, rise, t)
-        _draw_crown(surf, bx, by - e.spec.get("crown_lift", 40) * scale, t)
+        _draw_crown(surf, bx, by - 40 * scale, t)
 
 
 def _draw_bat_swarm(surf, e, rise, t):
@@ -646,7 +657,8 @@ def _draw_clipped_rise(surf, e, rise, t, sink):
 
 def _draw_rising(surf, e, rise, t, p):
     """Claws its way up out of the hole."""
-    fx, fy = _draw_clipped_rise(surf, e, rise, t, int((1 - _ease_out(p)) * 48))
+    depth = boss_sprites.RISE_DEPTH.get(e.kind, 48)
+    fx, fy = _draw_clipped_rise(surf, e, rise, t, int((1 - _ease_out(p)) * depth))
     # front lip of the hole drawn over the waist
     pygame.draw.arc(surf, (130, 98, 66), (fx - 15, fy - 7, 30, 14), math.pi * 1.05, math.pi * 1.95, 3)
 
@@ -664,9 +676,9 @@ def _draw_spider_dropping(surf, e, rise, t, p):
         pygame.draw.line(surf, shimmer, (fx, 0), (fx, int((fy - 6) * _ease_out(strand))), 1)
         return
     lift = int((1 - _ease_out(p)) * 320)
-    cy = fy - 8 - lift
+    cy = fy - boss_sprites.DROP_TOP.get(e.kind, 8) - lift
     pygame.draw.line(surf, (215, 215, 225), (fx, 0), (fx, cy - 5), 1)
-    _draw_spider(surf, e, rise, t, False, dy=-lift)
+    DRAWERS[e.kind](surf, e, rise, t, False, dy=-lift)
 
 
 def _swoop_start(e, rise):
@@ -692,7 +704,7 @@ def _draw_bat_swooping(surf, e, rise, t, p):
     x = sx + (ex - sx) * q
     y = sy + (ey - sy) * q + math.sin(q * math.pi) * 40   # dips low mid-swoop
     pygame.draw.ellipse(surf, (16, 12, 20), (fx - 4 - 4 * q, fy - 2, 8 + 8 * q, 4 + 2 * q))
-    _draw_bat(surf, e, rise, t, False, pos=(x, y))
+    DRAWERS[e.kind](surf, e, rise, t, False, pos=(x, y))
 
 
 def _draw_transform(surf, e, rise, t):
@@ -1144,3 +1156,7 @@ DRAWERS = {"zombie": _draw_zombie, "spider": _draw_spider, "bat": _draw_bat, "va
            "wisp": _draw_wisp, "ghost": _draw_ghost, "eggsac": _draw_eggsac, "skeleton": _draw_skeleton,
            "slime": _draw_slime, "slimeling": _draw_slime, "slimechunk": _draw_slime}
 DRAWERS.update({kind: DRAWERS[spec["look"]] for kind, spec in ENEMY_TYPES.items() if "look" in spec})   # bosses
+
+from . import boss_sprites   # noqa: E402  (bosses with sprites of their own; it borrows the helpers above)
+
+DRAWERS.update(boss_sprites.DRAWERS)

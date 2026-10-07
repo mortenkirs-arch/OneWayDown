@@ -518,7 +518,7 @@ class World:
 
     # ----- boss tricks ------------------------------------------------------
     def boss_auras(self):
-        """Each frame: the Zombie King rallies the zombies around him; wisps shield the Lich."""
+        """Each frame: the Zombie King rallies the zombies around him; wisps shield the Archlich."""
         for e in self.enemies:
             e.dmg_taken = 1.0
             e.rallied = False
@@ -535,7 +535,7 @@ class World:
             boss.dmg_taken = 1 - min(SHIELD_MAX, SHIELD_PER_WISP * len(self.shield_wisps()))
 
     def shield_wisps(self):
-        """Wisps linked to the Lich, shielding him."""
+        """Wisps linked to the Archlich, shielding him."""
         return [e for e in self.enemies if e.kind == "wisp" and e.state != "emerging"]
 
     def boss_special(self, boss, dt):
@@ -850,7 +850,7 @@ class World:
         """The boss is gone (beaten or fled): waves resume, and an already-cleared layer gives way."""
         self.boss_done = self.depth
         self.enemy_timer = self.wave_interval()
-        for m in self.miners:   # the Lich's curses die with him
+        for m in self.miners:   # the Archlich's curses die with him
             m.curse = 0.0
         if not self.current:
             self.descend()
@@ -1817,7 +1817,7 @@ class World:
             if self.clock - m.last_hurt >= REGEN_DELAY:   # (no healing in the thick of it)
                 m.hp = min(m.max_hp, m.hp + regen * m.max_hp * dt)
             mspeed = speed * self.web_slow(m)
-            if m.stun > 0:   # reeling from the Great Bat's screech
+            if m.stun > 0:   # reeling from the Fanged Behemoth's screech
                 m.stun = max(0.0, m.stun - dt)
                 m.anim = 0.0
                 continue

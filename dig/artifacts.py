@@ -66,7 +66,7 @@ ARTIFACTS = {
     "broodsilk": dict(name="Broodmother's Silk", icon="vein", color=(220, 220, 235), boss="broodmother",
                       lore="Stronger than steel, and only slightly sticky.",
                       bonus="Grabbed crew take 30% less damage", effects={"grab_dmg": 0.7}),
-    "batwing": dict(name="Great Bat's Wing", icon="wind", color=(150, 120, 190), boss="greatbat",
+    "batwing": dict(name="Fanged Behemoth's Wing", icon="wind", color=(150, 120, 190), boss="greatbat",
                     lore="Leathery, enormous, and it still twitches when something moves.",
                     bonus="Monsters move 15% slower", effects={"enemy_speed": 0.85}),
     "jawbone": dict(name="Tyrant's Jawbone", icon="skull", color=(235, 228, 205), boss="bonetyrant",
@@ -78,7 +78,7 @@ ARTIFACTS = {
     "vampfang": dict(name="Vampire Lord's Fang", icon="burst", color=(200, 40, 60), boss="vampirelord",
                      lore="It still thirsts. Your crew no longer does.",
                      bonus="Crew heal twice as fast", effects={"regen": 2.0}),
-    "phylactery": dict(name="Lich's Phylactery", icon="spiritlamp", color=(150, 210, 255), boss="lich",
+    "phylactery": dict(name="Archlich's Phylactery", icon="spiritlamp", color=(150, 210, 255), boss="lich",
                        lore="A soul in a jar, bartering for its freedom in gold.",
                        bonus="+25% gold from everything", effects={"gold": 1.25}),
 }

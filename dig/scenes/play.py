@@ -63,7 +63,7 @@ class PlayScene(Scene):
             if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
                 self.charge = time.time()
             cursed = self.world.pick_cursed(event.pos)
-            if cursed:   # lifting a Lich's curse comes first
+            if cursed:   # lifting a Archlich's curse comes first
                 self.world.lift_curse(cursed)
                 return
             enemy = pick_enemy(self.world, event.pos, time.time())

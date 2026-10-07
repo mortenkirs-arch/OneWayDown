@@ -28,7 +28,8 @@ Each enemy type is data in ENEMY_TYPES:
 
 Bosses (boss=True) never grab: they stalk the crew, wind up and slam the ground around them, and
 call in minions. Extra keys:
-  look, scale   which enemy sprite to draw, and how much bigger
+  scale         how much bigger it is drawn than its sprite (see boss_sprites.py)
+  look          (Zombie King) draw it with this regular enemy's sprite, scaled up and crowned
   slam          damage to every crew member in reach when the slam lands, as a share of a typical crew
                 member's health at the boss's depth (crew_hp_at): so slams keep pace with Hard Hats
   minion        dict(kind, count, every): summoned around the boss every `every` seconds (and `plus`: one of
@@ -39,11 +40,11 @@ Each boss also has a trick of its own, run by World.boss_special (see the BOSS T
   Zombie King   rallies nearby zombies (faster, tougher) and goes into a rage below half health
   Broodmother   her slams leave webs that slow the crew; she lays egg sacs that hatch into spiders
   Vampire Lord  turns into a swarm of bats, flies to a crew member and bites them to heal
-  Great Bat     dive-bombs a crew member from the air instead of slamming, and screeches to stun the crew
+  Fanged Behemoth  dive-bombs a crew member from the air instead of slamming, and screeches to stun the crew
   Bone Tyrant   after each slam it strides off and hurls a volley of bones at the crew, then marches back in;
                 its first "death" leaves a bone pile you must smash quickly
   Slime King    at half health it bursts into chunks that each creep up and slam; beat them all to win
-  Lich          curses a crew member (click them to lift it before it explodes); his wisps shield him
+  Archlich      curses a crew member (click them to lift it before it explodes); his wisps shield him
 
 Egg sacs (hatch=...) don't move: they hatch into `count` of `kind` after `after` seconds unless broken.
 entrance="none" means the enemy is simply there, with no spawn-in animation.
@@ -96,21 +97,21 @@ ENEMY_TYPES = {
                        tint=(150, 130, 210), gore=(120, 190, 80)),
     "broodmother": dict(name="Broodmother", hp=2000, speed=0.8, dps=0, bounty=360, min_depth=0, weight=0,
                         reach=0.9, entrance="drop", grab="head", arrival="descends", boss=True,
-                        look="spider", scale=2.4, crown_lift=14, slam=0.25,
+                        scale=1.2, slam=0.25,
                         minion=dict(kind="eggsac", count=2, every=9.0, plus="spider"),
                         tint=(150, 200, 120), gore=(90, 60, 120)),
-    "greatbat": dict(name="Great Bat", hp=2400, speed=1.0, dps=0, bounty=380, min_depth=0, weight=0,
+    "greatbat": dict(name="Fanged Behemoth", hp=2400, speed=1.0, dps=0, bounty=380, min_depth=0, weight=0,
                      reach=0.9, entrance="swoop", grab="neck", arrival="swoops in", boss=True, dive=True,
-                     altitude=1.1, look="bat", scale=2.4, crown_lift=16, slam=0.30,
+                     altitude=1.1, scale=1.2, slam=0.30,
                      minion=dict(kind="bat", count=3, every=11.0),
                      tint=(228, 228, 238), gore=(70, 50, 80)),
     "bonetyrant": dict(name="Bone Tyrant", hp=2400, speed=0.5, dps=0, bounty=400, min_depth=0, weight=0,
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
-                       look="skeleton", scale=2.3, slam=0.33, minion=dict(kind="skeleton", count=2, every=12.0),
+                       scale=1.1, slam=0.33, minion=dict(kind="skeleton", count=2, every=12.0),
                        tint=(200, 200, 220), gore=(232, 226, 205)),
     "slimeking": dict(name="Slime King", hp=3200, speed=0.5, dps=0, bounty=400, min_depth=0, weight=0,
                       reach=0.9, entrance="dig", grab="side", arrival="oozes up", boss=True,
-                      look="slime", scale=2.4, crown_lift=5, slam=0.30, split=dict(into="slimechunk", count=8),
+                      scale=1.2, slam=0.30, split=dict(into="slimechunk", count=8),
                       pct_scale=0.025,
                       minion=dict(kind="slime", count=2, every=12.0),
                       tint=(160, 230, 130), gore=(120, 220, 90)),
@@ -119,13 +120,12 @@ ENEMY_TYPES = {
                        pct_scale=0.2, tint=(160, 230, 130), gore=(150, 220, 70)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
                         reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
-                        look="vampire", scale=2.0, slam=0.28, minion=dict(kind="bat", count=2, every=12.0),
+                        scale=1.2, slam=0.28, minion=dict(kind="bat", count=2, every=12.0),
                         tint=(228, 228, 238), gore=(160, 30, 45)),
-    "lich": dict(name="Lich", hp=2600, speed=0.4, dps=0, bounty=420, min_depth=0, weight=0,
+    "lich": dict(name="Archlich", hp=2600, speed=0.4, dps=0, bounty=420, min_depth=0, weight=0,
                  reach=0.9, entrance="fade", grab="engulf", arrival="materialises", boss=True,
                  altitude=0.35, wobble=dict(amount=0.2, freq=1.0),
-                 look="ghost", scale=2.2, slam=0.33, minion=dict(kind="wisp", count=3, every=10.0),
-                 boss_tint=(205, 160, 255),
+                 scale=1.15, slam=0.33, minion=dict(kind="wisp", count=3, every=10.0),
                  tint=(160, 190, 230), gore=(200, 170, 255)),
     "eggsac": dict(name="Egg Sac", hp=10, speed=0, dps=0, bounty=4, min_depth=0, weight=0,
                    reach=0, entrance="none", grab="head", arrival="", hatch=dict(kind="spider", count=2, after=6.0),
@@ -159,14 +159,14 @@ BITE_SECS = 3.5              # how long he feeds on the crew member he lands on.
 BITE_SHARE = 0.08           # ...draining this share of a typical crew member's health a second...
 BITE_HEAL = 0.012            # ...and healing this share of his max health a second
 BITE_BREAK = 0.04            # taking this share of his max health while biting makes him let go
-CURSE_EVERY = 9.0            # Lich: seconds between curses
+CURSE_EVERY = 9.0            # Archlich: seconds between curses
 CURSE_SECS = 4.5             # a curse bursts this long after it lands, unless you click the crew member
 CURSE_SHARE = 0.4           # damage to every crew member within CURSE_RADIUS when it bursts (share, as above)
 CURSE_RADIUS = 1.5
 CURSE_WARD = 0.3             # Spirit Lantern weakens the burst by this share per level
-SHIELD_PER_WISP = 0.25       # each wisp alive takes this share off the damage the Lich takes...
+SHIELD_PER_WISP = 0.25       # each wisp alive takes this share off the damage the Archlich takes...
 SHIELD_MAX = 0.75            # ...up to this much
-SCREECH_EVERY = 13.0         # Great Bat: seconds between screeches...
+SCREECH_EVERY = 13.0         # Fanged Behemoth: seconds between screeches...
 SCREECH_RADIUS = 3.5         # ...stunning the crew within this many tiles...
 SCREECH_STUN = 2.2           # ...for this long
 BONE_VOLLEY = 4              # Bone Tyrant: after each slam it strides off and throws this many bones...
@@ -300,13 +300,13 @@ class Enemy:
         self.cooldown = BOSS_SLAM_COOLDOWN   # boss: seconds before it can wind up again
         self.summon_timer = 4.0       # boss: seconds until it calls in minions
         self.fight_time = 0.0         # boss: seconds since it arrived (it retreats at BOSS_TIME_LIMIT)
-        self.dmg_taken = 1.0          # share of incoming damage that lands (rallied zombies, shielded Lich)
+        self.dmg_taken = 1.0          # share of incoming damage that lands (rallied zombies, shielded Archlich)
         self.enraged = False          # Zombie King: below ENRAGE_AT health
         self.mode = "stalk"           # Vampire Lord: stalk | bats (flying, untouchable) | bite
         self.trick_timer = 6.0        # seconds until the boss's own trick (bat form, curse)
         self.goal = None              # Vampire Lord: the crew member the swarm is flying at
         self.bite_hp = 0.0            # his health when the bite began (to tell when he's been hit enough)
-        self.slam_at = None           # Great Bat: the spot it will dive onto when the wind-up ends
+        self.slam_at = None           # Fanged Behemoth: the spot it will dive onto when the wind-up ends
         self.reformed = False         # Bone Tyrant: already pulled itself back together once
         self.pile_timer = 0.0         # ...seconds left to smash its bone pile
         self.volley = 0               # ...bones left to throw in this volley
@@ -347,7 +347,7 @@ class Enemy:
 
     @property
     def look(self):
-        """The sprite this enemy is drawn with (bosses borrow a regular monster's, scaled up)."""
+        """The sprite this enemy is drawn with (the Zombie King borrows the zombie's, scaled up)."""
         return self.spec.get("look", self.kind)
 
     @property

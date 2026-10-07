@@ -53,8 +53,8 @@ with its own rock, backdrop and drifting embers, sparkles or dust (purely cosmet
 `dig/biomes.py`).
 
 Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
-Great Bat (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m) and the Lich (70m), then round
-again, tougher each time. A boss stalks your
+Fanged Behemoth (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m) and the
+Archlich (70m), then round again, tougher each time. A boss stalks your
 crew, winds up and slams the ground around it (get your miners out of the red), and calls in
 minions; ordinary waves pause while it's on the board. Each has a trick of its own:
 
@@ -62,7 +62,7 @@ minions; ordinary waves pause while it's on the board. Each has a trick of its o
   them off away from him; below half health he rages and slams far more often.
 - **Broodmother** lays egg sacs (with a spider to guard them) that hatch into spiders unless you
   break them, and her slams leave webs that slow your crew.
-- **Great Bat** flies: instead of slamming, it marks a crew member's spot and dive-bombs it, and
+- **Fanged Behemoth** flies: instead of slamming, it marks a crew member's spot and dive-bombs it, and
   its screech stuns the crew nearby for a moment.
 - **Bone Tyrant** never stands still for long: after each slam it strides off and hurls a volley of
   bones at your crew, then marches back in. It won't stay down either: its first "death" leaves a
@@ -72,7 +72,7 @@ minions; ordinary waves pause while it's on the board. Each has a trick of its o
   in two at half health as well.
 - **Vampire Lord** scatters into a swarm of bats (nothing can hit him), flies to a crew member
   and feeds on them to heal - hit him hard to make him let go.
-- **Lich** curses a crew member: click them to lift it before it bursts and hurts everyone
+- **Archlich** curses a crew member: click them to lift it before it bursts and hurts everyone
   nearby (Spirit Lantern weakens the burst). Each of his wisps shields him, so kill them first.
 
 You can't dig past a boss's layer until it falls, but if it isn't beaten within 150 seconds it

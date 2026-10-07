@@ -544,7 +544,7 @@ def draw_webs(surf, world):
 
 def draw_boss_auras(surf, world, t):
     """Zombie King: a sickly green ring of command, and a glow under every zombie he has rallied.
-    Lich: violet threads from each wisp shielding him, and the shield itself."""
+    Archlich: violet threads from each wisp shielding him, and the shield itself."""
     boss = world.boss()
     if not boss or boss.state == "emerging":
         return
@@ -570,7 +570,7 @@ def draw_boss_auras(surf, world, t):
 
 
 def draw_curses(surf, world, t):
-    """Lich: a violet sigil over each cursed crew member, its ring running down to the burst,
+    """Archlich: a violet sigil over each cursed crew member, its ring running down to the burst,
     and the area the burst will hit."""
     cursed = [m for m in world.miners if m.curse > 0 and m.state != "down"]
     if not cursed:
@@ -594,7 +594,7 @@ def draw_curses(surf, world, t):
 
 
 def draw_stuns(surf, world, t):
-    """Crew reeling from the Great Bat's screech: little stars circling their heads."""
+    """Crew reeling from the Fanged Behemoth's screech: little stars circling their heads."""
     for m in world.miners:
         if m.stun > 0 and m.state != "down":
             x, y = world.entity_screen(m, 50 + m.height)
