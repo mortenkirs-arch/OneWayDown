@@ -7,23 +7,25 @@ savegame.json is never touched; a boss guarding that depth rises straight away):
     uv run main.py --depth 39          start at 39m
     uv run main.py --boss bonetyrant   start at a boss (also: zombie, brood, bat, bone, vampire, lich...)
     uv run main.py --list              list the bosses and their depths
-    uv run main.py --save saves/depth_39.json   carry on a test game (or use any other save slot)
+    uv run main.py --save saves/depth_39.json   carry on a test game (plays just that file, not the slots)
 """
 import argparse
 import os
 import sys
 
-from dig.config import PROJECT_ROOT, SAVE_PATH
+from dig.config import PROJECT_ROOT
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="The Only Way Is Down", epilog="With no options, plays your own save.")
+    parser = argparse.ArgumentParser(description="The Only Way Is Down",
+                                     epilog="With no options, opens the menu on your save slots.")
     start = parser.add_mutually_exclusive_group()
     start.add_argument("--depth", type=int, metavar="N", help="start a fresh test game at depth N")
     start.add_argument("--boss", metavar="NAME", help="start a fresh test game at a boss (see --list)")
     start.add_argument("--list", action="store_true", help="list the bosses and their depths, then exit")
     parser.add_argument("--gold", type=float, metavar="G", help="with --depth/--boss: start with this much gold")
-    parser.add_argument("--save", metavar="PATH", help="save file to use (test games default to saves/)")
+    parser.add_argument("--save", metavar="PATH", help="play just this save file instead of the save slots "
+                                                      "(test games default to saves/)")
     return parser.parse_args()
 
 
@@ -58,7 +60,7 @@ def main():
         print(f"Test game at {depth}m, saving to {os.path.relpath(path, PROJECT_ROOT)}")
         Game(save_path=path, world=test_world(depth, gold=args.gold)).run()
     else:
-        Game(save_path=args.save or SAVE_PATH).run()
+        Game(save_path=args.save).run()
 
 
 if __name__ == "__main__":

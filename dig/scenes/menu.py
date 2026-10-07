@@ -21,35 +21,34 @@ class MenuScene(Scene):
 
     def __init__(self, game):
         super().__init__(game)
-        self.confirm_new = False
         self.title = None   # the stone "DOWN" title (see dig/title.py)
+        self.has_saves = game.latest_slot() is not None   # (refreshed on every visit)
         cx, dy = W // 2 - 160, MENU_DY
         self.buttons = {
-            "continue": Button((cx, 330 + dy, 320, 60), "Continue", lambda: game.switch("play")),
+            "continue": Button((cx, 330 + dy, 320, 60), "Continue", game.continue_game),
             "new": Button((cx, 405 + dy, 320, 60), "New Game", self.new_game),
-            "upgrades": Button((cx, 480 + dy, 320, 60), "Upgrades", lambda: game.open_upgrades("menu")),
+            "load": Button((cx, 480 + dy, 320, 60), "Load Game", lambda: game.open_slots("load")),
             "settings": Button((cx, 555 + dy, 320, 60), "Settings", lambda: game.open_settings("menu"),
                                color=(64, 84, 110)),
             "quit": Button((cx, 630 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
         }
 
     def enter(self):
-        self.confirm_new = False
+        self.has_saves = self.game.latest_slot() is not None
 
     def new_game(self):
-        if self.world and not self.confirm_new:
-            self.confirm_new = True
-            return
-        self.game.new_game()
+        """With no saves yet, straight in; otherwise pick the slot for it."""
+        if self.has_saves:
+            self.game.open_slots("new")
+        else:
+            self.game.new_game(self.game.slots[0])
 
     def handle(self, event):
-        for key, b in self.buttons.items():
+        for b in self.buttons.values():
             if b.handle(event):
-                if key != "new":
-                    self.confirm_new = False
                 return
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and self.world:
-            self.game.switch("play")
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN and self.has_saves:
+            self.game.continue_game()
 
     def draw(self, surf):
         mouse = pygame.mouse.get_pos()
@@ -71,9 +70,6 @@ class MenuScene(Scene):
             draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.depth}m",
                       26, TEXT, (W // 2, 280 + MENU_DY), "center")
         b = self.buttons
-        b["continue"].enabled = self.world is not None
-        b["new"].text = "Click again to confirm" if self.confirm_new else "New Game"
-        b["new"].size = 26 if self.confirm_new else 30
-        b["new"].color = (150, 70, 70) if self.confirm_new else (86, 70, 130)
+        b["continue"].enabled = b["load"].enabled = self.has_saves
         for btn in b.values():
             btn.draw(surf, self.fonts, mouse)

@@ -9,8 +9,8 @@ import pygame
 
 from .biomes import BIOMES, biome_at
 from .audio import Audio
-from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_PATH, W
-from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, SettingsScene, UpgradeScene
+from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
+from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
 from .ui import Fonts
 from .world import World
 
@@ -19,10 +19,12 @@ MUSIC_FADE_IN_MS = 1500    # ...then the new one fades in over this
 
 
 class Game:
-    def __init__(self, save_path=SAVE_PATH, world=None):
-        """`save_path`: where to load and save. `world`: start straight into this one on the dig site
-        (a developer's test game) instead of loading the save and opening the menu."""
-        self.save_path = save_path
+    def __init__(self, save_path=None, world=None):
+        """`save_path`: play just this one save file (a test game, or --save) instead of the save slots.
+        `world`: start straight into this one on the dig site (a developer's test game) instead of loading
+        the latest save and opening the menu."""
+        self.slots = [save_path] if save_path else list(SAVE_SLOTS)
+        self.save_path = self.latest_slot() or self.slots[0]   # (Continue: the save played most recently)
         pygame.init()
         pygame.display.set_caption("The Only Way Is Down")
         self.audio = Audio()   # volume settings, music and sound effects
@@ -48,6 +50,7 @@ class Game:
             "crew": CrewScene(self),
             "artifacts": ArtifactScene(self),
             "settings": SettingsScene(self),
+            "slots": SlotScene(self),
         }
         self.scene = self.scenes["play" if world else "menu"]
         self.music = None   # which track is playing (None = silence)
@@ -93,9 +96,43 @@ class Game:
         except pygame.error:   # (missing file, or the device went away)
             self.music = None
 
-    def new_game(self):
+    # ----- save slots -----------------------------------------------------
+    def latest_slot(self):
+        """The save written most recently, or None if there are none yet."""
+        saved = [p for p in self.slots if os.path.exists(p)]
+        return max(saved, key=os.path.getmtime) if saved else None
+
+    def open_slots(self, mode):
+        """The save slots screen: "load" a save, or pick one for a "new" game."""
+        self.scenes["slots"].mode = mode
+        self.switch("slots")
+
+    def continue_game(self):
+        latest = self.latest_slot()
+        if latest and (self.world is None or latest != self.save_path):
+            self.play_slot(latest)
+        elif self.world:
+            self.switch("play")
+
+    def play_slot(self, path):
+        """Load the save in `path` and carry on with it (saving the game being left first)."""
+        self.save()
+        self.save_path, self.world = path, None
+        self.load()
+        if not self.world:
+            self.toast = ("That save couldn't be read", 3.0)
+            return
+        self.bg_key, self.bg_prev, self.bg_fade = biome_at(self.world.depth)["key"], None, 1.0
+        self.switch("play")
+
+    def new_game(self, path=None):
+        """A fresh game in the save slot `path` (replacing what's there; default: the current one)."""
+        self.save()
+        if path:
+            self.save_path = path
         self.world = World()
         self.save()
+        self.bg_key, self.bg_prev, self.bg_fade = "topsoil", None, 1.0
         self.switch("play")
 
     def open_crew(self):

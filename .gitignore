@@ -1,8 +1,8 @@
 __pycache__/
 *.py[cod]
 .venv/
-savegame.json
-savegame.json.tmp
+savegame*.json
+savegame*.json.tmp
 saves/
 music_samples/
 settings.json

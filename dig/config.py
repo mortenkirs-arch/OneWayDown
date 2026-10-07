@@ -42,6 +42,7 @@ GOLD_HUD_COIN = (52, 44)      # where the HUD's gold coin sits; earned coins fly
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_PATH = os.path.join(PROJECT_ROOT, "savegame.json")
+SAVE_SLOTS = [SAVE_PATH] + [os.path.join(PROJECT_ROOT, f"savegame_{n}.json") for n in (2, 3)]   # (Load Game)
 AUTOSAVE_SECS = 10
 MUSIC_DIR = os.path.join(PROJECT_ROOT, "assets", "music")   # (regenerate with: uv run tools/make_music.py)
 

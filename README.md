@@ -117,7 +117,7 @@ uv run main.py --depth 39            # start at 39m
 uv run main.py --boss bonetyrant     # start at a boss (any unambiguous start works: bone, vamp, lich...)
 uv run main.py --list                # the bosses and their depths
 uv run main.py --boss bat --gold 1e9 # ...with plenty of gold to try upgrades
-uv run main.py --save saves/depth_39.json   # carry on a test game later (or use another save slot)
+uv run main.py --save saves/depth_39.json   # carry on a test game later (plays just that file, not the slots)
 ```
 
 ## Controls
@@ -133,7 +133,9 @@ uv run main.py --save saves/depth_39.json   # carry on a test game later (or use
 | Right-click / `Enter` in upgrades | Buy the selected upgrade |
 | `Esc` | Back / main menu |
 
-Progress auto-saves to `savegame.json` every 10 seconds and on exit.
+There are three save slots (`savegame.json`, `savegame_2.json` and `savegame_3.json`). **Continue**
+carries on with whichever was played last, **Load Game** picks one, and **New Game** asks which slot
+to start in (replacing a save takes a second click). Progress auto-saves every 10 seconds and on exit.
 
 The window opens at the largest of 1600x900, 1440x810 or 1280x720 that fits your screen
 (set `THE_ONLY_WAY_IS_DOWN_RES=1280x720` to force a size). Depth milestones live in `UNLOCK_DEPTH`
