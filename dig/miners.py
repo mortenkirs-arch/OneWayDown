@@ -16,8 +16,27 @@ ROLES = {
     "foreman":       dict(hp=1.0, speed=0.8, height=4),    # walks the site barking orders
     "medic":         dict(hp=1.2, speed=1.15, height=1),   # runs to the hurt and patches them up
     "ghost":         dict(hp=1.0, speed=1.0, height=0),    # Graveyard Shift: a fallen miner, back to dig
+    # the camp's hires (Base Camp): permanent, knocked out rather than killed
+    "hero":          dict(hp=3.0, speed=1.15, height=3),   # digs like four, rescues the grabbed
+    "blacksmith":    dict(hp=1.6, speed=1.25, height=-3),  # goblin: reforges the diggers' picks
+    "archer":        dict(hp=1.2, speed=1.1, height=2),    # shoots monsters from a distance
+    "taxman":        dict(hp=1.0, speed=0.9, height=3),    # collects a share of the crew's earnings
+    "claygolem":     dict(hp=2.5, speed=0.75, height=6),   # plods about slamming the ground
 }
-DIGGERS = ("miner", "driller", "ghost")
+DIGGERS = ("miner", "driller", "ghost", "hero")
+# The camp's hires always look the same (and keep their names): they're characters, not recruits
+CAMP_LOOKS = {
+    "hero": dict(name="Rocco", skin=(224, 172, 125), hair=(150, 100, 50), style="short", facial="beard",
+                 shirt=(60, 110, 200), height=3),
+    "blacksmith": dict(name="Grizzle", skin=(120, 170, 80), hair=(40, 34, 30), style="bald", facial=None,
+                       shirt=(110, 90, 70), height=-3),
+    "archer": dict(name="Wren", skin=(241, 194, 155), hair=(90, 60, 30), style="ponytail", facial=None,
+                   shirt=(70, 120, 60), height=2),
+    "claygolem": dict(name="Mitts", skin=(186, 116, 74), hair=(130, 78, 48), style="bald", facial=None,
+                      shirt=(170, 104, 66), height=6),
+    "taxman": dict(name="Mr. Pennyworth", skin=(255, 224, 196), hair=(200, 200, 205), style="short",
+                   facial="mustache", shirt=(70, 40, 90), height=3),
+}
 CRIT_ANIM_SECS = 0.6          # a critical strike's slam-and-recoil animation
 MINER_MAX_HP = 10.0           # before Hard Hats (see upgrades.miner_max_hp)
 
@@ -121,6 +140,7 @@ class Miner:
         self.curse = 0.0         # Archlich: seconds until the curse on them bursts (0 = not cursed)
         self.stun = 0.0          # Fanged Behemoth: seconds left reeling from its screech
         self.last_hurt = -1e9    # game clock when last hit (they only heal once they've had a breather)
+        self.route = set()       # Tax Collector: who's paid up this round
         self.level = 1           # experience level (see level_mult)...
         self.xp = 0.0            # ...and xp towards the next one
         if ROLES[role]["height"]:

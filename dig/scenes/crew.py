@@ -16,7 +16,9 @@ from .base import Scene
 TABS = [("crew", "Active crew"), ("graveyard", "Graveyard")]
 ROLE_BADGES = {"foreman": ("FOREMAN", HI_VIS), "driller": ("DRILLER", (235, 160, 70)),
                "guard": ("GUARD", (120, 150, 220)), "demolitionist": ("DEMOLITION", (225, 80, 70)),
-               "medic": ("MEDIC", (120, 220, 140))}
+               "medic": ("MEDIC", (120, 220, 140)), "hero": ("HERO", (250, 205, 70)),
+               "blacksmith": ("BLACKSMITH", (240, 140, 70)), "archer": ("ARCHER", (160, 210, 120)),
+               "taxman": ("TAX", (110, 210, 120)), "claygolem": ("GOLEM", (200, 140, 240))}
 TAB_W, TAB_H, TAB_Y = 230, 46, 84
 LIST_TOP, LIST_BOTTOM = 196, H - 72
 ROW_H = 62
@@ -75,8 +77,9 @@ class CrewScene(Scene):
         if col:
             rows.sort(key=lambda r: self.value(r, col), reverse=desc)
         if self.tab == "crew":   # the foreman heads the list, then the specialists, then the miners
-            order = {"foreman": 0, "medic": 1, "guard": 2, "demolitionist": 3, "driller": 4}
-            rows.sort(key=lambda r: order.get(r["role"], 5))
+            order = {"hero": 0, "blacksmith": 0, "archer": 0, "taxman": 0, "claygolem": 0,   # (camp people first)
+                     "foreman": 1, "medic": 2, "guard": 3, "demolitionist": 4, "driller": 5}
+            rows.sort(key=lambda r: order.get(r["role"], 6))
         return rows
 
     @staticmethod
@@ -275,7 +278,9 @@ class CrewScene(Scene):
             return
         m = row["miner"]
         if m.state == "down":
-            draw_text(s, f, f"Dead - replacement in {math.ceil(m.respawn)}s", 24, MUTED, (x, y - 9), "midleft")
+            text = (f"Knocked out - back up in {math.ceil(m.respawn)}s" if getattr(m, "ko", False)
+                    else f"Dead - replacement in {math.ceil(m.respawn)}s")
+            draw_text(s, f, text, 24, MUTED, (x, y - 9), "midleft")
             return
         if m.state == "grabbed":
             label, color = f"Under attack by a {m.attacker.spec['name']}!" if m.attacker else "Under attack!", BAD
@@ -292,6 +297,15 @@ class CrewScene(Scene):
             color = ROLE_BADGES["demolitionist"][1]
         elif m.role == "driller":
             label, color = "Drilling", ROLE_BADGES["driller"][1]
+        elif m.role in ("hero", "blacksmith", "archer", "taxman", "claygolem"):
+            busy = {"hero": {"rescuing": "To the rescue!"}, "blacksmith": {"forging": "Reforging a pick",
+                                                                          "heading": "Off to reforge a pick"},
+                    "archer": {"shooting": "Shooting"}, "taxman": {"visiting": f"Off to collect from {m.goal.name}" if m.task == "visiting" and m.goal else "Doing the rounds",
+                               "collecting": "Collecting taxes", "waiting": "Waiting for someone to tax"},
+                    "claygolem": {"winding": "Winding up a slam!", "plodding": "Plodding to the thick of it"}}[m.role]
+            idle = {"hero": "Digging", "blacksmith": "Looking for a dull pick", "archer": "Keeping watch",
+                    "taxman": "Doing the rounds", "claygolem": "Getting its breath back"}[m.role]
+            label, color = busy.get(m.task, idle), ROLE_BADGES[m.role][1]
         elif m.role == "medic":
             patient = m.goal if m.task == "healing" and m.goal in self.world.miners else None
             label = f"Patching up {patient.name}" if patient else "On call"

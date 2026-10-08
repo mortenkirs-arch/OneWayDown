@@ -7,14 +7,15 @@ import pygame
 
 from .biomes import biome_at, block_color
 from .blocks import BLOCKS
-from .config import GRID, TILE_H, TILE_W, W
+from .camp import CRUMBLE_FALL, ROPE_DROP
+from .config import BLOCK_H, GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
 from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_SURFACE_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS,
                       SHADE_RADIUS, VOID_INHALE_RADIUS, VOID_INHALE_SECS)
 from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bone, draw_bomb, draw_enemy, draw_ghost, draw_miner, enemy_anchor
+from .sprites import draw_bone, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
 from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
                            STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
@@ -49,9 +50,10 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     hover_boiler = pick_boiler(w, pygame.mouse.get_pos())
     r = w.rise
     # Earth slab under the board: the layers below the two shown block by block, each in its own biome's earth
-    bottom = -3 + r
-    top0 = 0 + r
-    for i in range(3):
+    sink = slab_drop(w)
+    bottom = -3 + r - sink
+    top0 = 0 + r - sink
+    for i in range(3 if sink < 30 else 0):
         depth = w.depth + 2 + i
         earth = (74, 56, 46) if depth < 4 else biome_at(depth)["earth"]   # (brown while the topsoil is dirt)
         hi, lo = top0 - i, top0 - i - 1
@@ -62,18 +64,23 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         if i:   # the seam between this layer and the one above
             pygame.draw.line(surf, shade(earth, 0.4), iso(0, GRID, hi), iso(GRID, GRID, hi), 2)
             pygame.draw.line(surf, shade(earth, 0.33), iso(GRID, 0, hi), iso(GRID, GRID, hi), 2)
-    surf.blit(_get_slab_fade(), (0, iso(GRID, GRID, bottom)[1] - 150))
+    if sink < 30:
+        surf.blit(_get_slab_fade(), (0, iso(GRID, GRID, bottom)[1] - 150))
 
     # Drawables sorted back-to-front: blocks of both layers + miners
     items = []
     for (x, y), b in w.next.items():
-        items.append((x + y, 0, "block", (x, y, 1 + r, b, 1)))
+        if crumble_drop(w, x, y) < 30:
+            items.append((x + y, 0, "block", (x, y, 1 + r - crumble_drop(w, x, y), b, 1)))
     for (x, y), b in w.current.items():
-        items.append((x + y, 1, "block", (x, y, 2 + r + quake_lift(w, x + 0.5, y + 0.5), b, 0)))
+        if crumble_drop(w, x, y) < 30:
+            items.append((x + y, 1, "block", (x, y, 2 + r + quake_lift(w, x + 0.5, y + 0.5) - crumble_drop(w, x, y),
+                                              b, 0)))
     miner_key = {}
     for m in w.miners:
         miner_key[id(m)] = m.x + m.y - 0.5
-        items.append((miner_key[id(m)], 2, "miner", m))
+        climbing = w.collapse is not None and getattr(m, "climb", None) and w.collapse >= m.climb["grab"]
+        items.append((math.inf, 6, "climber", m) if climbing else (miner_key[id(m)], 2, "miner", m))
     for g in w.ghosts:   # (Graveyard Shift)
         items.append((g.x + g.y - 0.5, 2, "ghost", g))
     for e in w.enemies:
@@ -119,11 +126,13 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                 if hover and hover[0] == (x, y):
                     for name, poly in faces.items():
                         pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
-        elif kind == "miner":   # rides the quake heave with the block underfoot
-            draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"),
-                       spirit=w.lv("spiritlantern") > 0)
+        elif kind == "miner":   # rides the quake heave with the block underfoot (and goes down with the floor)
+            draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y) - entity_drop(w, data), t,
+                       w.lv("diamond"), spirit=w.lv("spiritlantern") > 0)
+        elif kind == "climber":
+            draw_climbing(surf, w, data, t)
         elif kind == "ghost":
-            draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y), t, w.lv("diamond"))
+            draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y) + ghost_lift(w, data), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
         elif kind == "whetstone":
@@ -134,8 +143,9 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         elif kind == "boiler":
             draw_boiler(surf, _anchor(w, BOILER_POS), w.boiler, t, hover_boiler)
         else:
-            draw_enemy(surf, data, r, t, hovered=data is hover_enemy)
+            draw_enemy(surf, data, r - entity_drop(w, data), t, hovered=data is hover_enemy)
 
+    draw_falling_ropes(surf, w, t)
     draw_blast_zones(surf, w, t)
     draw_webs(surf, w)
     draw_slam_zones(surf, w, t)
@@ -152,6 +162,7 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     draw_crit_bursts(surf, w)
     draw_spike_traps(surf, w)
     draw_bolts(surf, w, t)
+    draw_arrows(surf, w, t)
     draw_rocks(surf, w, t)
     draw_chests(surf, w)
     for rx, ry, age, max_r, color in w.rings:
@@ -491,7 +502,100 @@ def draw_flying_coins(surf, coins):
 def _anchor(world, pos):
     """Screen position of the ground at a fixed grid spot (whetstone, ballista)."""
     x, y = pos
-    return iso(x, y, world.column_height(*world.cell_of(x, y)) + world.rise)
+    cx, cy = world.cell_of(x, y)
+    return iso(x, y, world.column_height(cx, cy) + world.rise - crumble_drop(world, cx, cy))
+
+
+# ----- the collapse (The Void Maw falls) ---------------------------------------------------------------------------
+def crumble_drop(world, x, y):
+    """How far (in block heights) cell (x, y) of the floor has fallen in the collapse: trembling just before it
+    goes, then dropping away faster and faster."""
+    if world.collapse is None:
+        return 0.0
+    since = world.collapse - world.crumble.get((x, y), 99.0)
+    if since < -0.6:
+        return 0.0
+    if since < 0:
+        return 0.05 * math.sin(world.collapse * 60 + x * 7 + y * 3)
+    return 0.5 * CRUMBLE_FALL * since * since
+
+
+def slab_drop(world):
+    """The earth under the board goes last, once the floor above it has mostly fallen."""
+    if world.collapse is None or not world.crumble:
+        return 0.0
+    since = world.collapse - (max(world.crumble.values()) - 0.8)
+    return 0.5 * CRUMBLE_FALL * since * since if since > 0 else 0.0
+
+
+def entity_drop(world, e):
+    """A monster, a grave, a crew member still waiting for their rope: down with the floor under them."""
+    return crumble_drop(world, *world.cell_of(e.x, e.y))
+
+
+def climb_lift(style, tau):
+    """Pixels a climber has got up their rope, `tau` seconds after grabbing on, in their own style."""
+    if tau <= 0:
+        return 0.0
+    if style == "steady":   # hand over hand, a pull at a time
+        k = tau * 2.5
+        return 70 * (math.floor(k) + _ease(k % 1))
+    if style == "scramble":
+        return 260 * tau + 6 * abs(math.sin(tau * 18))
+    if style == "struggle":   # gets on, slips back, gets on again
+        s = tau % 1.1
+        return 170 * tau - 45 * math.floor(tau / 1.1) - (45 * min(1.0, (s - 0.9) / 0.2) if s > 0.9 else 0)
+    if style == "hauled":   # hangs on for dear life while the rope's reeled in
+        return 0.5 * 230 * tau * tau
+    return {"swing": 165, "spin": 185, "waver": 150, "float": 130}.get(style, 160) * tau
+
+
+def climb_sway(style, tau):
+    """Sideways pixels the rope (and climber) has swung out."""
+    if style == "swing":
+        return 24 * math.sin(tau * 3.2) * min(1.0, tau)
+    if style == "scramble":
+        return random.uniform(-1.5, 1.5)
+    return 3 * math.sin(tau * 2)
+
+
+def draw_climbing(surf, world, m, t):
+    """A crew member on their rope, climbing out of the collapsing shaft."""
+    plan = m.climb
+    tau = world.collapse - plan["grab"]
+    style = plan["style"]
+    fx, fy = iso(m.x, m.y, m.draw_z + world.rise)
+    fy -= climb_lift(style, tau)
+    if fy < -60:
+        return
+    sway = climb_sway(style, tau)
+    if style == "spin":   # the rope twisting: round and round they go
+        m.facing = 1 if math.sin(tau * 9) > 0 else -1
+    draw_rope(surf, (fx, -20), (fx + sway, fy + 16))
+    draw_climber(surf, m, int(fx + sway), int(fy), t, style, tau, fx + sway)
+
+
+def ghost_lift(world, g):
+    """A Graveyard Shift ghost drifting up and away as the shaft comes down (block heights)."""
+    plan = getattr(g, "climb", None) if world.collapse is not None else None
+    if not plan:
+        return 0.0
+    return climb_lift("float", world.collapse - plan["grab"]) / BLOCK_H
+
+
+def draw_falling_ropes(surf, world, t):
+    """Ropes coming down to the crew members who haven't grabbed theirs yet (snaking a little as they land)."""
+    if world.collapse is None:
+        return
+    for m in world.miners:
+        plan = getattr(m, "climb", None)
+        if not plan or m.state == "down" or not plan["rope"] <= world.collapse < plan["grab"]:
+            continue
+        fx, fy = iso(m.x, m.y, m.draw_z + world.rise - entity_drop(world, m))
+        q = min(1.0, (world.collapse - plan["rope"]) / ROPE_DROP)
+        end = -20 + (fy - 40 + 20) * _ease(q)
+        wobble = math.sin(t * 9 + plan["phase"]) * 4 * (1 - q * 0.6)
+        draw_rope(surf, (fx, -20), (fx + wobble, end))
 
 
 def draw_golden_block(surf, faces, left, t):
@@ -883,6 +987,24 @@ def draw_bolts(surf, world, t):
         tail = (x - dx / norm * 14, y - dy / norm * 14)
         pygame.draw.line(surf, (140, 100, 60), tail, (x, y), 2)
         pygame.draw.circle(surf, (210, 210, 220), (int(x), int(y)), 2)
+
+
+def draw_arrows(surf, world, t):
+    """The Archer's arrows, arcing a little on their way to the target."""
+    from .world import ARROW_SECS
+    for (sx, sy), foe, age, _ in world.arrows:
+        tx, ty = enemy_anchor(foe, world.rise, t)
+        at = lambda q: (sx + (tx - sx) * q, sy + (ty - sy) * q - math.sin(q * math.pi) * 18)
+        q = min(1.0, age / ARROW_SECS)
+        (x, y), (bx, by) = at(q), at(max(0.0, q - 0.1))
+        n = math.hypot(x - bx, y - by) or 1.0
+        ux, uy = (x - bx) / n, (y - by) / n
+        tail = (x - ux * 14, y - uy * 14)
+        pygame.draw.line(surf, (150, 110, 60), tail, (x, y), 2)
+        pygame.draw.polygon(surf, (210, 210, 220), [(x + ux * 4, y + uy * 4), (x - uy * 2.5, y + ux * 2.5),
+                                                    (x + uy * 2.5, y - ux * 2.5)])
+        for d in (-1, 1):   # fletching
+            pygame.draw.line(surf, (240, 240, 235), tail, (tail[0] - ux * 3 - uy * 3 * d, tail[1] - uy * 3 + ux * 3 * d), 1)
 
 
 def draw_rocks(surf, world, t):

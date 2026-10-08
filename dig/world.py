@@ -7,7 +7,8 @@ from .artifacts import (ARTIFACT_CHANCE, ARTIFACT_MIN_DEPTH, ARTIFACTS, COMMON, 
                         TROPHY_OF)
 from .biomes import biome_at, block_color
 from .blocks import BLOCKS, DEEP_ROCK_FROM, HP_GROWTH, Block, crack_share, generate_layer, layer_value
-from .camp import CAMP, COLLAPSE_DELAY, CYCLE_GROWTH, EXPEDITION_DEPTH
+from .camp import (CAMP_ROLES, HIRES, CLIMB_STYLES, COLLAPSE_SECS, CRUMBLE_FROM, CRUMBLE_SPREAD, EXPEDITION_DEPTH,
+                   ROLE_CLIMB, ROPE_DROP)
 from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS, Bomb
 from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED, CoinFly, Floater, Particle,
@@ -31,7 +32,7 @@ from .enemies import (ELITE_HP, boss_minion_cap, boss_minion_mult,
 from .iso import iso
 from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
                            STEAM_SECS, WHETSTONE_POS)
-from .miners import (CRIT_ANIM_SECS, MAX_LEVEL, ROLES, Miner, base_name, level_mult, new_stats, numbered_name,
+from .miners import (CAMP_LOOKS, CRIT_ANIM_SECS, MAX_LEVEL, ROLES, Miner, base_name, level_mult, new_stats, numbered_name,
                      xp_to_next)
 from .sprites import bomb_fuse_tip, enemy_anchor
 from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, chest_chance, clear_share,
@@ -60,6 +61,24 @@ FOREMAN_BARKS = ["Faster!", "Put your backs into it!", "That ore won't dig itsel
                  "Is that a nap, {name}?", "Gold doesn't wait!"]
 DRILL_HITS_PER_SWING = 7.5   # a driller lands this many small hits in the time a miner swings once...
 DRILL_SHARE = 0.25           # ...each worth this much of a miner's hit: ~1.9x a miner's digging
+KO_SECS = 25.0               # the camp's people are knocked out, not killed: back on their feet after this long
+HERO_POWER = 4.0             # the Hero Miner digs as hard as this many miners...
+HERO_STRIKE = 0.25           # ...and each rescue blow takes this share of a monster's max health (a heavy blow)...
+HERO_SWING = 0.6             # ...this often...
+HERO_RESCUE_RANGE = 2.5      # ...for anyone grabbed this close (further off, they keep digging)
+FORGE_WORK = 1.6             # Goblin Blacksmith: seconds hammering a pick...
+FORGE_SECS = 40.0            # ...which then stays reforged this long...
+FORGE_BOOST = 0.25           # ...hitting this much harder (times the goblin's level bonus: up to +50%)
+ARCHER_DRAW = 1.0            # Archer: seconds between arrows...
+ARCHER_SHARE = 0.10          # ...each taking this share of a monster's max health (times the level bonus)...
+ARCHER_RANGE = 5.0           # ...from up to this far away
+ARROW_SECS = 0.3             # (an arrow's flight)
+MITTS_WINDUP = 0.9           # Clay Golem: seconds raising its fists before a slam...
+MITTS_EVERY = 2.5            # ...and resting after one before the next (plus however long it takes to plod over)
+TAX_BLOCKS = 1.0             # Tax Collector: each crew member pays this many average blocks' worth of gold...
+TAX_DEEPER = 50              # ...and one more for every this many metres down (a bigger crew, bigger takings),
+                             # times his level bonus...
+TAX_PAUSE = 1.0              # ...and he stops this long with each to write it in the ledger
 GUARD_SWING = 0.7            # seconds between a guard's shovel blows
 GUARD_SHARE = 0.08           # each blow takes this share of a monster's max health (~9s to fell one alone)...
 GUARD_XP_SHARE = 0.5         # ...and experience counts for half as much as for other crew (x1.5 at most)
@@ -173,9 +192,12 @@ class World:
         self.void_tip_at = -99.0                                # ...and when we last pointed at the Void Maw's eye
         self.void_pools = []                                    # The Void Maw's pools of darkness: [x, y, age]
         self.expedition = 0                # expeditions finished (each ends at EXPEDITION_DEPTH: Base Camp)
-        self.camp = []                     # what's been built at Base Camp, in order (it survives every reset)
-        self.collapse = None               # seconds until the shaft comes down (The Void Maw just fell), or None
+        self.camp = []                     # who's been hired at Base Camp, in order (they survive every reset)
+        self.arrows = []                   # the Archer's arrows in flight: [start (x, y), enemy, age, archer]
+        self.collapse = None               # seconds since the shaft started coming down (The Void Maw fell), or None
+        self.crumble = {}                  # ...and when each cell of the floor gives way
         self.camp_ready = False            # the shaft has come down: time to build at camp
+        self.visit_hire = None             # ...and who's been taken on at camp this visit (one per visit)
         self.boss_return = 0.0             # seconds until The Void Maw rises again, after it retreated
         self.lifetime = dict(blocks=0, gold=0.0, monsters=0, bosses=0, expeditions=0, deepest=0)
         self.steam = None                                       # ...and seconds since it last vented (the steam fx)
@@ -223,23 +245,16 @@ class World:
     def refresh_artifacts(self):
         """Combine the effects of every artifact found (multiply 'mult' stats, add 'add' stats)."""
         stats = {}
-        effects = [ARTIFACTS[k]["effects"] for k in self.artifacts] + [CAMP[k]["effects"] for k in self.camp]
-        for fx in effects:   # (Base Camp's buildings count too)
+        effects = [ARTIFACTS[k]["effects"] for k in self.artifacts]
+        for fx in effects:
             for stat, v in fx.items():
                 if STAT_KIND[stat] == "add":
                     stats[stat] = stats.get(stat, 0.0) + v
                 else:
                     stats[stat] = stats.get(stat, 1.0) * v
-        cycle = self.cycle()   # later expeditions: tougher monsters, bigger bounties
-        stats["enemy_hp"] = stats.get("enemy_hp", 1.0) * cycle
-        stats["bounty"] = stats.get("bounty", 1.0) * cycle
         self.art_stats = stats
 
     # ----- expeditions ----------------------------------------------------------------------------------------
-    def cycle(self):
-        """How much tougher (and richer) this expedition's blocks and monsters are than the first's."""
-        return CYCLE_GROWTH ** self.expedition
-
     @property
     def display_depth(self):
         """The depth the player sees: it keeps counting across expeditions (101m, 102m...)."""
@@ -250,28 +265,19 @@ class World:
         return depth + EXPEDITION_DEPTH * self.expedition
 
     def new_layer(self, depth, *args, **kw):
-        """A fresh layer, toughened (and enriched) for this expedition."""
-        return self.toughen(generate_layer(depth, *args, **kw))
-
-    def toughen(self, layer, keep_hp=False):
-        k = self.cycle()
-        for b in layer.values():
-            b.max_hp *= k
-            b.value *= k
-            if not keep_hp:
-                b.hp *= k
-        return layer
+        """A fresh layer (every expedition's are just like the first's)."""
+        return generate_layer(depth, *args, **kw)
 
     def boss_time_limit(self):
         return BOSS_TIME_LIMIT + self.art_add("boss_time")
 
     @classmethod
-    def next_expedition(cls, old, build):
-        """The shaft has come down: `build` goes up at Base Camp, and a fresh expedition starts beneath it with
-        nothing but the camp, the graveyard and the lifetime record."""
+    def next_expedition(cls, old):
+        """The shaft has come down and you've been to Base Camp: a fresh expedition starts beneath it with nothing
+        but the camp's people (hired straight into old.camp), the graveyard and the lifetime record."""
         w = cls()
         w.expedition = old.expedition + 1
-        w.camp = old.camp + [build]
+        w.camp = list(old.camp)
         w.graveyard = old.graveyard
         w.lifetime = dict(old.lifetime)
         w.lifetime["expeditions"] = w.expedition
@@ -284,6 +290,10 @@ class World:
         w.gold = w.art_add("start_gold")
         w.miners = []
         w.sync_miners()
+        veterans = {m.role: m.to_dict() for m in old.miners if m.role in CAMP_ROLES}
+        for m in w.miners:   # the camp's people come along as they were: same level, same record
+            if m.role in veterans:
+                m.apply_saved(veterans[m.role])
         w.enemy_timer = 4.0   # (the first monsters find the new shaft soon enough)
         w.notice = [f"Expedition {w.expedition + 1}: a new crew, a new shaft - the dig goes on at {w.display_depth}m",
                     6.0, ""]
@@ -309,7 +319,8 @@ class World:
         """How many of each role the upgrades call for."""
         return {"miner": self.crew_size(), "driller": self.lv("driller"), "guard": self.lv("guard"),
                 "demolitionist": 1 if self.lv("demolition") else 0, "foreman": 1 if self.lv("foreman") else 0,
-                "medic": 1 if self.lv("medic") else 0}   # (only ever one medic: levels make them better)
+                "medic": 1 if self.lv("medic") else 0,   # (only ever one medic: levels make them better)
+                **{hire: 1 for hire in getattr(self, "camp", ())}}   # (and the camp's people, once hired)
 
     def foreman(self):
         """The foreman on site and alive, or None (their bonuses only apply while they are)."""
@@ -335,9 +346,9 @@ class World:
 
     def glove_scale(self):
         """Power Gloves toughen with the rock: past GLOVES_TOUGHEN_FROM a click (and so every slam, blast and tap
-        built on one) grows as the blocks do, and with each expedition's tougher rock. Not with the endgame's deep
+        built on one) grows as the blocks do. Not with the endgame's deep
         rock, though - past 70m your hands slow down along with the crew."""
-        return HP_GROWTH ** max(0, self.depth - GLOVES_TOUGHEN_FROM) * self.cycle()
+        return HP_GROWTH ** max(0, self.depth - GLOVES_TOUGHEN_FROM)
 
     def monster_hit_damage(self):
         """Your click damage to monsters (Combat menu), before the Executioner minimum."""
@@ -434,7 +445,10 @@ class World:
         miner.max_hp = miner.hp = self.max_hp_for(role)
         miner.stats = new_stats(self.display_depth, self.clock)
         miner.level = min(MAX_LEVEL, veteran_level(self.lv("veterans")) + int(self.art_add("start_level")))
-        # (Veterans and Base Camp's Drill Yard: they turn up already trained)
+        # (Veterans: they turn up already trained)
+        if role in CAMP_LOOKS:   # one of the camp's people: always the same face (and starting fresh)
+            miner.apply_look(CAMP_LOOKS[role])
+            miner.level = 1
         return miner
 
     def column_height(self, cx, cy):
@@ -454,7 +468,7 @@ class World:
 
     # ----- combat ---------------------------------------------------------
     def nearest_free_miner(self, x, y):
-        free = [m for m in self.miners if m.state == "working"]
+        free = [m for m in self.miners if m.state == "working" and m.role != "hero"]   # (no grip holds a hero)
         return min(free, key=lambda m: (m.x - x) ** 2 + (m.y - y) ** 2, default=None)
 
     def spawn_wave(self):
@@ -888,7 +902,7 @@ class World:
         empty = [(x, y) for x in range(cx - 2, cx + 3) for y in range(cy - 2, cy + 3)
                  if 0 <= x < GRID and 0 <= y < GRID and (x, y) != (cx, cy) and (x, y) not in self.current]
         for cell in random.sample(empty, min(MOUNTAIN_HEAVE, len(empty))):
-            self.current[cell] = self.toughen({cell: Block("stone", self.depth)})[cell]
+            self.current[cell] = Block("stone", self.depth)
             px, py = self.cell_screen(cell)
             for _ in range(6):
                 self.particles.append(Particle(px, py, random.choice([(120, 118, 132), (80, 78, 92)])))
@@ -1321,9 +1335,8 @@ class World:
             self.find_artifact(px, py)
         self.lifetime["bosses"] += 1
         self.finish_boss_fight()
-        if self.depth >= EXPEDITION_DEPTH:   # the bottom of the expedition: the shaft is about to come down
-            self.collapse = COLLAPSE_DELAY
-            self.notice = ["The ground is shaking... the shaft is coming down!", COLLAPSE_DELAY + 2, ""]
+        if self.depth >= EXPEDITION_DEPTH:   # the bottom of the expedition: the shaft comes down, there and then
+            self.start_collapse()
 
     def finish_boss_fight(self):
         """The boss is gone (beaten or fled): waves resume, and an already-cleared layer gives way."""
@@ -1522,6 +1535,8 @@ class World:
             self.particles.append(Particle(px, py, (200, 20, 40)))
 
     def grab(self, enemy, miner):
+        if miner.role == "hero":   # (no monster can get a grip on the Hero Miner)
+            return
         style = enemy.spec["grab"]
         if style in ("head", "orbit", "engulf"):
             enemy.grab_offset = (0.0, 0.0)          # on / around the miner themselves
@@ -1542,7 +1557,17 @@ class World:
         self.floaters.append(Floater(f"{miner.name}: HELP!", px, py, BAD, life=1.2, size=26))
 
     def miner_down(self, miner, killer=None):
-        """Death is permanent: the miner is buried, and a new recruit arrives when the timer runs out."""
+        """Death is permanent: the miner is buried, and a new recruit arrives when the timer runs out.
+        (The camp's people are only ever knocked out: they get back up after KO_SECS.)"""
+        if miner.role in CAMP_ROLES:
+            miner.state, miner.ko, miner.respawn = "down", True, KO_SECS
+            miner.curse, miner.attacker, miner.target = 0.0, None, None
+            px, py = self.entity_screen(miner, 40)
+            self.floaters.append(Floater(f"{miner.name} is knocked out!", px, py - 20, (255, 210, 120), life=1.8,
+                                         size=26))
+            for _ in range(10):
+                self.particles.append(Particle(px, py, random.choice([(255, 230, 120), (255, 255, 255)])))
+            return
         miner.state = "down"
         miner.curse = 0.0
         miner.respawn = RESPAWN_SECS
@@ -1565,6 +1590,13 @@ class World:
             "died_depth": self.display_depth,
             "died_clock": self.clock,
         })
+
+    def revive(self, m, quiet=False):
+        """One of the camp's people comes round, back on their feet at full health."""
+        m.state, m.ko, m.hp, m.respawn = "working", False, m.max_hp, 0.0
+        if not quiet:
+            px, py = self.entity_screen(m, 50)
+            self.floaters.append(Floater(f"{m.name} is back on their feet!", px, py, GOOD, life=1.6, size=22))
 
     def respawn_miner(self, miner):
         """The fallen miner's grave is replaced by a brand-new recruit."""
@@ -1745,7 +1777,7 @@ class World:
         return self.available(up) and not is_maxed(up, self.levels) and self.gold >= self.cost(up)
 
     def cost(self, up):
-        return math.ceil(self.base_cost(up) * self.art_mult("cost"))   # (Base Camp's Trading Post)
+        return math.ceil(self.base_cost(up) * self.art_mult("cost"))
 
     def base_cost(self, up):
         return upgrade_cost(up, self.levels)
@@ -1799,6 +1831,8 @@ class World:
         dmg = self.miner_hit_damage() * self.pick_bonus(miner, cell, 1.0) * (level_mult(miner.level) if miner else 1)
         if miner and miner.role == "ghost":
             dmg *= GHOST_POWER
+        elif miner and miner.role == "hero":   # the Hero Miner: a legend with a pick
+            dmg *= HERO_POWER
         if is_ore(block):
             dmg *= ore_damage_mult(self.lv("diamond"))
         crit = random.random() < 0.05 * self.lv("crit") + self.art_add("crit")
@@ -1826,6 +1860,8 @@ class World:
                 self.particles.append(Particle(px, py - 4, random.choice([(255, 150, 40), (255, 210, 80)])))
         if miner.sharp > 0:
             bonus *= 1 + whetstone_boost(self.lv("whetstone"))
+        if getattr(miner, "forged", 0) > 0:   # reforged by the Goblin Blacksmith
+            bonus *= miner.forge_boost
         return bonus
 
     def crit_effects(self, cell, miner):
@@ -2272,6 +2308,199 @@ class World:
                           min(GRID - 0.5, max(0.5, near.y + random.uniform(-1.5, 1.5))))
         self.walk_to(guard, *guard.goal, speed * 0.6, dt)
 
+    # ----- the camp's people (Base Camp hires) ----------------------------------------------------------------
+    def hire_at_camp(self, hire):
+        """Take someone on at Base Camp: they're with you from this moment (saved straight away by the camp),
+        whatever happens before you set off."""
+        if hire not in self.camp:
+            self.camp.append(hire)
+        self.visit_hire = hire
+        self.sync_miners()
+
+    def update_hero(self, hero, dt, speed):
+        """The Hero Miner drops their pick to rescue anyone close by a monster has hold of. True while on a rescue."""
+        grabbing = [e for e in self.enemies if e.targetable and e.state == "attacking" and not e.boss
+                    and math.hypot(e.x - hero.x, e.y - hero.y) <= HERO_RESCUE_RANGE]
+        if not grabbing:
+            if hero.task == "rescuing":
+                hero.task, hero.target = "idle", None
+            return False
+        foe = min(grabbing, key=lambda e: math.hypot(e.x - hero.x, e.y - hero.y))
+        hero.task, hero.goal = "rescuing", foe
+        hero.anim = max(0.0, hero.anim - dt * 4)
+        if self.walk_to(hero, foe.x, foe.y, speed * GUARD_RUSH, dt, stop=GUARD_REACH):
+            hero.swing -= dt
+            if hero.swing <= 0:
+                hero.swing = HERO_SWING
+                hero.anim = 1.0
+                share = HERO_STRIKE * level_mult(hero.level)
+                self.give_xp(hero, share * XP_PER_MONSTER * GUARD_XP_SHARE)
+                self.hit_enemy(foe, foe.max_hp * share * foe.pct_scale, floor=False, ring=GOLD, by=hero, heavy=True)
+        return True
+
+    def update_blacksmith(self, smith, dt, speed):
+        """The Goblin Blacksmith: trots to whichever digger's pick has gone longest unforged, and reforges it on
+        the spot - a couple of seconds of hammering, then it bites harder for FORGE_SECS."""
+        if smith.task == "forging" and smith.goal in self.miners and smith.goal.state == "working":
+            smith.task_timer -= dt
+            smith.anim = 1.0 if (self.clock * 5) % 1 < 0.5 else 0.2   # (hammering away)
+            if random.random() < dt * 12:   # sparks off the anvil
+                px, py = self.entity_screen(smith, 12)
+                self.particles.append(Particle(px + 8 * smith.facing, py, random.choice([(255, 200, 90), (255, 140, 50)])))
+            if smith.task_timer <= 0:
+                m = smith.goal
+                m.forged, m.forge_boost = FORGE_SECS, 1 + FORGE_BOOST * level_mult(smith.level)
+                px, py = self.entity_screen(m, 56)
+                self.floaters.append(Floater("Reforged!", px, py, (255, 170, 80), life=1.1, size=20))
+                self.give_xp(smith, XP_PER_BLOCK * 0.5)
+                smith.task, smith.goal, smith.anim = "idle", None, 0.0
+            return
+        pool = [m for m in self.diggers() if m.state == "working"]
+        if not pool:
+            return
+        if smith.task != "heading" or smith.goal not in pool:
+            smith.goal = min(pool, key=lambda m: (getattr(m, "forged", 0.0), math.hypot(m.x - smith.x, m.y - smith.y)))
+            smith.task = "heading"
+        m = smith.goal
+        if self.walk_to(smith, m.x + 0.35, m.y + 0.35, speed, dt, stop=0.15):
+            smith.task, smith.task_timer = "forging", FORGE_WORK
+            smith.facing = 1 if (m.x - smith.x) - (m.y - smith.y) >= 0 else -1
+
+    def update_clay_golem(self, golem, dt, speed):
+        """Mitts the Clay Golem: plods over to wherever the blocks are thickest, raises both fists and slams the
+        ground - a full Charged Slam of its own, every few seconds, upgrade or no upgrade."""
+        golem.swing = max(0.0, golem.swing - dt)
+        if golem.task == "winding":
+            golem.task_timer -= dt
+            golem.anim = 1 - golem.task_timer / MITTS_WINDUP   # (fists going up)
+            if golem.task_timer <= 0:
+                if golem.goal in self.current:
+                    self.golem_slam(golem, golem.goal)
+                golem.task, golem.goal, golem.anim, golem.swing = "resting", None, 0.0, MITTS_EVERY
+            return
+        golem.anim = 0.0
+        if golem.goal not in self.current:
+            golem.goal = self.phantom_target() if self.current else None
+            golem.task = "plodding"
+        if golem.goal is None:
+            return
+        tx, ty = golem.goal[0] + 0.5, golem.goal[1] + 0.5
+        if self.walk_to(golem, tx, ty, speed, dt, stop=0.2) and golem.swing <= 0:
+            golem.task, golem.task_timer = "winding", MITTS_WINDUP
+
+    def golem_slam(self, golem, cell):
+        """Mitts' fists come down: the block under them takes a full Charged Slam's worth (your click damage times
+        the slam), the eight around it half that, and monsters close by are walloped."""
+        power = slam_mult(self.lv("slam")) * level_mult(golem.level)
+        dmg = self.click_hit_damage() * power
+        for e in list(self.enemies):
+            if e.targetable and not e.boss and max(abs(e.x - (cell[0] + 0.5)), abs(e.y - (cell[1] + 0.5))) <= 1.5:
+                self.hit_enemy(e, self.enemy_hit_damage(e, self.monster_hit_damage()) * SLAM_MONSTER_MULT, floor=False,
+                               ring=(200, 130, 90), by=golem, heavy=True)
+        px, py = self.cell_screen(cell)
+        self.crit_bursts.append([px, py, 0.0])
+        self.quakes.append([cell[0] + 0.5, cell[1] + 0.5, 0.0, set(), 1.6])
+        if self.shake < 0.12:
+            self.shake, self.shake_power = 0.12, 3
+        self.cues.append(("smash", 0.5))
+        self.floaters.append(Floater("THUD!", px, py - 60, (215, 150, 105), life=0.8, size=26))
+        self.give_xp(golem, XP_PER_BLOCK)
+        depth = self.depth
+        if not self.damage(cell, dmg, sparks=10, by=golem):
+            return
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx, dy) != (0, 0) and self.depth == depth:
+                    self.damage((cell[0] + dx, cell[1] + dy), dmg * 0.5, sparks=2, by=golem)
+
+    def update_archer(self, archer, dt, speed):
+        """The Archer: shoots whatever's grabbing someone first, then the nearest monster, from a distance;
+        with no monsters about, keeps close to the crew."""
+        targets = [e for e in self.enemies if e.targetable]
+        if targets:
+            foe = min(targets, key=lambda e: (e.state != "attacking", math.hypot(e.x - archer.x, e.y - archer.y)))
+            archer.task, archer.goal = "shooting", foe
+            if math.hypot(foe.x - archer.x, foe.y - archer.y) > ARCHER_RANGE:
+                self.walk_to(archer, foe.x, foe.y, speed, dt)
+                return
+            archer.facing = 1 if (foe.x - archer.x) - (foe.y - archer.y) >= 0 else -1
+            archer.swing -= dt
+            archer.anim = min(1.0, 1 - archer.swing / ARCHER_DRAW)   # (drawing the bow back)
+            if archer.swing <= 0:
+                archer.swing, archer.anim = ARCHER_DRAW, 0.0
+                self.arrows.append([self.entity_screen(archer, 24), foe, 0.0, archer])
+            return
+        archer.anim = 0.0
+        archer.task_timer -= dt
+        if archer.task != "watching" or archer.task_timer <= 0 or not isinstance(archer.goal, tuple):
+            crew = [m for m in self.diggers() if m.state != "down"]
+            near = random.choice(crew) if crew else archer
+            archer.task, archer.task_timer = "watching", random.uniform(5.0, 9.0)
+            archer.goal = (min(GRID - 0.5, max(0.5, near.x + random.uniform(-2, 2))),
+                           min(GRID - 0.5, max(0.5, near.y + random.uniform(-2, 2))))
+        self.walk_to(archer, *archer.goal, speed * 0.6, dt)
+
+    def update_arrows(self, dt):
+        """Arrows in flight: each lands on its target for a share of its health."""
+        for arrow in self.arrows:
+            arrow[2] += dt
+            _, foe, age, archer = arrow
+            if age >= ARROW_SECS and foe in self.enemies and foe.targetable:
+                share = ARCHER_SHARE * level_mult(archer.level)
+                self.give_xp(archer, share * XP_PER_MONSTER * GUARD_XP_SHARE)
+                self.hit_enemy(foe, foe.max_hp * share * foe.pct_scale, floor=False, ring=(180, 220, 140), by=archer)
+        self.arrows = [a for a in self.arrows if a[2] < ARROW_SECS]
+
+    def update_taxman(self, tax, dt, speed):
+        """The Tax Collector does his rounds: he walks up to each crew member in turn (the nearest one he hasn't
+        been to yet this round), stops to collect their dues and write them in the ledger, and moves on. When
+        everyone's paid, a new round starts."""
+        if tax.task == "collecting":
+            tax.task_timer -= dt
+            tax.anim = 1.0 if tax.task_timer > TAX_PAUSE * 0.35 else 0.0   # (writing it in the ledger)
+            if tax.task_timer <= 0:
+                tax.task, tax.anim = "idle", 0.0
+            return
+        tax.anim = 0.0
+        crew = [m for m in self.miners if m is not tax and m.state == "working"]
+        if not crew:
+            return
+        if tax.task != "visiting" or tax.goal not in crew:   # on to the next one on the round
+            last = getattr(tax, "last_payer", None)   # (never the same one twice running)
+            due = [m for m in crew if m not in tax.route and m is not last]
+            if not due:   # everyone's paid up: a fresh round (starting with whoever's nearest)
+                tax.route = set()
+                due = [m for m in crew if m is not last]
+            if not due:   # (nobody else free to pay: he waits rather than tax the same one twice running)
+                tax.task = "waiting"
+                return
+            tax.task = "visiting"
+            tax.goal = min(due, key=lambda m: math.hypot(m.x - tax.x, m.y - tax.y))
+        payer = tax.goal
+        if self.walk_to(tax, payer.x + 0.3, payer.y - 0.3, speed, dt, stop=0.15):
+            tax.facing = 1 if (payer.x - tax.x) - (payer.y - tax.y) >= 0 else -1
+            tax.route.add(payer)
+            tax.last_payer = payer
+            self.collect_tax(tax, payer)
+            tax.task, tax.task_timer = "collecting", TAX_PAUSE
+
+    def tax_due(self, tax):
+        """What one crew member pays the Tax Collector: a few of this layer's average blocks, at what blocks pay
+        right now (Fortune upgrades and all), a few more the deeper the dig - so the take keeps step with the depth
+        (about a fifth on top of the crew's earnings all the way down), whatever's been broken lately."""
+        block = self.layer_value / (GRID * GRID) * value_mult(self.lv("value"))
+        return block * (TAX_BLOCKS + self.depth / TAX_DEEPER) * level_mult(tax.level)
+
+    def collect_tax(self, tax, payer):
+        paid = self.earn(self.tax_due(tax))   # (Midas Touch and the depth bonus count, as for any gold)
+        px, py = self.entity_screen(payer, 40)
+        tx, ty = self.entity_screen(tax, 50)
+        for k in range(6):   # coins hopping from their pocket to his ledger
+            q = k / 5
+            self.particles.append(Particle(px + (tx - px) * q, py + (ty - py) * q - math.sin(q * math.pi) * 14, GOLD))
+        self.floaters.append(Floater(f"Tax +{fmt(paid)}", tx, ty - 10, GOLD, life=1.2, size=22, coin=True))
+        self.give_xp(tax, XP_PER_BLOCK * 0.5)
+
     def coffee_break(self):
         """Coffee Break: a round of coffee - a few diggers at work down a mug and swing faster for a while."""
         thirsty = [m for m in self.diggers() if m.state == "working" and m.coffee <= 0 and m.stun <= 0]
@@ -2534,14 +2763,80 @@ class World:
         return x, y - 18
 
     # ----- update ---------------------------------------------------------
+    # ----- the collapse (The Void Maw falls) ------------------------------------------------------------------
+    def start_collapse(self):
+        """The Void Maw has fallen at the bottom of the expedition: the dig ends there and then, blocks or no.
+        The floor caves in from its hole outwards; a rope drops to each crew member just before the ground under
+        them goes, and they climb out - every one in their own way. Monsters and graves go down with the floor."""
+        self.collapse = 0.0
+        self.bombs, self.bolts, self.rocks, self.bone_throws = [], [], [], []
+        c = GRID / 2
+        self.crumble = {(x, y): CRUMBLE_FROM + CRUMBLE_SPREAD * math.hypot(x + 0.5 - c, y + 0.5 - c)
+                        + random.uniform(0, 0.35) for x in range(GRID) for y in range(GRID)}
+        for e in self.enemies:   # whatever had hold of someone lets go
+            if e.victim and e.victim.attacker is e:
+                e.victim.attacker = None
+            e.victim = None
+        self.arrows = []
+        for m in self.miners:   # (the camp's people, knocked out, come round to climb)
+            if getattr(m, "ko", False) and m.state == "down":
+                self.revive(m, quiet=True)
+        styles = list(CLIMB_STYLES)
+        random.shuffle(styles)
+        crew = sorted((m for m in self.miners if m.state != "down"), key=lambda m: self.crumble[self.cell_of(m.x, m.y)])
+        for i, m in enumerate(crew):
+            if m.state == "grabbed":
+                m.state = "working"
+            m.attacker, m.stun, m.curse = None, 0.0, 0.0
+            gives = self.crumble[self.cell_of(m.x, m.y)]
+            rope = max(0.4, gives - random.uniform(1.4, 2.0))
+            m.climb = dict(style=ROLE_CLIMB.get(m.role, styles[i % len(styles)]), rope=rope,
+                           grab=rope + ROPE_DROP + random.uniform(0.1, 0.4), phase=random.uniform(0, math.tau))
+        for g in self.ghosts:   # the Graveyard Shift's ghosts just drift up and away
+            g.climb = dict(style="float", rope=None, grab=self.crumble[self.cell_of(g.x, g.y)] - 1.0, phase=0.0)
+        self.shouts = 0
+        self.cues.append(("boom", 0.8))
+        self.floaters.append(Floater("THE SHAFT IS COMING DOWN!", W / 2, 250, (255, 190, 90), life=3.0, size=40))
+        self.notice = ["The Void Maw's death-throes are bringing the shaft down - get the crew out!", COLLAPSE_SECS, ""]
+
+    def update_collapse(self, dt):
+        """The shaft coming down: the ground shakes harder as the floor goes, cells crumble away kicking up dust,
+        the crew climb their ropes; when it's over, on to the camp."""
+        was, self.collapse = self.collapse, self.collapse + dt
+        t = self.collapse
+        settle = max(0.0, 1 - max(0.0, t - (COLLAPSE_SECS - 2.5)) / 2.5)
+        self.shake, self.shake_power = 0.2, (3 if t < CRUMBLE_FROM else 6) * settle
+        falling = 0
+        for cell, at in self.crumble.items():
+            if was < at <= t:   # this cell just gave way
+                falling += 1
+                z = self.column_height(*cell) + self.rise
+                px, py = iso(cell[0] + 0.5, cell[1] + 0.5, z)
+                for _ in range(5):
+                    self.particles.append(Particle(px, py, random.choice([(120, 100, 90), (80, 66, 60), (150, 130, 110)]),
+                                                   big=random.random() < 0.4))
+                if random.random() < 0.3:
+                    self.smoke.append(Smoke(px, py, size=12))
+        if falling and random.random() < 0.35:
+            self.cues.append(("smash", 0.35))
+        for m in self.miners:   # a few shouts as the ropes are grabbed
+            plan = getattr(m, "climb", None)
+            if plan and was < plan["grab"] <= t and self.shouts < 4 and random.random() < 0.35:
+                self.shouts += 1
+                px, py = self.entity_screen(m, 60)
+                self.floaters.append(Floater(random.choice(["Go, go, go!", "Hold on!", "Pull me up!", "Climb!",
+                                                            "Don't look down!", "Not without my pick!"]),
+                                             px, py, TEXT, life=1.2, size=22))
+        if t >= COLLAPSE_SECS:
+            self.collapse, self.camp_ready = None, True
+
     def update(self, dt, combat=True):
         """Advance the simulation. With combat=False enemies freeze and none spawn."""
         self.clock += dt
-        if self.collapse is not None:   # The Void Maw has fallen: the shaft comes down
-            self.collapse -= dt
-            self.shake, self.shake_power = 0.2, 3 + 5 * (1 - max(0.0, self.collapse) / COLLAPSE_DELAY)
-            if self.collapse <= 0:
-                self.collapse, self.camp_ready = None, True
+        if self.collapse is not None:   # The Void Maw has fallen: the shaft comes down (nothing else goes on)
+            self.update_collapse(dt)
+            self.update_effects(dt)
+            return
         if self.boss_return > 0:   # the bottom's boss, back for another try
             self.boss_return -= dt
             if self.boss_return <= 0:
@@ -2567,7 +2862,10 @@ class World:
             if m.state == "down":
                 m.respawn -= dt
                 if m.respawn <= 0:
-                    self.respawn_miner(m)
+                    if getattr(m, "ko", False):
+                        self.revive(m)
+                    else:
+                        self.respawn_miner(m)
                 continue
             if m.state == "grabbed":
                 if random.random() < dt * 5:   # panicked sweat
@@ -2591,12 +2889,18 @@ class World:
                 m.stun = max(0.0, m.stun - dt)
                 m.anim = 0.0
                 continue
+            if m.role == "hero" and self.update_hero(m, dt, mspeed * ROLES["hero"]["speed"]):   # off to a rescue
+                m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
+                continue
             if not m.digs:   # specialists with their own jobs
                 {"foreman": self.update_foreman, "guard": self.update_guard, "medic": self.update_medic,
-                 "demolitionist": self.update_demolitionist}[m.role](m, dt, mspeed * ROLES[m.role]["speed"])
+                 "demolitionist": self.update_demolitionist, "blacksmith": self.update_blacksmith,
+                 "archer": self.update_archer, "taxman": self.update_taxman, "claygolem": self.update_clay_golem,
+                 }[m.role](m, dt, mspeed * ROLES[m.role]["speed"])
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
                 continue
             m.sharp = max(0.0, m.sharp - dt)
+            m.forged = max(0.0, getattr(m, "forged", 0.0) - dt)
             m.coffee = max(0.0, m.coffee - dt)
             if m.task in ("whetstone", "sharpening"):   # off to the sharpening wheel
                 self.update_whetstone_trip(m, dt, mspeed)
@@ -2664,7 +2968,7 @@ class World:
             for e in list(self.enemies):
                 e.update(self, dt)
             # waves keep coming while enemies remain (but a boss fight is just the boss and its own monsters)
-            if self.depth >= ENEMY_START_DEPTH and not self.boss():
+            if self.depth >= ENEMY_START_DEPTH and not self.boss() and self.lv("miners"):   # (none till a miner's hired)
                 self.enemy_timer -= dt
                 if self.enemy_timer <= 0:
                     self.enemy_timer = self.wave_interval()
@@ -2706,6 +3010,11 @@ class World:
             if bomb.done:
                 self.bombs.remove(bomb)
                 self.detonate(bomb)
+        self.update_arrows(dt)
+        self.update_effects(dt)
+
+    def update_effects(self, dt):
+        """Fireballs, smoke, shake, particles, floating text and the rest of the eye candy."""
         for ex in self.explosions:
             ex[2] += dt
         self.explosions = [ex for ex in self.explosions if ex[2] < EXPLOSION_SECS]
@@ -2755,7 +3064,7 @@ class World:
                     crew=[m.to_dict() for m in self.miners], graveyard=self.graveyard,
                     clock=self.clock, grid=GRID, artifacts=self.artifacts, boss_done=self.boss_done,
                     expedition=self.expedition, camp=self.camp, lifetime=self.lifetime,
-                    camp_ready=self.camp_ready or self.collapse is not None)
+                    camp_ready=self.camp_ready or self.collapse is not None, visit_hire=self.visit_hire)
 
     @classmethod
     def from_dict(cls, d):
@@ -2763,9 +3072,10 @@ class World:
         w.gold = d["gold"]
         w.depth = d["depth"]
         w.expedition = d.get("expedition", 0)
-        w.camp = [k for k in d.get("camp", []) if k in CAMP]
+        w.camp = [k for k in d.get("camp", []) if k in HIRES]   # (older camps' buildings are gone)
         w.lifetime.update(d.get("lifetime", {}))
         w.camp_ready = d.get("camp_ready", False)
+        w.visit_hire = d.get("visit_hire") if w.camp_ready else None
         w.levels.update({k: v for k, v in d["levels"].items() if k in w.levels})
         for up in UPGRADES:   # (an upgrade's cap was lowered since: e.g. Spirit Lantern's 3 levels became 1)
             if up["max"] and w.levels[up["key"]] > up["max"]:
@@ -2781,15 +3091,13 @@ class World:
         w.graveyard = d.get("graveyard", [])
         renamed = {"idol": "medal", "goldtooth": "broclaw"}   # (retired: the Cursed Idol, the Hoard's Golden Tooth)
         w.artifacts = [k for k in (renamed.get(k, k) for k in d.get("artifacts", [])) if k in ARTIFACTS]
-        w.refresh_artifacts()   # (with the camp's buildings and the expedition's toughness)
+        w.refresh_artifacts()
         w.boss_done = d.get("boss_done", w.depth if boss_for(w.depth) else -1)   # older saves: no boss mid-layer
         if d.get("grid", 8) == GRID:
             # (older saves have no chest / artifact / bones flags: [x, y, kind, hp])
             # (each block's hp was saved; its toughness and worth come from the expedition)
-            w.current = w.toughen({(x, y): Block(k, w.depth, hp, *rest) for x, y, k, hp, *rest in d["current"]},
-                                  keep_hp=True)
-            w.next = w.toughen({(x, y): Block(k, w.depth + 1, hp, *rest) for x, y, k, hp, *rest in d["next"]},
-                               keep_hp=True)
+            w.current = {(x, y): Block(k, w.depth, hp, *rest) for x, y, k, hp, *rest in d["current"]}
+            w.next = {(x, y): Block(k, w.depth + 1, hp, *rest) for x, y, k, hp, *rest in d["next"]}
         else:   # saved on a different board size: start the current layer fresh
             w.current = w.new_layer(w.depth)
             prospector = w.lv("prospector")

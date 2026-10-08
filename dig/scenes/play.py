@@ -13,9 +13,10 @@ SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
 TOP_PANEL = pygame.Rect(16, 16, 420, 160)
 HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
+from ..camp import COLLAPSE_FADE, COLLAPSE_SECS
 from ..enemies import ENEMY_START_DEPTH, max_enemies
 from ..effects import Floater
-from ..icons import draw_icon
+from ..icons import draw_icon, draw_padlock
 from ..iso import origin_at
 from ..biomes import biome_at
 from ..render import draw_ambient, draw_board, draw_flying_coins, pick_block, pick_boiler
@@ -37,6 +38,7 @@ class PlayScene(Scene):
             Button((W - 178, 16, 160, 46), "Menu (Esc)", game.to_menu, size=26, color=(70, 64, 90)),
             Button((W - 360, 72, 170, 40), "Crew (C)", game.open_crew, size=24, color=(50, 96, 140)),
             Button((W - 178, 72, 160, 40), "Artifacts (A)", game.open_artifacts, size=24, color=(110, 70, 150)),
+            Button((W - 360, 122, 342, 38), "Base Camp (B)", game.open_camp, size=24, color=(120, 86, 50)),
         ]
 
     def handle(self, event):
@@ -52,12 +54,16 @@ class PlayScene(Scene):
                 self.game.open_crew()
             elif event.key == pygame.K_a:
                 self.game.open_artifacts()
+            elif event.key == pygame.K_b:
+                self.game.open_camp()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.world.reveals and self.reveal_rect().collidepoint(event.pos):
                 if self.reveal_close_rect().collidepoint(event.pos):   # only the X closes the found card...
                     self.world.reveals.pop(0)
                 return   # ...other clicks on it do nothing, so spam-clicking can't dismiss it unread
             if any(r.collidepoint(event.pos) for r in HUD_PANELS):   # clicks on the HUD aren't play
+                return
+            if self.world.collapse is not None:   # the shaft's coming down: nothing left to dig or fight
                 return
             self.world.combo_click()   # every click counts towards the combo, whatever it lands on
             self.world.combo_held = True   # ...and holding the button keeps it from running down
@@ -132,6 +138,11 @@ class PlayScene(Scene):
             self.draw_notice(surf, w)
         if w.reveals:
             self.draw_reveal(surf, w, mouse)
+        if w.collapse is not None and w.collapse > COLLAPSE_SECS - COLLAPSE_FADE:   # the dust settles... to black
+            fade = pygame.Surface(surf.get_size())
+            fade.fill((0, 0, 0))
+            fade.set_alpha(int(255 * min(1.0, (w.collapse - (COLLAPSE_SECS - COLLAPSE_FADE)) / COLLAPSE_FADE)))
+            surf.blit(fade, (0, 0))
 
     REVEAL_W = 250   # the found-artifact notification: a slim card down the left side, beside the board
 
@@ -369,8 +380,14 @@ class PlayScene(Scene):
         draw_text(surf, f, f"{fmt(w.gold_per_sec())} gold / sec", 24, MUTED, (36, 72))
         draw_text(surf, f, f"Depth  {w.display_depth}m", 34, TEXT, (420, 30), "topright")
         draw_text(surf, f, f"{len(w.current)}/{GRID * GRID} left", 24, MUTED, (420, 72), "topright")
+        camp = self.buttons[4]
+        locked = not w.expedition and not w.camp_ready   # (no camp until The Void Maw has fallen once)
+        camp.text = "Base Camp  -  locked till 100m" if locked else "Base Camp (B)"
+        camp.color = (64, 60, 72) if locked else (120, 86, 50)
         for b in self.buttons:
             b.draw(surf, f, mouse)
+        if locked:   # a padlock on it: there's something down there to unlock
+            draw_padlock(surf, (camp.rect.x + 22, camp.rect.centery), 9, (200, 190, 150))
         affordable = sum(1 for u in UPGRADES if w.can_buy(u))
         for count, button in ((affordable, self.buttons[0]), (len(w.new_artifacts), self.buttons[3])):
             if count:
@@ -396,7 +413,8 @@ class PlayScene(Scene):
         boss = w.boss()
         if boss:
             self.draw_boss_bar(surf, boss)
-        elif w.depth >= ENEMY_START_DEPTH:
+        elif w.depth >= ENEMY_START_DEPTH and w.collapse is None and w.lv("miners"):
+            # (no waves once the shaft's coming down - nor before you've hired a miner for them to bother)
             secs = math.ceil(w.enemy_timer)
             incoming = max_enemies(w.depth) - len(w.enemies)
             wave = f"next wave in {secs}s" + (f" (+{incoming})" if incoming > 0 else " (at max)")

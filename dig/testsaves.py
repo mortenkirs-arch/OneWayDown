@@ -9,7 +9,7 @@ from .blocks import generate_layer, layer_value
 from .enemies import BOSS_EVERY, BOSSES, ENEMY_TYPES, boss_for
 from .miners import MAX_LEVEL, xp_to_next
 from .upgrades import UPGRADES, ore_mult, ore_richness, value_mult
-from .camp import EXPEDITION_DEPTH, buildable
+from .camp import EXPEDITION_DEPTH, hireable
 from .world import World
 
 # A real player's game at 60m, just after beating the Lich (the boss there at the time), which felt about right:
@@ -90,8 +90,9 @@ def test_world(depth, gold=None, seed=None):
     if depth > EXPEDITION_DEPTH:
         w.expedition = (depth - 1) // EXPEDITION_DEPTH
         depth -= EXPEDITION_DEPTH * w.expedition
-        for _ in range(w.expedition):   # (a spread of buildings: whatever's next in line)
-            w.camp.append(buildable(w.camp)[0])
+        for _ in range(w.expedition):   # (the camp's hires, in tent order)
+            if hireable(w.camp):
+                w.camp.append(hireable(w.camp)[0])
     w.levels.update(test_levels(depth))
     w.depth = depth
     prospector = w.lv("prospector")
@@ -112,7 +113,7 @@ def test_world(depth, gold=None, seed=None):
         k = by_role[m.role] = by_role.get(m.role, -1) + 1
         m.level = min(MAX_LEVEL, 1 + round((spread[min(k, len(spread) - 1)] - 1) * progress(depth)))
         m.xp = rng.uniform(0, xp_to_next(m.level)) if m.level < MAX_LEVEL else 0.0
-    w.gold = layer_value(w.current) * value_mult(w.lv("value")) * 3 * w.cycle() if gold is None else gold
+    w.gold = layer_value(w.current) * value_mult(w.lv("value")) * 3 if gold is None else gold
     w.enemy_timer = w.wave_interval()
     if boss_for(depth):
         w.spawn_boss()

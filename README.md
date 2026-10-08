@@ -82,8 +82,8 @@ with its own rock, backdrop and drifting embers, sparkles or dust (purely cosmet
 
 Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
 Fanged Behemoth (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m), the
-Archlich (70m), the Burrow Brothers (80m), The Mountain (90m) and The Void Maw (100m), then round again, tougher
-each time. A boss stalks your
+Archlich (70m), the Burrow Brothers (80m), The Mountain (90m) and The Void Maw (100m), then round again on
+every expedition. A boss stalks your
 crew, winds up and slams the ground around it (get your miners out of the red), and calls in
 minions; ordinary waves pause while it's on the board. Each has a trick of its own:
 
@@ -115,14 +115,34 @@ minions; ordinary waves pause while it's on the board. Each has a trick of its o
   the crew close by into its maw to bite them hard: strike the open eye mid-breath to choke it.
 
 **Base Camp.** The Void Maw at 100m ends an *expedition*. When it falls, its death-throes bring the shaft
-down: the crew escape up the last rope, the gear is buried, and the artifacts you found are set into the
-foundations of a camp at the bottom. You build one thing there - each of the five core buildings (Bunkhouse,
-Forge, Training Hall, Counting House, Watchtower: one per upgrade branch) has items that branch outward from it,
-and everything built stays for good. Then a new expedition starts beneath the camp at 101m with nothing else:
-no gold, no upgrades, no artifacts, no crew (only the graveyard and your lifetime record survive). Upgrades
-unlock again at their usual depth +100 (Mining Boots at 102m...), the bosses come round again, and blocks
-and monsters replay the 1-100m climb, 25% tougher (and 25% richer) every expedition - which is what the
-camp's buildings are for. If The Void Maw retreats instead of falling, it rises again 30 seconds later:
+down there and then, however many blocks are left: the floor caves in from its hole outwards, ropes drop to
+the crew just ahead of it and every one of them climbs out in their own way (hand over hand, scrambling,
+slipping, swinging, spinning, hauled up clinging on, or waving on the rest), while the monsters go down with
+the floor. They climb out to Base Camp: a board like a mine layer - grass, dirt paths, a pond with a dock -
+with five tents round a campfire, one per upgrade branch. Every tent starts plain white; its first upgrade is a
+hire, and you can take on one per visit. A hire is a character who joins every expedition from then on, levels
+up with you, and is only ever knocked out (back on their feet after 25 seconds), never killed - and their tent
+takes on their colours:
+- **Rocco the Hero Miner** (Crew) digs as hard as four miners, drops everything to rescue anyone grabbed nearby
+  (heavy blows that crack a golem's armour), and no monster can get a grip on him.
+- **Grizzle the Goblin Blacksmith** (Tools) trots from digger to digger reforging their picks on the spot: a
+  reforged pick glows and hits 25% harder for 40 seconds (more as the goblin levels up).
+- **Mr. Pennyworth the Tax Collector** (Fortune) does the rounds with a ledger, walking from one crew member
+  to the next: each pays a few of the layer's average blocks' worth (more the deeper you are), paid to you -
+  about a fifth on top of your income all the way down.
+- **Wren the Archer** (Combat) shoots whatever's grabbing someone first, then the nearest monster: an arrow a
+  second, each taking 10% of its health.
+- **Mitts the Clay Golem** (Hands) plods to wherever the blocks are thickest and slams the ground every few
+  seconds: a full Charged Slam of its own (your click damage times the slam), with or without the upgrade.
+
+You can look round the camp from the dig at any time (Base Camp, or B) - before you've ever reached it,
+it's there too, locked: the cavern in shadow, five silhouettes waiting in its tents.
+
+Then a new expedition starts beneath the camp at 101m with nothing else: no gold, no upgrades, no artifacts,
+no crew but the camp's people (the graveyard and your lifetime record survive too). Upgrades unlock again at
+their usual depth +100 (Mining Boots at 102m...), the bosses come round again, and blocks and monsters replay
+the 1-100m climb exactly as before - no tougher, no richer - so with the camp's people along, each run goes
+easier than the last. No monsters come for you until you've hired your first miner. If The Void Maw retreats instead of falling, it rises again 30 seconds later:
 there's no way on but through it.
 
 You can't dig past a boss's layer until it falls, but if it isn't beaten within 150 seconds it

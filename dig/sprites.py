@@ -109,6 +109,66 @@ def _draw_mohawk(surf, m, head):
                                        (hx + 2, top - 1), (hx + 4, top - 5), (hx + 6, top)])
 
 
+def draw_climber(surf, m, fx, fy, t, style, tau, rope_x):
+    """A crew member climbing a rope out of the collapsing shaft, feet at (fx, fy), the rope at rope_x. `style`
+    is how they go about it (camp.CLIMB_STYLES), `tau` seconds since they grabbed on."""
+    role = getattr(m, "role", "miner")
+    width = 18 if role in ("driller", "guard") else 14
+    lift = m.height
+    phase = tau * {"scramble": 14, "steady": 8, "struggle": 5}.get(style, 7) + m.climb["phase"]
+    trousers = (60, 50, 40)
+    # legs: kicking, scissoring or bracing against the rope
+    if style == "hauled":
+        kick = math.sin(t * 22) * 4
+        legs = ((fx - 3 + kick, fy), (fx + 3 - kick, fy))
+    elif style == "struggle":
+        kick = math.sin(t * 6) * 5
+        legs = ((fx - 4 + kick, fy + 1), (fx + 4 + kick, fy))
+    elif style in ("steady", "scramble", "spin"):
+        legs = ((fx - 3, fy - 4 - 5 * max(0.0, math.sin(phase))), (fx + 3, fy - 4 - 5 * max(0.0, -math.sin(phase))))
+    else:
+        legs = ((fx - 2, fy), (fx + 3, fy - 2))
+    for d, foot in zip((-3, 3), legs):
+        pygame.draw.line(surf, trousers, (fx + d, fy - 10), foot, 3)
+    body = pygame.Rect(fx - width // 2, fy - 26 - lift, width, 18 + lift)
+    head = (fx, int(fy - 32 - lift))
+    _draw_hair_back(surf, m, head)
+    pygame.draw.rect(surf, m.shirt, body, border_radius=4)
+    _draw_outfit(surf, m, role, body, fx)
+    pygame.draw.circle(surf, m.skin, head, 7)
+    _draw_face(surf, m, head, style in ("struggle", "hauled"))
+    if role in HEADGEAR:
+        HEADGEAR[role](surf, m, head, t)
+    else:
+        pygame.draw.ellipse(surf, HELMETS.get(role, HELMETS["miner"]), (head[0] - 9, head[1] - 10, 18, 9))
+        pygame.draw.circle(surf, (255, 250, 200), (head[0] + 5 * m.facing, head[1] - 6), 2)
+    if m.style == "mohawk":
+        _draw_mohawk(surf, m, head)
+    # arms: hand over hand up the rope (or hanging on with both, or one free to wave)
+    top = head[1] - 12
+    if style == "hauled":
+        hands = [(rope_x, top - 2), (rope_x, top + 4)]
+    elif style == "waver":
+        hands = [(rope_x, top), (fx + 18 * m.facing, top - 4 + math.sin(t * 14) * 5)]
+    else:
+        hands = [(rope_x, top - 6 * math.sin(phase)), (rope_x, top + 6 * math.sin(phase))]
+    for d, hand in zip((-1, 1), hands):
+        shoulder = (fx + d * (width // 2 - 2), body.y + 4)
+        pygame.draw.line(surf, m.shirt, shoulder, hand, 3)
+        pygame.draw.circle(surf, m.skin, (int(hand[0]), int(hand[1])), 3)
+
+
+def draw_rope(surf, top, bottom):
+    """A climbing rope from `top` down to `bottom`, knotted every so often."""
+    pygame.draw.line(surf, (120, 88, 50), top, bottom, 4)
+    pygame.draw.line(surf, (170, 130, 80), (top[0] - 1, top[1]), (bottom[0] - 1, bottom[1]), 1)
+    length = math.hypot(bottom[0] - top[0], bottom[1] - top[1])
+    for k in range(1, int(length // 26) + 1):
+        a = k * 26 / max(1.0, length)
+        pygame.draw.circle(surf, (95, 68, 40), (int(top[0] + (bottom[0] - top[0]) * a),
+                                                 int(top[1] + (bottom[1] - top[1]) * a)), 3)
+
+
 def pick_head_color(diamond_lv):
     """Steel turning to diamond blue as Diamond Tips levels up (fully blue at its max, 10)."""
     return _lerp(STEEL, DIAMOND, min(1.0, diamond_lv / 10))
@@ -117,9 +177,15 @@ def pick_head_color(diamond_lv):
 def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
     fx, fy = _feet(m, rise)
     if m.state == "down":
-        draw_grave(surf, fonts, fx, fy, m.respawn)
+        if getattr(m, "ko", False):   # one of the camp's people: knocked out, not dead
+            draw_knocked_out(surf, fonts, m, fx, fy, t)
+        else:
+            draw_grave(surf, fonts, fx, fy, m.respawn)
         return
     grabbed = m.state == "grabbed"
+    if getattr(m, "role", "") == "claygolem":   # Mitts is a shape all their own
+        draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed)
+        return
     lift = m.height
     timer = getattr(m, "crit", 0.0)
     crit = 1 - timer / CRIT_ANIM_SECS if timer > 0 and not grabbed else None   # 0..1 through a crit
@@ -142,6 +208,15 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
     body = pygame.Rect(fx - width // 2, fy - 26 - bob - lift, width, 18 + lift + min(0, bob))
     head = (fx, int(fy - 32 - bob - lift))
     _draw_hair_back(surf, m, head)
+    if role == "hero":   # a cape, stirring behind them
+        sway = math.sin(t * 3 + m.x) * 2
+        pygame.draw.polygon(surf, (180, 36, 46), [(fx - 6, body.y + 2), (fx + 6, body.y + 2),
+                                                  (fx + 8 - 4 * m.facing + sway, fy - 5), (fx - 8 - 4 * m.facing + sway, fy - 5)])
+    elif role == "archer":   # a quiver of arrows on their back
+        qx = fx - 8 * m.facing
+        pygame.draw.rect(surf, (110, 70, 40), (qx - 2, body.y - 3, 5, 15), border_radius=2)
+        for k in range(3):
+            pygame.draw.line(surf, (240, 240, 235), (qx - 1 + k * 2, body.y - 3), (qx - 2 + k * 2, body.y - 7), 1)
     pygame.draw.rect(surf, m.shirt, body, border_radius=4)
     _draw_outfit(surf, m, role, body, fx)
     pygame.draw.rect(surf, (60, 50, 40), (fx - width // 2, fy - 10 - max(0, bob), width, 8), border_radius=2)
@@ -154,7 +229,10 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         for d in (-3, 3):
             pygame.draw.circle(surf, (150, 200, 230), (head[0] + d + m.facing, head[1] - 1), 2)
         pygame.draw.line(surf, (60, 60, 70), (head[0] - 7, head[1] - 1), (head[0] + 7, head[1] - 1), 1)
-    pygame.draw.ellipse(surf, HELMETS.get(role, HELMETS["miner"]), (head[0] - 9, head[1] - 10, 18, 9))
+    if role in HEADGEAR:   # the camp's people wear their own
+        HEADGEAR[role](surf, m, head, t)
+    else:
+        pygame.draw.ellipse(surf, HELMETS.get(role, HELMETS["miner"]), (head[0] - 9, head[1] - 10, 18, 9))
     if foreman:
         pygame.draw.line(surf, HI_VIS, (head[0] - 6, head[1] - 7), (head[0] + 6, head[1] - 7), 2)
     elif role == "medic":   # a red cross on the front of the helmet
@@ -162,7 +240,9 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         pygame.draw.line(surf, MEDIC_RED, (head[0] - 2 * m.facing - 2, head[1] - 7),
                          (head[0] - 2 * m.facing + 2, head[1] - 7), 2)
     lamp = (head[0] + 5 * m.facing, head[1] - 6)
-    if getattr(m, "shaded", False):   # an Abyssal Shade's darkness: the lamp gutters out
+    if role in HEADGEAR:
+        pass
+    elif getattr(m, "shaded", False):   # an Abyssal Shade's darkness: the lamp gutters out
         pygame.draw.circle(surf, (70, 66, 80), lamp, 2)
     elif role == "guard":   # a proper lantern on the helmet, glowing
         pygame.draw.circle(surf, (255, 220, 120), lamp, 4)
@@ -182,11 +262,19 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         _draw_jackhammer(surf, m, fx, fy - max(0, bob), grabbed, t)
     elif role == "demolitionist":
         _draw_charge_stick(surf, m, fx, fy - bob - lift, skin, grabbed, t)
+    elif role == "blacksmith":
+        _draw_hammer(surf, m, fx, fy - bob - lift, grabbed, t)
+    elif role == "archer":
+        _draw_bow(surf, m, fx, fy - bob - lift, grabbed, t)
+    elif role == "taxman":
+        _draw_ledger(surf, m, fx, fy - bob - lift, grabbed, t)
     else:
         # pickaxe: normal swing, flailing wildly while grabbed, or a crit's overhead slam
         # (rests raised in front of the miner so it doesn't hide their face)
         hx, hy = fx + 7 * m.facing, fy - 20 - bob - lift
-        head_col = pick_head_color(pick_level)
+        head_col = (250, 205, 70) if role == "hero" else pick_head_color(pick_level)   # (the hero's: gold)
+        if getattr(m, "forged", 0) > 0:   # reforged by the Goblin Blacksmith: still glowing from the forge
+            head_col = _lerp(head_col, (255, 130, 50), 0.55 + 0.25 * math.sin(t * 6 + m.x))
         if grabbed:
             ang = math.sin(t * 16) * 1.4
         elif crit is not None and crit <= CRIT_SLAM:   # slam: from behind the head down into the block
@@ -261,6 +349,26 @@ def _draw_outfit(surf, m, role, body, fx):
         cx, cy = fx + 3 * m.facing, coat.y + 6
         pygame.draw.line(surf, MEDIC_RED, (cx, cy - 3), (cx, cy + 3), 2)
         pygame.draw.line(surf, MEDIC_RED, (cx - 3, cy), (cx + 3, cy), 2)
+    elif role == "hero":   # a polished breastplate, gold-trimmed, and a belt
+        plate = pygame.Rect(body.x + 1, body.y + 2, body.w - 2, body.h - 10)
+        pygame.draw.rect(surf, (200, 205, 216), plate, border_radius=3)
+        pygame.draw.rect(surf, (240, 196, 60), plate, 1, border_radius=3)
+        pygame.draw.line(surf, (60, 40, 30), (body.x, body.bottom - 8), (body.right - 1, body.bottom - 8), 2)
+    elif role == "blacksmith":   # a scorched leather apron on straps
+        apron = pygame.Rect(body.x + 2, body.y + 4, body.w - 4, body.h - 6)
+        pygame.draw.rect(surf, (96, 66, 42), apron, border_radius=2)
+        for d in (-1, 1):
+            pygame.draw.line(surf, (70, 48, 30), (fx + d * 4, body.y), (fx + d * 3, apron.y), 1)
+        pygame.draw.circle(surf, (40, 30, 26), (fx - 2, apron.centery + 2), 1)
+    elif role == "archer":   # a tunic belted at the waist, the quiver's strap across it
+        pygame.draw.line(surf, (90, 60, 30), (body.x + 1, body.y + 2), (body.right - 2, body.bottom - 9), 2)
+        pygame.draw.line(surf, (60, 40, 25), (body.x, body.bottom - 8), (body.right - 1, body.bottom - 8), 2)
+    elif role == "taxman":   # a black waistcoat, gold buttons and a watch chain
+        coat = pygame.Rect(body.x + 2, body.y + 2, body.w - 4, body.h - 9)
+        pygame.draw.rect(surf, (34, 28, 40), coat, border_radius=2)
+        for k in range(3):
+            pygame.draw.circle(surf, (240, 200, 70), (fx, coat.y + 3 + k * 4), 1)
+        pygame.draw.arc(surf, (240, 200, 70), (fx - 1, coat.y + 6, 6, 5), math.pi, math.tau, 1)
     elif role == "demolitionist":   # leather vest with a bandolier of dynamite
         vest = pygame.Rect(body.x, body.y + 1, body.w, body.h - 9)
         pygame.draw.rect(surf, (115, 75, 45), vest, border_radius=3)
@@ -383,6 +491,168 @@ def draw_portrait(surf, fonts, look, center, dead=False, pick_level=0):
         img = pygame.transform.grayscale(img)
         img.set_alpha(170)
     surf.blit(img, img.get_rect(center=center))
+
+
+# ----- the camp's people (Base Camp hires) ----------------------------------------------------------------------
+def _hero_helmet(surf, m, head, t):
+    """The Hero Miner: a gilded helmet with a red plume, its lamp lit."""
+    hx, hy = head
+    f = m.facing
+    pygame.draw.polygon(surf, (210, 40, 46), [(hx - 1 * f, hy - 10), (hx - 7 * f, hy - 20), (hx - 12 * f, hy - 15),
+                                              (hx - 5 * f, hy - 8)])
+    pygame.draw.ellipse(surf, (240, 196, 60), (hx - 9, hy - 11, 18, 10))
+    pygame.draw.line(surf, (190, 140, 30), (hx - 8, hy - 5), (hx + 8, hy - 5), 2)
+    pygame.draw.circle(surf, (255, 250, 200), (hx + 5 * f, hy - 7), 2)
+
+
+def _goblin_cap(surf, m, head, t):
+    """The Goblin Blacksmith: big pointed ears, a leather cap and goggles pushed up on it."""
+    hx, hy = head
+    for d in (-1, 1):
+        pygame.draw.polygon(surf, m.skin, [(hx + d * 6, hy - 3), (hx + d * 15, hy - 8), (hx + d * 6, hy + 2)])
+        pygame.draw.line(surf, _lerp(m.skin, (0, 0, 0), 0.3), (hx + d * 7, hy - 2), (hx + d * 12, hy - 6), 1)
+    pygame.draw.ellipse(surf, (90, 60, 40), (hx - 8, hy - 10, 16, 8))
+    for d in (-3, 3):
+        pygame.draw.circle(surf, (200, 160, 70), (hx + d, hy - 7), 2)
+        pygame.draw.circle(surf, (150, 220, 230), (hx + d, hy - 7), 1)
+
+
+def _archer_hood(surf, m, head, t):
+    """The Archer: a green hood with a point at the back, and a feather."""
+    hx, hy = head
+    f = m.facing
+    hood = (58, 100, 50)
+    pygame.draw.polygon(surf, hood, [(hx - 6 * f, hy - 8), (hx - 14 * f, hy - 13), (hx - 9 * f, hy - 2)])
+    pygame.draw.polygon(surf, hood, [(hx - 7 * f, hy - 4), (hx - 9 * f, hy + 7), (hx - 2 * f, hy + 5)])
+    pygame.draw.ellipse(surf, hood, (hx - 9, hy - 11, 18, 10))
+    pygame.draw.line(surf, (230, 70, 50), (hx + 2 * f, hy - 10), (hx + 7 * f, hy - 17), 2)
+
+
+def _top_hat(surf, m, head, t):
+    """The Tax Collector: a tall black hat and a monocle on a chain."""
+    hx, hy = head
+    f = m.facing
+    pygame.draw.rect(surf, (28, 22, 30), (hx - 6, hy - 22, 12, 14))
+    pygame.draw.rect(surf, (140, 30, 50), (hx - 6, hy - 12, 12, 3))
+    pygame.draw.ellipse(surf, (28, 22, 30), (hx - 10, hy - 10, 20, 5))
+    pygame.draw.circle(surf, (230, 230, 240), (hx + 3 * f, hy), 3, 1)
+    pygame.draw.line(surf, (240, 200, 70), (hx + 3 * f, hy + 3), (hx + 1 * f, hy + 9), 1)
+
+
+def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
+    """Mitts the Clay Golem: a lumpy, lumbering body of river clay, a glowing rune on its chest, eyes like coals,
+    and two huge fists - hanging at its sides, or raised overhead as it winds up a slam."""
+    clay, dark, light = (186, 116, 74), (132, 80, 50), (214, 150, 104)
+    if grabbed:
+        fx += struggle_shake(t)
+    up = m.anim if getattr(m, "task", "") == "winding" else 0.0
+    walk = math.sin(t * 6 + m.x * 3) * 2 if getattr(m, "task", "") == "plodding" else 0.0
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 17, fy - 5, 34, 10))
+    for d in (-1, 1):   # stumpy legs
+        pygame.draw.rect(surf, dark, (fx + d * 7 - 5, fy - 12 + (walk * d if d > 0 else -walk * d) * 0.5, 10, 12),
+                         border_radius=4)
+    body = pygame.Rect(fx - 15, fy - 40, 30, 30)
+    pygame.draw.ellipse(surf, dark, body.inflate(4, 4))
+    pygame.draw.ellipse(surf, clay, body)
+    pygame.draw.ellipse(surf, light, (body.x + 5, body.y + 4, 12, 8))   # (a sheen of wet clay)
+    for a, b in (((fx - 9, fy - 30), (fx - 4, fy - 22)), ((fx + 6, fy - 36), (fx + 10, fy - 28))):   # cracks
+        pygame.draw.line(surf, dark, a, b, 1)
+    glow = 0.5 + 0.5 * math.sin(t * 3 + m.x)
+    rune = (int(120 + 100 * glow), int(200 + 40 * glow), 255)
+    pygame.draw.circle(surf, rune, (fx, fy - 26), 4, 1)
+    pygame.draw.line(surf, rune, (fx, fy - 31), (fx, fy - 21), 1)
+    head = pygame.Rect(fx - 8, fy - 52, 16, 13)
+    pygame.draw.rect(surf, dark, head.inflate(2, 2), border_radius=5)
+    pygame.draw.rect(surf, clay, head, border_radius=5)
+    pygame.draw.line(surf, dark, (head.x + 2, head.y + 4), (head.right - 2, head.y + 4), 2)   # a heavy brow
+    for d in (-3, 3):
+        pygame.draw.circle(surf, (255, 190, 90), (fx + d + m.facing, head.y + 7), 2)
+    for d in (-1, 1):   # the fists: down at its sides, or up overhead
+        shoulder = (fx + d * 14, fy - 34)
+        fist = (fx + d * (19 - 9 * up), fy - 14 - (46 * up) + (math.sin(t * 16) * 4 if grabbed else 0))
+        pygame.draw.line(surf, dark, shoulder, fist, 8)
+        pygame.draw.circle(surf, dark, (int(fist[0]), int(fist[1])), 8)
+        pygame.draw.circle(surf, clay, (int(fist[0]), int(fist[1])), 7)
+    if m.hp < m.max_hp:
+        _hp_bar(surf, fx, fy - 58, m.hp / m.max_hp, GOOD, 30)
+
+
+def _golem_brow(surf, m, head, t):
+    """(Mitts on a rope: a clay brow and coal eyes in place of a helmet.)"""
+    hx, hy = head
+    pygame.draw.line(surf, (132, 80, 50), (hx - 7, hy - 4), (hx + 7, hy - 4), 3)
+    for d in (-3, 3):
+        pygame.draw.circle(surf, (255, 190, 90), (hx + d, hy - 1), 2)
+
+
+HEADGEAR = {"claygolem": _golem_brow, "hero": _hero_helmet, "blacksmith": _goblin_cap, "archer": _archer_hood, "taxman": _top_hat}
+
+
+def _draw_hammer(surf, m, fx, base, grabbed, t):
+    """The goblin's smithing hammer (and, hard at work, the little anvil set down beside them)."""
+    f = m.facing
+    if getattr(m, "task", "") == "forging":
+        ax, ay = fx + 12 * f, base + 26 + (-3 if m.height < 0 else 0)
+        pygame.draw.polygon(surf, (70, 70, 80), [(ax - 6, ay - 6), (ax + 6, ay - 6), (ax + 3, ay - 2), (ax + 4, ay + 2),
+                                                 (ax - 4, ay + 2), (ax - 3, ay - 2)])
+        pygame.draw.line(surf, (110, 110, 120), (ax - 6, ay - 6), (ax + 6, ay - 6), 1)
+    hx, hy = fx + 7 * f, base - 20
+    ang = math.sin(t * 16) * 1.4 if grabbed else (0.35 + m.anim * 2.0) * f
+    ex, ey = hx + math.sin(ang) * 14, hy - math.cos(ang) * 14
+    pygame.draw.line(surf, (120, 82, 44), (hx, hy), (ex, ey), 3)
+    perp = (math.cos(ang) * 5, math.sin(ang) * 5)
+    pygame.draw.line(surf, (90, 92, 104), (ex - perp[0], ey - perp[1]), (ex + perp[0], ey + perp[1]), 6)
+
+
+def _draw_bow(surf, m, fx, base, grabbed, t):
+    """The Archer's longbow, held out in front: the string drawn back (an arrow nocked) as they take aim."""
+    f = m.facing
+    x, y = fx + 9 * f, base - 20
+    if grabbed:
+        y += math.sin(t * 16) * 4
+    rect = pygame.Rect(x - 6, y - 13, 12, 26)
+    start, end = (-math.pi / 2, math.pi / 2) if f > 0 else (math.pi / 2, 3 * math.pi / 2)
+    pygame.draw.arc(surf, (130, 85, 45), rect, start, end, 3)
+    top, bottom = (x, y - 13), (x, y + 13)
+    pull = 0 if grabbed else m.anim * 8
+    nock = (x - pull * f, y)
+    pygame.draw.line(surf, (230, 230, 220), top, nock, 1)
+    pygame.draw.line(surf, (230, 230, 220), nock, bottom, 1)
+    if pull > 1:   # an arrow on the string
+        pygame.draw.line(surf, (150, 110, 60), nock, (nock[0] + 16 * f, y), 2)
+        pygame.draw.polygon(surf, (200, 200, 210), [(nock[0] + 16 * f, y - 2), (nock[0] + 20 * f, y),
+                                                    (nock[0] + 16 * f, y + 2)])
+
+
+def _draw_ledger(surf, m, fx, base, grabbed, t):
+    """The Tax Collector's ledger, and the quill scratching in it while they write."""
+    f = m.facing
+    x, y = fx + 8 * f, base - 20
+    if grabbed:
+        y += math.sin(t * 16) * 4
+    pygame.draw.rect(surf, (120, 30, 40), (x - 5, y - 4, 10, 8), border_radius=1)
+    pygame.draw.line(surf, (240, 236, 220), (x - 4, y + 3), (x + 4, y + 3), 1)
+    if m.anim > 0 and not grabbed:
+        qx = x + math.sin(t * 14) * 3
+        pygame.draw.line(surf, (245, 245, 245), (qx, y - 2), (qx + 4 * f, y - 10), 2)
+
+
+def draw_knocked_out(surf, fonts, m, fx, fy, t):
+    """One of the camp's people, out cold on the ground, stars circling - back up in a few seconds."""
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 18, fy - 5, 36, 9))
+    pygame.draw.rect(surf, (60, 50, 40), (fx + 4, fy - 8, 12, 6), border_radius=2)
+    pygame.draw.rect(surf, m.shirt, (fx - 10, fy - 10, 16, 8), border_radius=3)
+    head = (fx - 15, fy - 7)
+    pygame.draw.circle(surf, m.skin, head, 7)
+    for d in (-3, 3):   # x_x
+        pygame.draw.line(surf, (30, 24, 28), (head[0] + d - 1, head[1] - 3), (head[0] + d + 1, head[1] - 1), 1)
+        pygame.draw.line(surf, (30, 24, 28), (head[0] + d + 1, head[1] - 3), (head[0] + d - 1, head[1] - 1), 1)
+    for k in range(3):   # stars going round
+        a = t * 4 + k * math.tau / 3
+        sx, sy = head[0] + math.cos(a) * 11, head[1] - 14 + math.sin(a) * 4
+        pygame.draw.circle(surf, (255, 230, 120), (int(sx), int(sy)), 2)
+    img = fonts[18].render(f"KO {math.ceil(m.respawn)}s", True, (255, 220, 140))
+    surf.blit(img, img.get_rect(midbottom=(fx, fy - 24)))
 
 
 def draw_grave(surf, fonts, fx, fy, secs):

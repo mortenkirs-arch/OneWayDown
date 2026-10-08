@@ -6,6 +6,18 @@ import pygame
 from .util import shade
 
 
+def draw_padlock(surf, c, s, col):
+    """A padlock centred on c, half-size s: something here is still locked."""
+    x, y = c
+    pygame.draw.arc(surf, col, (x - s * 0.62, y - s * 1.25, s * 1.24, s * 1.4), 0, math.pi, max(2, int(s * 0.26)))
+    body = pygame.Rect(0, 0, s * 1.7, s * 1.25)
+    body.center = (x, y + s * 0.3)
+    pygame.draw.rect(surf, col, body, border_radius=max(2, int(s * 0.25)))
+    dark = shade(col, 0.35)
+    pygame.draw.circle(surf, dark, (int(x), int(y + s * 0.15)), max(1, int(s * 0.22)))
+    pygame.draw.line(surf, dark, (x, y + s * 0.15), (x, y + s * 0.6), max(1, int(s * 0.16)))
+
+
 def draw_icon(surf, kind, c, s, col):
     """Draw icon `kind` centred on c with half-size s."""
     x, y = c

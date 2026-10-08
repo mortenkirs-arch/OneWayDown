@@ -142,6 +142,11 @@ class Game:
         if self.world:
             self.switch("crew")
 
+    def open_camp(self):
+        """Base Camp from the dig: a look round between visits (or, before you've ever made camp, a locked teaser)."""
+        if self.world:
+            self.switch("camp")
+
     def open_artifacts(self):
         if self.world:
             self.switch("artifacts")
