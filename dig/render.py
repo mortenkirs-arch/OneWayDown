@@ -9,8 +9,9 @@ from .biomes import biome_at, block_color
 from .blocks import BLOCKS
 from .config import GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
-from .enemies import BONE_THROW_SECS, BOSS_SLAM_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS
-from .effects import CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED
+from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_SURFACE_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS,
+                      SHADE_RADIUS, VOID_INHALE_RADIUS, VOID_INHALE_SECS)
+from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
 from .sprites import draw_bone, draw_bomb, draw_enemy, draw_ghost, draw_miner, enemy_anchor
@@ -141,7 +142,10 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     draw_phantom(surf, w, t)
     draw_steam(surf, w, t)
     draw_boss_auras(surf, w, t)
+    draw_shade_auras(surf, w, t)
+    draw_bro_mound(surf, w, t)
     draw_curses(surf, w, t)
+    draw_void_inhale(surf, w, t)
     draw_stuns(surf, w, t)
     draw_bone_throws(surf, w, t)
     draw_quake_waves(surf, w)
@@ -583,6 +587,81 @@ def draw_boss_auras(surf, world, t):
     surf.blit(overlay, (0, 0))
 
 
+def draw_bro_mound(surf, world, t):
+    """The Burrow Brothers: the tunnelling brother's mound ploughing towards the crew - and, as he's about to burst
+    up, a red ring where he'll come out."""
+    boss = world.boss()
+    if not boss or boss.kind != "burrowbros" or not boss.mound:
+        return
+    x, y = boss.mound
+    cx, cy = iso(x, y, world.column_height(*world.cell_of(x, y)) + world.rise)
+    churn = math.sin(t * 12) * 2
+    pygame.draw.ellipse(surf, (16, 12, 20), (cx - 30, cy - 7, 60, 14))
+    hump = pygame.Rect(cx - 26, cy - 18 + churn, 52, 22)
+    pygame.draw.ellipse(surf, (118, 88, 60), hump)
+    pygame.draw.ellipse(surf, (72, 52, 34), hump, 2)
+    for k in range(5):   # clods of earth flung up
+        a = (t * 2.4 + k * 0.2) % 1
+        px = cx - 20 + k * 10 + math.sin(t * 3 + k) * 4
+        pygame.draw.circle(surf, (96, 70, 46), (int(px), int(cy - 16 - a * 22 + a * a * 26)), 3)
+    if boss.swap_timer < 2.0:   # about to burst up: warn the crew
+        q = 1 - boss.swap_timer / 2.0
+        ring = _ground_ellipse(world, x, y, BRO_SURFACE_RADIUS)
+        overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        pygame.draw.ellipse(overlay, (255, 60, 40, int(50 + 70 * q)), ring)
+        pygame.draw.ellipse(overlay, (255, 150, 110, 220), ring, 3)
+        surf.blit(overlay, (0, 0))
+
+
+def draw_shade_auras(surf, world, t):
+    """Abyssal Shades: a pool of darkness on the ground around each, where the crew's swings drag."""
+    spots = [(e.x, e.y, False) for e in world.enemies if e.spec.get("aura") and e.targetable]
+    spots += [(p[0], p[1], True) for p in world.void_pools]   # (and The Void Maw's hungry pools of darkness)
+    if not spots:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    for x, y, hungry in spots:
+        ring = _ground_ellipse(world, x, y, SHADE_RADIUS)
+        pulse = 0.5 + 0.5 * math.sin(t * 2 + x)
+        pygame.draw.ellipse(overlay, (6, 4, 14, int(110 + 30 * pulse)), ring)
+        if hungry:   # a violet rim that writhes: it bites (and a click drives it back)
+            fast = 0.5 + 0.5 * math.sin(t * 6 + x)
+            pygame.draw.ellipse(overlay, (170, 110, 255, int(120 + 100 * fast)), ring, 3)
+            pygame.draw.ellipse(overlay, (120, 60, 200, 70), ring.inflate(-ring.w * 0.45, -ring.h * 0.45), 2)
+        else:
+            pygame.draw.ellipse(overlay, (90, 70, 140, 90), ring, 2)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_void_inhale(surf, world, t):
+    """The Void Maw inhaling: rings of darkness closing in on it, and streams dragging each pulled crew member."""
+    boss = world.boss()
+    if not boss or boss.kind != "voidmaw" or boss.inhale is None:
+        return
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    k = boss.inhale / VOID_INHALE_SECS
+    for i in range(3):   # rings rushing inwards
+        share = 1 - ((t * 1.6 + i / 3) % 1)
+        ring = _ground_ellipse(world, boss.x, boss.y, VOID_INHALE_RADIUS * share)
+        pygame.draw.ellipse(overlay, (150, 100, 230, int(40 + 120 * (1 - share))), ring, 3)
+    pygame.draw.ellipse(overlay, (20, 10, 40, int(40 + 50 * k)), _ground_ellipse(world, boss.x, boss.y, 1.6))
+    mx, my = world.entity_screen(boss, 40)
+    for m in world.void_pulled(boss):
+        x, y = world.entity_screen(m, 30)
+        for j in range(4):   # dashes streaming from them into its mouth
+            a = (t * 2.5 + j / 4) % 1
+            px, py = x + (mx - x) * a, y + (my - y) * a
+            pygame.draw.circle(overlay, (190, 150, 255, int(200 * (1 - a))), (int(px), int(py)), 3)
+    surf.blit(overlay, (0, 0))
+    from .boss_sprites import void_eye_screen
+    eye = void_eye_screen(boss, world.rise)
+    if eye:   # a target pulsing round the open eye: hit it now to choke the breath
+        pulse = 0.5 + 0.5 * math.sin(t * 10)
+        r = int(eye[2] + 8 + 6 * pulse)
+        pygame.draw.circle(surf, (255, 255, 255), (int(eye[0]), int(eye[1])), r, 2)
+        pygame.draw.circle(surf, (200, 160, 255), (int(eye[0]), int(eye[1])), r + 5, 1)
+
+
 def draw_curses(surf, world, t):
     """Archlich: a violet sigil over each cursed crew member, its ring running down to the burst,
     and the area the burst will hit."""
@@ -921,13 +1000,13 @@ def quake_lift(world, x, y):
     """How far (in blocks) a Seismic Strikes wave is heaving the ground at grid point (x, y) right now.
     The wave front rolls outward; ground it passes pops up and settles, strongest near the epicentre."""
     lift = 0.0
-    for qx, qy, age, _ in world.quakes:
+    for qx, qy, age, _, reach in world.quakes:
         d = math.hypot(x - qx, y - qy)
-        if d > QUAKE_RADIUS:
+        if d > reach:
             continue
         behind = age * QUAKE_SPEED - d          # how far the front has travelled past this point
         if 0 <= behind < 1.2:
-            strength = (1 - d / QUAKE_RADIUS) ** 0.7
+            strength = (1 - d / reach) ** 0.7
             lift += math.sin(behind / 1.2 * math.pi) * 0.3 * strength
     return lift
 
@@ -937,13 +1016,13 @@ def draw_quake_waves(surf, world):
     if not world.quakes:
         return
     overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
-    for qx, qy, age, _ in world.quakes:
+    for qx, qy, age, _, reach in world.quakes:
         cx, cy = iso(qx, qy, 2 + world.rise)
         for lag, width in ((0.0, 5), (0.45, 3)):   # leading ring and a fainter one behind it
             rad = age * QUAKE_SPEED - lag
-            if not 0 < rad <= QUAKE_RADIUS:
+            if not 0 < rad <= reach:
                 continue
-            fade = 1 - rad / QUAKE_RADIUS
+            fade = 1 - rad / reach
             rect = pygame.Rect(0, 0, rad * TILE_W * 1.42, rad * TILE_H * 1.42)   # a circle on the iso ground
             rect.center = (cx, cy)
             pygame.draw.ellipse(overlay, (215, 180, 130, int(200 * fade)), rect, width)

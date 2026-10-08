@@ -13,7 +13,7 @@ from ..effects import CoinFly, Particle
 from ..icons import draw_icon
 from ..render import draw_flying_coins
 from ..ui import Button, draw_callout, draw_glow, draw_gold, draw_panel, draw_pointer, draw_text, wrap_text
-from ..upgrades import (BRANCHES, RING_IN, RING_STEP, SECTOR_DEG, TABS, UPGRADES, UPGRADES_BY_TAB, UPGRADE_BY_KEY,
+from ..upgrades import (BRANCHES, EFFECT_SCALE, RING_IN, RING_STEP, SECTOR_DEG, TABS, UPGRADES, UPGRADES_BY_TAB, UPGRADE_BY_KEY,
                         is_maxed, sector_angle, star_pos, star_xy, tree_requires)
 from ..util import fmt, shade
 from .base import Scene
@@ -425,7 +425,8 @@ class UpgradeScene(Scene):
         pygame.draw.circle(s, GOLD, (cx, cy), r, max(2, int(4 * z)))
         draw_icon(s, "pick", (cx, cy - r * 0.12), r * 0.55, (255, 235, 180))
         if z >= LABEL_ZOOM:
-            draw_text(s, self.fonts, f"{self.world.depth}m", max(14, int(22 * z)), GOLD, (cx, cy + r * 0.55), "center")
+            draw_text(s, self.fonts, f"{self.world.display_depth}m", max(14, int(22 * z)), GOLD, (cx, cy + r * 0.55),
+                      "center")
 
     def glow(self, color, radius):
         radius = max(2, int(radius))
@@ -527,7 +528,7 @@ class UpgradeScene(Scene):
         size = max(15, min(28, int(24 * z)))
         name_img = self.fonts[size].render(up["name"], True, TEXT if state != "locked" else MUTED)
         if self.world.depth < up["depth"]:   # milestone not reached yet: the depth to dig to instead of the level
-            lv_text, lv_color = f"at {up['depth']}m", (240, 150, 90)
+            lv_text, lv_color = f"at {self.world.shown(up['depth'])}m", (240, 150, 90)
         else:
             lv_text = "MAX" if state == "maxed" else (f"{lv}/{up['max']}" if up["max"] else f"Lv {lv}")
             lv_color = GOLD if state == "maxed" else MUTED
@@ -607,13 +608,17 @@ class UpgradeScene(Scene):
                 pygame.draw.rect(s, color if i < lv else (60, 54, 76), rect, border_radius=3)
             y += 14
         y += 40
-        draw_text(s, f, "Now", 22, MUTED, (p.x + 20, y))
-        draw_text(s, f, up["effect"](lv), 26, TEXT, (p.x + 80, y - 2))
+        scale = (getattr(w, EFFECT_SCALE[up["key"]])(),) if up["key"] in EFFECT_SCALE else ()
+        rows = [("Now", up["effect"](lv, *scale), TEXT)]
         if state != "maxed":
-            y += 30
-            draw_text(s, f, "Next", 22, MUTED, (p.x + 20, y))
-            draw_text(s, f, up["effect"](lv + 1), 26, GOOD, (p.x + 80, y - 2))
-        y += 44
+            rows.append(("Next", up["effect"](lv + 1, *scale), GOOD))
+        for label, effect, color in rows:   # (a long effect wraps onto more lines)
+            draw_text(s, f, label, 22, MUTED, (p.x + 20, y))
+            for line in wrap_text(f[26], effect, p.w - 100):
+                draw_text(s, f, line, 26, color, (p.x + 80, y - 2))
+                y += 28
+            y += 2
+        y += 14
         needs = []
         for k, n in up["requires"]:
             req = UPGRADE_BY_KEY[k]
@@ -621,7 +626,8 @@ class UpgradeScene(Scene):
             needs.append((f"{req['name']}  Lv {n}", w.levels[k] >= n,
                           BRANCHES[req["branch"]]["color"] if other else None))
         if up["depth"]:
-            needs.append((f"Reach depth {up['depth']}m  (you: {w.depth}m)", w.depth >= up["depth"], None))
+            needs.append((f"Reach depth {w.shown(up['depth'])}m  (you: {w.display_depth}m)", w.depth >= up["depth"],
+                          None))
         if needs:
             draw_text(s, f, "Requires", 22, MUTED, (p.x + 20, y))
             y += 26

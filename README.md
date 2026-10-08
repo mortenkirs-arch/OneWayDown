@@ -13,6 +13,16 @@ From depth 1, enemies invade in waves and go after your miners - the first one a
 the moment you get there. Zombies claw out of the ground (depth 1+), bats swoop in (depth 3+),
 cave spiders drop from the ceiling (depth 6+), skeletons rattle out of the rock (depth 9+), fast
 wisps flicker in (depth 13+) and slow ghosts materialise (depth 19+).
+From 45m Burrowers tunnel in unseen - just a mound of earth ploughing along - and burst up under a
+miner to grab them (click the mound to dig one out first). Deeper down: Mimics (60m+) sit on a block disguised as a treasure chest and bite whoever digs it - click
+a chest that's just sitting there to flush one out; Rock Golems (70m+) wear stone armour that shrugs off
+blows until a Charged Slam or a blast cracks it; and Abyssal Shades (85m+) never grab, but drift to where
+the crew are thickest and smother them in darkness that slows every swing. Past 70m the waves grow again
+(up to 16 monsters by 94m) and more of them are elite.
+Past 70m is the endgame: down to 90m the rock gets 15% harder still with every metre (it pays no more for it),
+and even a demolitionist's charge or Vein Follower only cracks deep rock rather than shattering it.
+Your own hands keep up with the dig: past 50m your Power Gloves toughen with the rock, 12% harder every
+metre (and with each expedition), so clicks, slams, dynamite and the Auto-Tapper still bite deep down.
 From depth 16, a bat left flying for 3 seconds turns into a vampire, which heals itself
 as it drains a miner - so swat bats fast. Ghosts phase out and can't be clicked for a
 moment every few seconds, so time your clicks. A grabbed miner is choked until you click the enemy to death;
@@ -26,12 +36,18 @@ faster while they're alive (and faster still near them), but monsters can kill t
 Every menu has a middle path of its own: Tools (Hot Streak, Vein Follower, Whetstone),
 Hands (Combo Clicks, Golden Blocks, Charged Slam - hold the mouse anywhere on the dig - and, at the
 top, Phantom Slam, where the Auto-Tapper's ghostly hand charges up and slams on its own), Fortune
-(Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Booby Traps, Ballista, and a Steam
+(Surveyor's Contract, Buried Treasure, Gold Vault) and Combat (Booby Traps, a Ballista whose bolts pierce
+every monster in line, and a Steam
 Boiler in the corner that slowly builds up pressure: click it when it's full to scald every regular
 monster off the board). Combat's fourth path, Holy Water (zombies and skeletons take more damage), fans
-out into specialist counters for the regular monsters (bosses shrug them off): Spirit Lantern (ghosts and wisps), Torches
-(spiders are singed as they land), Garlic Garlands (vampires drain less, bats are slower to turn) and
-Rock Salt (slimes split into fewer slimelings, which shrivel). The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
+out into specialist counters for the regular monsters (bosses shrug them off): Spirit Lantern (ghosts can't
+fade), Torches (spiders are singed as they land), Garlic Garlands (vampires drain less, bats are slower to
+turn) and Rock Salt (slimes split into fewer slimelings, which shrivel). One ring further out, the deep's
+monsters get theirs: Tremor Bells (Burrowers are flushed out before they reach anyone), Ten-Foot Poles
+(Mimics are found out without biting), Acid Edge (any four hits eat through a Rock Golem's armour) and
+Flares (shades slow the crew far less, and burn). Past Cleave, Cut Down to Size shrinks a badly hurt elite
+back to an ordinary monster - one that still pays an elite's bounty. And very deep, past the Steam Boiler,
+Volatile Remains makes every monster burst as it dies, blasting the rock beneath it as hard as it was tough. The Crew menu's middle path hires specialists: drillers (tough, slow, dig almost twice as
 fast), guards (patrol and fight monsters on their own) and a demolitionist (charges that level
 a whole 3x3 of blocks wherever they are thickest). Next to Combat, a single medic runs to whoever is
 hurt - anyone being grabbed first - and patches them up. Now and then a Coffee Break sends a
@@ -65,8 +81,9 @@ with its own rock, backdrop and drifting embers, sparkles or dust (purely cosmet
 `dig/biomes.py`).
 
 Every 10th metre is guarded by a boss: the Zombie King (10m), the Broodmother (20m), the
-Fanged Behemoth (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m) and the
-Archlich (70m), then round again, tougher each time. A boss stalks your
+Fanged Behemoth (30m), the Bone Tyrant (40m), the Slime King (50m), the Vampire Lord (60m), the
+Archlich (70m), the Burrow Brothers (80m), The Mountain (90m) and The Void Maw (100m), then round again, tougher
+each time. A boss stalks your
 crew, winds up and slams the ground around it (get your miners out of the red), and calls in
 minions; ordinary waves pause while it's on the board. Each has a trick of its own:
 
@@ -85,7 +102,28 @@ minions; ordinary waves pause while it's on the board. Each has a trick of its o
 - **Vampire Lord** scatters into a swarm of bats (nothing can hit him), flies to a crew member
   and feeds on them to heal - hit him hard to make him let go.
 - **Archlich** curses a crew member: click them to lift it before it bursts and hurts everyone
-  nearby (Spirit Lantern weakens the burst). Each of his wisps shields him, so kill them first.
+  nearby. Each of his wisps shields him, so kill them first.
+- **The Burrow Brothers**, Dig and Delve, share one health bar: one fights above ground while the other
+  tunnels towards the crew as a mound of earth, and every few seconds they swap - the mound bursting up
+  in a slam (a red ring warns where). Only the one above ground can be hurt; when one falls, the other
+  fights on alone.
+- **The Mountain** wears four stone plates: blows barely land until heavy hits (Charged Slam, Phantom
+  Slam, dynamite, a demolitionist's charge) knock them off one by one. Its stomps heave up new blocks.
+- **The Void Maw** only really feels a click on its one open eye (the eyes take turns, blinking shut
+  between); everything else glances off. Pools of darkness spread under the crew, slowing every swing
+  and eating at whoever stands in them - click a pool to drive it back. Every so often it inhales, dragging
+  the crew close by into its maw to bite them hard: strike the open eye mid-breath to choke it.
+
+**Base Camp.** The Void Maw at 100m ends an *expedition*. When it falls, its death-throes bring the shaft
+down: the crew escape up the last rope, the gear is buried, and the artifacts you found are set into the
+foundations of a camp at the bottom. You build one thing there - each of the five core buildings (Bunkhouse,
+Forge, Training Hall, Counting House, Watchtower: one per upgrade branch) has items that branch outward from it,
+and everything built stays for good. Then a new expedition starts beneath the camp at 101m with nothing else:
+no gold, no upgrades, no artifacts, no crew (only the graveyard and your lifetime record survive). Upgrades
+unlock again at their usual depth +100 (Mining Boots at 102m...), the bosses come round again, and blocks
+and monsters replay the 1-100m climb, 25% tougher (and 25% richer) every expedition - which is what the
+camp's buildings are for. If The Void Maw retreats instead of falling, it rises again 30 seconds later:
+there's no way on but through it.
 
 You can't dig past a boss's layer until it falls, but if it isn't beaten within 150 seconds it
 retreats and the dig goes on. If your diggers clear the layer first, they don't stand idle: they

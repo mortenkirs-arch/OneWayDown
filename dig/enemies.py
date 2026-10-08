@@ -21,6 +21,14 @@ Each enemy type is data in ENEMY_TYPES:
   lifesteal     fraction of its own max hp healed by draining a whole miner
   transform     dict(into, min_depth, after): turns into another enemy after flying `after` seconds
   split         dict(into, count): at half health it bursts into `count` smaller `into` (slimes)
+  lurk          (Mimic) it turns up sitting on a block, disguised as a treasure chest, until the block is hit,
+                it is hit, or LURK_SECS pass - then it springs, biting whoever was digging there
+  armour        (Rock Golem) stone armour: every hit lands at GOLEM_ARMOUR until a heavy one (a Charged Slam,
+                dynamite, a demolitionist's charge) cracks it for good
+  burrow        (Burrower) it tunnels in unseen - a moving mound of earth - and bursts up under a miner to grab
+                them; any hit on the mound digs it out first
+  aura          (Abyssal Shade) never grabs: it drifts to where the crew are thickest, and crew within
+                SHADE_RADIUS swing SHADE_SLOW times slower
   slam, slam_radius   (non-bosses: Slime King chunks) it winds up and slams like a boss, only smaller
   pct_scale     how much "share of max health" damage lands on it (default: all of it; see Enemy.pct_scale)
   tint          colour a grabbed miner's face fades towards
@@ -45,6 +53,12 @@ Each boss also has a trick of its own, run by World.boss_special (see the BOSS T
                 its first "death" leaves a bone pile you must smash quickly
   Slime King    at half health it bursts into chunks that each creep up and slam; beat them all to win
   Archlich      curses a crew member (click them to lift it before it explodes); his wisps shield him
+  Burrow Brothers  two giant burrowers sharing one health bar: one fights while the other tunnels under the
+                crew as a mound, then they swap - the mound bursting up in a slam. Only the one above takes hits
+  The Mountain  stone plates only heavy hits knock off (until then blows barely land); its stomps heave up blocks
+  The Void Maw  only a blow to its one open eye lands properly; pools of darkness spread under the crew and eat
+                at them (click a pool away), and every so often it inhales, dragging the crew in to bite them
+                (strike the open eye to choke it)
 
 Egg sacs (hatch=...) don't move: they hatch into `count` of `kind` after `after` seconds unless broken.
 entrance="none" means the enemy is simply there, with no spawn-in animation.
@@ -127,13 +141,41 @@ ENEMY_TYPES = {
                  altitude=0.35, wobble=dict(amount=0.2, freq=1.0),
                  scale=1.15, slam=0.33, minion=dict(kind="wisp", count=3, every=10.0),
                  tint=(160, 190, 230), gore=(200, 170, 255)),
+    "burrower": dict(name="Burrower", hp=26, speed=0.8, dps=2.2, bounty=26, min_depth=45, weight=2,
+                     reach=0.35, entrance="none", grab="side", arrival="tunnels in", burrow=True,
+                     tint=(150, 110, 80), gore=(120, 90, 60)),
+    # ----- the deep: 60m and below -------------------------------------------------------------------
+    "mimic": dict(name="Mimic", hp=34, speed=0.9, dps=2.6, bounty=34, min_depth=60, weight=1.5,
+                  reach=0.3, entrance="none", grab="side", arrival="lurks among the blocks", lurk=True,
+                  tint=(200, 150, 90), gore=(150, 100, 60)),
+    "golem": dict(name="Rock Golem", hp=70, speed=0.35, dps=2.8, bounty=55, min_depth=70, weight=1.5,
+                  reach=0.35, entrance="dig", grab="side", arrival="heaves itself up", armour=True,
+                  tint=(150, 150, 160), gore=(130, 128, 140)),
+    "shade": dict(name="Abyssal Shade", hp=40, speed=0.5, dps=0, bounty=40, min_depth=85, weight=1.5,
+                  reach=0.0, entrance="fade", grab="engulf", arrival="seeps in", aura=True,
+                  altitude=0.5, wobble=dict(amount=0.3, freq=1.2),
+                  tint=(60, 50, 90), gore=(40, 30, 70)),
+    # ----- the deep's bosses -------------------------------------------------------------------------
+    "burrowbros": dict(name="The Burrow Brothers", hp=3200, speed=0.55, dps=0, bounty=440, min_depth=0, weight=0,
+                       reach=0.9, entrance="dig", grab="side", arrival="burst up out of the rock", boss=True,
+                       scale=1.1, slam=0.30, minion=dict(kind="burrower", count=2, every=14.0),
+                       tint=(150, 110, 80), gore=(120, 90, 60)),
+    "mountain": dict(name="The Mountain", hp=3400, speed=0.35, dps=0, bounty=460, min_depth=0, weight=0,
+                     reach=0.9, entrance="dig", grab="side", arrival="heaves itself up", boss=True,
+                     scale=1.1, slam=0.36, plates=4, minion=dict(kind="golem", count=1, every=16.0),
+                     tint=(150, 150, 160), gore=(130, 128, 140)),
+    "voidmaw": dict(name="The Void Maw", hp=3600, speed=0.25, dps=0, bounty=500, min_depth=0, weight=0,
+                    reach=0.9, entrance="fade", grab="engulf", arrival="rises out of the dark", boss=True,
+                    scale=1.15, slam=0.36, minion=dict(kind="shade", count=1, every=15.0),
+                    tint=(60, 50, 90), gore=(120, 80, 200)),
     "eggsac": dict(name="Egg Sac", hp=10, speed=0, dps=0, bounty=4, min_depth=0, weight=0,
                    reach=0, entrance="none", grab="head", arrival="", hatch=dict(kind="spider", count=2, after=6.0),
                    tint=(230, 230, 210), gore=(225, 225, 200)),
 }
 FLY_ALTITUDE = ENEMY_TYPES["bat"]["altitude"]   # bat swoop-in / transformation height
 
-BOSSES = ["zombieking", "broodmother", "greatbat", "bonetyrant", "slimeking", "vampirelord", "lich"]
+BOSSES = ["zombieking", "broodmother", "greatbat", "bonetyrant", "slimeking", "vampirelord", "lich",
+          "burrowbros", "mountain", "voidmaw"]
 BOSS_EVERY = 10              # a boss guards every 10th metre
 BOSS_TIME_LIMIT = 150.0      # seconds before an unbeaten boss retreats (no reward, but the dig goes on)
 BOSS_PCT_SCALE = 0.04        # bosses shrug off "share of max health" damage (Executioner, guards, ballista...)
@@ -163,7 +205,6 @@ CURSE_EVERY = 9.0            # Archlich: seconds between curses
 CURSE_SECS = 4.5             # a curse bursts this long after it lands, unless you click the crew member
 CURSE_SHARE = 0.4           # damage to every crew member within CURSE_RADIUS when it bursts (share, as above)
 CURSE_RADIUS = 1.5
-CURSE_WARD = 0.3             # Spirit Lantern weakens the burst by this share per level
 SHIELD_PER_WISP = 0.25       # each wisp alive takes this share off the damage the Archlich takes...
 SHIELD_MAX = 0.75            # ...up to this much
 SCREECH_EVERY = 13.0         # Fanged Behemoth: seconds between screeches...
@@ -221,16 +262,43 @@ WAVE_FASTEST_DEPTH = 10
 WAVE_HASTE = 0.75             # waves come this much sooner once you're deep, easing in from ENEMY_START_DEPTH...
 WAVE_HASTE_DEPTH = 17         # ...to the full amount here
 MAX_ENEMIES_CAP = 8           # monsters alive after a wave, reached at 21m...
-DEEP_CAP = 12                 # ...then +1 every DEEP_CAP_EVERY metres, up to this (at 45m)
+DEEP_CAP = 12                 # ...then +1 every DEEP_CAP_EVERY metres, up to this (at 45m)...
 DEEP_CAP_EVERY = 6
+ABYSS_FROM = 70               # ...and again past here, +1 every DEEP_CAP_EVERY metres...
+ABYSS_CAP = 16                # ...up to this (at 94m)
+LURK_SECS = 18.0              # Mimic: springs by itself after sitting this long unnoticed
+GOLEM_ARMOUR = 0.25           # Rock Golem: share of each hit that gets through its armour, until it's cracked
+SHADE_RADIUS = 1.6            # Abyssal Shade: crew this close (tiles) are in its darkness...
+SHADE_SLOW = 1.8              # ...and take this many times longer over each swing
+BRO_NAMES = ("Dig", "Delve")   # The Burrow Brothers: one fights above, the other tunnels below...
+BRO_SWAP = 9.0                # ...and they swap this often...
+BRO_MOUND_SPEED = 0.9         # ...the tunneller's mound creeping towards the crew this fast (tiles/s)...
+BRO_SURFACE_RADIUS = 1.1      # ...and bursting up in a slam that hurts crew this close
+MOUNTAIN_ARMOUR = 0.1         # The Mountain: share of a blow that gets through while it still has plates
+MOUNTAIN_HEAVE = 4            # ...and stone blocks its stomps heave up around it
+VOID_GLANCE = 0.2             # The Void Maw: share of a blow that lands anywhere but its open eye...
+VOID_EYE = 1.5                # ...and how hard a click on the open eye lands
+VOID_EYE_OPEN, VOID_EYE_SHUT = 4.5, 1.5   # ...an eye stays open this long, then all blink shut this long
+VOID_POOL_EVERY = 9.0         # ...a pool of darkness spreads under a crew member this often...
+VOID_POOL_SECS = 24.0         # ...lasting this long (up to VOID_POOLS at once)
+VOID_POOLS = 4
+VOID_POOL_DRAIN = 0.02        # ...eating this share of a crew member's own max health a second (click one away)...
+VOID_INHALE_EVERY = 22.0      # ...and this often it inhales: its eye flies open wide...
+VOID_INHALE_SECS = 2.6        # ...and for this long it drags in crew within VOID_INHALE_RADIUS...
+VOID_INHALE_RADIUS = 3.0
+VOID_INHALE_PULL = 1.3        # ...at this many tiles a second...
+VOID_BITE_RADIUS = 1.6        # ...then bites everyone this close for VOID_BITE of their own max health
+VOID_BITE = 0.2               # (a blow to the open eye while it inhales chokes it: no bite)
 ELITE_FROM = 25               # elite monsters: from this depth...
-ELITE_CHANCE = (0.10, 0.25)   # ...this chance per wave monster, rising over ELITE_RAMP metres
+ELITE_CHANCE = (0.10, 0.25)   # ...this chance per wave monster, rising over ELITE_RAMP metres...
 ELITE_RAMP = 25
+ELITE_DEEP = 0.35             # ...then on up to this by 100m, from ABYSS_FROM
 ELITE_HP = 4.0                # much tougher...
 ELITE_GRIP = 1.6              # ...grab harder...
 ELITE_BOUNTY = 4.0            # ...and pay more
 ELITE_PCT_SCALE = 0.4         # they shrug off "share of max health" damage: this much of it lands
 ELITE_SCALE = 1.35            # drawn this much bigger, in a red glow
+HUMBLE_SECS = 0.5             # Cut Down to Size: how long an elite takes to shrink back
 
 
 def spawn_interval(depth):
@@ -246,6 +314,8 @@ def max_enemies(depth):
     cap = min(MAX_ENEMIES_CAP, 1 + depth // 3)
     if cap == MAX_ENEMIES_CAP:
         cap = min(DEEP_CAP, MAX_ENEMIES_CAP + max(0, depth - 21) // DEEP_CAP_EVERY)
+    if depth > ABYSS_FROM:   # the deep gets busier again
+        cap = min(ABYSS_CAP, DEEP_CAP + (depth - ABYSS_FROM) // DEEP_CAP_EVERY)
     return cap
 
 
@@ -254,7 +324,10 @@ def elite_chance(depth):
     if depth < ELITE_FROM:
         return 0.0
     lo, hi = ELITE_CHANCE
-    return lo + (hi - lo) * min(1.0, (depth - ELITE_FROM) / ELITE_RAMP)
+    chance = lo + (hi - lo) * min(1.0, (depth - ELITE_FROM) / ELITE_RAMP)
+    if depth > ABYSS_FROM:
+        chance = hi + (ELITE_DEEP - hi) * min(1.0, (depth - ABYSS_FROM) / 30)
+    return chance
 
 
 def choose_kind(depth):
@@ -314,7 +387,19 @@ class Enemy:
         self.throw_at = None          # ...the crew member this bone is for
         self.chunks = []              # Slime King: the chunks it burst into (the fight ends when they're all gone)
         if ENEMY_TYPES[kind]["entrance"] == "none":
-            self.state = "hunting"
+            self.state = "burrowing" if ENEMY_TYPES[kind].get("burrow") else "hunting"
+        self.plates = ENEMY_TYPES[kind].get("plates", 0)   # The Mountain: stone plates left
+        self.eye, self.eye_timer = None, 2.0      # The Void Maw: which eye is open (None: all shut), and for how long...
+        self.inhale = None                        # ...seconds into an inhale (None: not inhaling)...
+        self.inhale_timer = VOID_INHALE_EVERY * 0.6   # ...and until the next one
+        self.bro_hp = None                        # The Burrow Brothers: each brother's health...
+        self.up = 0                               # ...which of them is above ground...
+        self.mound = None                         # ...where the other's mound is, tunnelling...
+        self.swap_timer = BRO_SWAP                # ...seconds until they swap...
+        self.surface_t = 9.0                      # ...and since the one above burst up
+        self.tunnel_t = 0.0                       # Burrower: seconds spent tunnelling (Tremor Bells)
+        self.etch = 0                             # Rock Golem: hits the acid has eaten into its armour (Acid Edge)
+        self.humbled = None                       # an elite cut down to size: anim_t when it happened
 
     def become(self, kind):
         """Set the enemy type, with full health for that type at this depth."""
@@ -331,6 +416,9 @@ class Enemy:
     @property
     def draw_scale(self):
         """How much bigger than its regular sprite this one is drawn (bosses and elites), or None."""
+        if self.humbled is not None and not self.boss:   # cut down to size: shrinking back to normal
+            k = min(1.0, (self.anim_t - self.humbled) / HUMBLE_SECS)
+            return ELITE_SCALE + (1 - ELITE_SCALE) * k if k < 1 else None
         return self.spec.get("scale") or (ELITE_SCALE if self.elite else None)
 
     @property
@@ -343,7 +431,7 @@ class Enemy:
         traps, the ballista, Self Defense, charges and Executioner's minimum all go through this."""
         if self.boss:
             return self.spec.get("pct_scale", BOSS_PCT_SCALE)
-        return self.spec.get("pct_scale", ELITE_PCT_SCALE if self.elite else 1.0)
+        return self.spec.get("pct_scale", ELITE_PCT_SCALE if self.elite and self.humbled is None else 1.0)
 
     @property
     def look(self):
@@ -409,6 +497,24 @@ class Enemy:
                 self.state = "hunting"
             return
 
+        if self.state == "burrowing":   # Burrower: tunnelling under the blocks towards a miner
+            if world.tremor_bells(self, dt):
+                return
+            target = world.nearest_free_miner(self.x, self.y)
+            if target is None:
+                return
+            if math.hypot(target.x - self.x, target.y - self.y) <= self.spec["reach"]:
+                world.surface_burrower(self, target)
+            else:
+                self.step_to(target.x, target.y, dt)
+            return
+
+        if self.state == "lurking":   # Mimic: sitting on its block, passing for a treasure chest
+            self.timer += dt
+            if self.lurk_cell not in world.current or self.timer >= LURK_SECS:
+                world.spring_mimic(self)
+            return
+
         if self.boss:
             self.update_boss(world, dt)
             return
@@ -430,7 +536,7 @@ class Enemy:
             self.x, self.y = v.x + self.grab_offset[0], v.y + self.grab_offset[1]
             # the grip tightens past GRIP_FROM metres: drains keep pace with a typical crew member's health
             dps = self.spec["dps"] * max(1.0, crew_hp_at(self.depth) / crew_hp_at(GRIP_FROM))
-            if self.elite:
+            if self.elite and self.humbled is None:
                 dps *= ELITE_GRIP
             dps *= world.grip_ward(self)   # (Garlic Garlands, Torches)
             drained = min(v.hp, dps * dt * world.art_mult("grab_dmg"))   # (Broodmother's Silk)
@@ -453,15 +559,27 @@ class Enemy:
             if self.flight_time >= transform["after"] * world.turn_delay():   # (Garlic Garlands)
                 world.transform_enemy(self, transform["into"])
                 return
+        if self.spec.get("aura"):   # Abyssal Shade: drift to where the crew are thickest; it never grabs
+            tx, ty = world.shade_target(self)
+            if math.hypot(tx - self.x, ty - self.y) > 0.15:
+                self.step_to(tx, ty, dt)
+            return
         target = world.nearest_free_miner(self.x, self.y)
         if not target:
             return
-        dx, dy = target.x - self.x, target.y - self.y
-        dist = math.hypot(dx, dy)
-        self.facing = 1 if (dx - dy) >= 0 else -1
-        if dist <= self.spec["reach"]:
+        if math.hypot(target.x - self.x, target.y - self.y) <= self.spec["reach"]:
+            self.facing = 1 if (target.x - self.x) - (target.y - self.y) >= 0 else -1
             world.grab(self, target)
             return
+        self.step_to(target.x, target.y, dt)
+
+    def step_to(self, tx, ty, dt):
+        """Move towards (tx, ty) at its speed (zig-zagging if it flies that way)."""
+        dx, dy = tx - self.x, ty - self.y
+        dist = math.hypot(dx, dy)
+        if dist < 1e-6:
+            return
+        self.facing = 1 if (dx - dy) >= 0 else -1
         ux, uy = dx / dist, dy / dist
         wob = self.spec.get("wobble")
         if wob and dist > 0.8:   # zig-zag flight
@@ -478,7 +596,7 @@ class Enemy:
         """Stalk the nearest crew member, wind up, slam the ground around itself; call in minions."""
         self.hunt_time += dt
         self.fight_time += dt
-        if self.fight_time >= BOSS_TIME_LIMIT:
+        if self.fight_time >= world.boss_time_limit():
             world.boss_retreat(self)
             return
         if self.mode == "split":   # the Slime King in pieces: its chunks do the fighting

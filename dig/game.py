@@ -8,9 +8,10 @@ import time
 import pygame
 
 from .biomes import BIOMES, biome_at
+from .appicon import set_app_icon
 from .audio import Audio
 from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
-from .scenes import ArtifactScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
+from .scenes import ArtifactScene, CampScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
 from .ui import Fonts
 from .world import World
 
@@ -27,6 +28,7 @@ class Game:
         self.save_path = self.latest_slot() or self.slots[0]   # (Continue: the save played most recently)
         pygame.init()
         pygame.display.set_caption("The Only Way Is Down")
+        set_app_icon()   # (before the window opens, so the title bar and taskbar both pick it up)
         self.audio = Audio()   # volume settings, music and sound effects
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
@@ -51,6 +53,7 @@ class Game:
             "artifacts": ArtifactScene(self),
             "settings": SettingsScene(self),
             "slots": SlotScene(self),
+            "camp": CampScene(self),
         }
         self.scene = self.scenes["play" if world else "menu"]
         self.music = None   # which track is playing (None = silence)
@@ -214,6 +217,8 @@ class Game:
             self.world.cues.clear()
             if time.time() - self.last_save > AUTOSAVE_SECS:
                 self.save()
+        if self.world and self.world.camp_ready and self.scene is self.scenes["play"]:   # the shaft came down
+            self.switch("camp")
         self.update_music()   # (a boss arriving or falling mid-game changes the track, not just a new screen)
         self.scene.update(dt)
         if self.toast:

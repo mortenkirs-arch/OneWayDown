@@ -13,7 +13,7 @@ SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
 TOP_PANEL = pygame.Rect(16, 16, 420, 160)
 HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
-from ..enemies import BOSS_TIME_LIMIT, ENEMY_START_DEPTH, max_enemies
+from ..enemies import ENEMY_START_DEPTH, max_enemies
 from ..effects import Floater
 from ..icons import draw_icon
 from ..iso import origin_at
@@ -74,8 +74,12 @@ class PlayScene(Scene):
                 return
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
-                self.world.player_hit_enemy(enemy)
+                self.world.player_hit_enemy(enemy, event.pos)
                 self.game.audio.play("hit")   # (blocks: "click")
+                return
+            pool = self.world.pick_void_pool(event.pos)
+            if pool:   # The Void Maw's pools of darkness: a click drives one back
+                self.world.dispel_void_pool(pool)
                 return
             hit = pick_block(self.world, event.pos)
             if hit:
@@ -197,7 +201,7 @@ class PlayScene(Scene):
             return
         depth, ups = nxt
         names = ", ".join(u["name"] for u in ups[:2]) + (f" +{len(ups) - 2} more" if len(ups) > 2 else "")
-        draw_text(surf, f, f"Next unlock at {depth}m: {names}", 22, MUTED, (34, 138), "midleft")
+        draw_text(surf, f, f"Next unlock at {w.shown(depth)}m: {names}", 22, MUTED, (34, 138), "midleft")
         prev = max([u["depth"] for u in UPGRADES if u["depth"] <= w.depth], default=0)
         layer = 1 - len(w.current) / (GRID * GRID)            # progress through the current layer
         frac = min(1.0, (w.depth - prev + layer) / max(1, depth - prev))
@@ -295,7 +299,7 @@ class PlayScene(Scene):
         frac = max(0.0, boss.hp / boss.max_hp)
         pygame.draw.rect(surf, BAD, (bar.x, bar.y, int(bar.w * frac), bar.h), border_radius=5)
         pygame.draw.rect(surf, (255, 200, 190), bar.inflate(4, 4), 2, border_radius=6)
-        left = max(0, math.ceil(BOSS_TIME_LIMIT - boss.fight_time))
+        left = max(0, math.ceil(self.world.boss_time_limit() - boss.fight_time))
         hint = "It's coming..." if boss.state == "emerging" else self.boss_tip(boss)
         room = 2 * (cx - TOP_PANEL.right) - 24   # (between the top-left panel and the buttons)
         size = next((n for n in (20, 18, 16) if f[n].size(hint)[0] <= room), 16)
@@ -342,6 +346,12 @@ class PlayScene(Scene):
                 left = sum(1 for c in boss.chunks if c in w.enemies)
                 return f"{left} chunk{'s' if left != 1 else ''} left - every one of them slams!"
             return "At half health he bursts into 8 chunks - and every one of them slams"
+        if boss.kind == "voidmaw":
+            if boss.inhale is not None:
+                return "It's inhaling - strike its open eye to choke it!"
+            if w.void_pools:
+                return "Its pools eat at your crew - click them away!"
+            return "Only its open eye feels a blow - and when it inhales, strike the eye"
         return "Click it!  Stay out of the red when it slams"
 
     def draw_hud(self, surf, mouse):
@@ -357,7 +367,7 @@ class PlayScene(Scene):
         color = tuple(min(255, int(c + (255 - c) * 0.6 * bump)) for c in GOLD)
         draw_text(surf, f, fmt(w.gold), 48, color, (cx + 26, cy + 1), "midleft")
         draw_text(surf, f, f"{fmt(w.gold_per_sec())} gold / sec", 24, MUTED, (36, 72))
-        draw_text(surf, f, f"Depth  {w.depth}m", 34, TEXT, (420, 30), "topright")
+        draw_text(surf, f, f"Depth  {w.display_depth}m", 34, TEXT, (420, 30), "topright")
         draw_text(surf, f, f"{len(w.current)}/{GRID * GRID} left", 24, MUTED, (420, 72), "topright")
         for b in self.buttons:
             b.draw(surf, f, mouse)

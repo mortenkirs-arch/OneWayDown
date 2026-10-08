@@ -56,10 +56,9 @@ def miner_strike(lv): return 0.0 if lv == 0 else 0.02 + 0.004 * lv  # share of a
 def last_stand_mult(lv): return 1 + 0.5 * lv           # Last Stand: strikes this much harder when desperate
 def miner_max_hp(lv): return 10 * (1 + 0.25 * lv)
 def miner_regen(lv): return 0.015 + 0.0075 * lv       # share of max health healed per second
-def wisp_slow(lv): return 0.15 * lv                   # Spirit Lantern: wisps near the crew slow down
 def trap_share(lv): return 0.05 * lv                  # Booby Traps: share of max hp taken on arrival
-def ballista_interval(lv): return max(1.2, 3.2 - 0.4 * lv)
-def ballista_share(lv): return 0.06 + 0.015 * lv      # Ballista: share of max hp per bolt
+def ballista_interval(lv): return max(1.0, 3.0 - 0.4 * lv)
+def ballista_share(lv): return 0.10 + 0.04 * lv       # Ballista: share of max hp per bolt (to everything it pierces)
 # Specialist counters (never bosses):
 def holy_bonus(lv): return 0.25 * lv                  # Holy Water: extra damage zombies and skeletons take
 def boiler_charge(lv): return 180 - 30 * lv           # Steam Boiler: seconds to build up a full head of steam
@@ -69,6 +68,13 @@ def garlic_ward(lv): return 0.25 * lv                 # Garlic: vampires drain a
 def garlic_delay(lv): return 1 + 0.5 * lv             # ...and bats take this many times longer to turn
 def salt_single(lv): return 0.3 * lv                  # Rock Salt: chance a slime bursts into one slimeling, not two...
 def salt_shrivel(lv): return 0.04 * lv                # ...and share of max hp a slimeling shrivels away per second
+def pole_share(lv): return 0.15 * lv                  # Ten-Foot Poles: share of max hp a found-out Mimic takes
+ACID_HITS = 4                                         # Acid Edge: hits that eat through a Rock Golem's armour
+def flare_ease(lv): return 0.3 * lv                   # Flares: share of a shade's slowdown the crew shake off...
+def flare_burn(lv): return 0.03 * lv                  # ...and share of its max hp a shade burns away per second
+VOLATILE_BLAST = 1.0                                  # Volatile Remains: a dying monster's blast, in its max hp
+                                                      # (monsters and rock grow alike past 90m, so it keeps its share)
+CUTDOWN_AT = 0.4                                      # Cut Down to Size: elites shrink at this share of their health
 # Combat meets Fortune:
 def trophy_mult(lv): return 1 + 0.5 * lv              # Trophy Hunter: elite bounties are worth this many times more
 def spree_step(lv): return 0.05 * lv                  # Killing Spree: extra bounty per kill already in the spree
@@ -161,7 +167,8 @@ UPGRADES = [
 
     # ----- Hands --------------------------------------------------------------
     _up("click", "Power Gloves", "hands", "hand", (-8, 0), [], 10, 1.45, None,
-        "Your clicks hit blocks harder.", lambda l: f"{fmt(click_damage(l))} dmg / click"),
+        "Your clicks hit blocks harder. Past 50m the gloves toughen with the rock: 12% harder every metre.",
+        lambda l, k=1: f"{fmt(click_damage(l) * k)} dmg / click"),
     _up("shockwave", "Shockwave", "hands", "wave", (-22, 1), [("click", 1)], 120, 1.9, 5,
         "Your clicks splash onto neighbouring blocks.", lambda l: f"clicks splash {20 * l}%"),
     _up("autotap", "Auto-Tapper", "hands", "cursor", (-24, 2), [("shockwave", 1)], 9200, 2.0, 10,
@@ -247,14 +254,14 @@ UPGRADES = [
     _up("firstaid", "First Aid", "combat", "cross", (28, 3), [("hardhats", 1)], 1900, 2.0, 6,
         "Miners heal faster once they've had a breather.",
         lambda l: f"heal {100 * miner_regen(l):.1f}% of health/s"),
-    _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (3, 3.35), [("holywater", 1)], 17000, 2.5, 3,
-        "Blue spirit-light on every helmet: ghosts can't fade out, and wisps slow down near the crew.",
-        lambda l: "no lanterns" if l == 0 else f"no fading, wisps -{round(100 * wisp_slow(l))}% speed"),
+    _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (3, 3.35), [("holywater", 1)], 17000, 2.5, 1,
+        "Blue spirit-light on every helmet: ghosts can't fade out of reach.",
+        lambda l: "no lanterns" if l == 0 else "ghosts can't fade"),
     _up("traps", "Booby Traps", "combat", "spikes", (-9, 1), [("slayer", 1)], 35000, 2.2, 5,
         "Spikes punch up into monsters as they climb out of the ground or drop in.",
         lambda l: f"{round(100 * trap_share(l))}% of max hp on arrival"),
     _up("ballista", "Ballista", "combat", "ballista", (-10, 2), [("traps", 1)], 180000, 2.5, 5,
-        "A crossbow turret on the corner of the dig that fires bolts at monsters.",
+        "A crossbow turret on the corner of the dig. Its bolts pierce: every monster in line takes the hit.",
         lambda l: "no ballista" if l == 0 else
         f"a bolt every {ballista_interval(l):.1f}s, {round(100 * ballista_share(l))}% of max hp"),
     # specialist counters for the regular monsters (bosses shrug them off), fanning out from the Ballista
@@ -271,6 +278,33 @@ UPGRADES = [
     _up("salt", "Rock Salt", "combat", "salt", (21, 3.4), [("holywater", 1)], 160000, 2.6, 3,
         "Salt scattered on the dig: slimes often burst into just one slimeling, and slimelings shrivel away.",
         lambda l: f"{round(100 * salt_single(l))}% one slimeling, -{round(100 * salt_shrivel(l))}% hp / s"),
+    # ...and their counters for the deep's monsters, one ring further out
+    _up("bells", "Tremor Bells", "combat", "bell", (-6, 3.8), [("torches", 1)], 400000, 2.6, 1,
+        "Bells on stakes all round the dig ring out as a Burrower tunnels close: the crew stamp it out of the "
+        "ground before it can burst up under anyone.",
+        lambda l: "no bells" if l == 0 else "burrowers can't ambush"),
+    _up("poles", "Ten-Foot Poles", "combat", "pole", (13, 3.9), [("garlic", 1)], 2500000, 2.6, 3,
+        "Miners prod every chest with a ten-foot pole before they dig into it: a Mimic that's found out springs "
+        "without biting anyone, and gets a jab for its trouble.",
+        lambda l: "no poles" if l == 0 else f"no bite, -{round(100 * pole_share(l))}% hp when found out"),
+    _up("acid", "Acid Edge", "combat", "acid", (22, 4.55), [("salt", 1)], 12000000, 2.6, 1,
+        "Every pick, blade and bolt dipped in acid: each hit eats into a Rock Golem's stone armour, and after a "
+        "few it cracks - no slam needed.",
+        lambda l: "no acid" if l == 0 else f"armour cracks after {ACID_HITS} hits"),
+    _up("flares", "Flares", "combat", "flare", (3, 4.5), [("spiritlantern", 1)], 60000000, 2.6, 3,
+        "Magnesium flares light up the dark: crew in an Abyssal Shade's darkness are slowed far less, and the "
+        "shades burn away in the glare.",
+        lambda l: "no flares" if l == 0 else
+        f"-{round(100 * flare_ease(l))}% slowdown, shades burn {round(100 * flare_burn(l))}% hp/s"),
+    _up("cutdown", "Cut Down to Size", "combat", "cutdown", (-22, 4.1), [("cleave", 1)], 100_000_000_000, 2.7, 1,
+        "Wound an elite badly enough and it's cut down to size: it shrinks back to an ordinary monster - health, "
+        "grip and all - and guards, traps and the Ballista hit it in full. It still pays an elite's bounty.",
+        lambda l: "elites stay elite" if l == 0 else f"elites shrink at {round(100 * CUTDOWN_AT)}% health"),
+    _up("volatile", "Volatile Remains", "combat", "volatile", (-14, 4.6), [("boiler", 1), ("cutdown", 1)],
+        200_000_000_000, 2.7, 1,
+        "Down this deep, monsters die badly: each one bursts as it falls, blasting the rock beneath it. The bigger "
+        "the monster, the bigger the blast - elites most of all.",
+        lambda l: "they just die" if l == 0 else "blasts its own health into the rock below"),
     _up("boiler", "Steam Boiler", "combat", "boiler", (-11, 3), [("ballista", 1)], 780000, 2.6, 3,
         "A steam boiler in the corner of the dig slowly builds up pressure. When it's full, click it: scalding "
         "steam rolls across the board and clears it of monsters (bosses stand firm), and the next wave holds back.",
@@ -299,9 +333,14 @@ UNLOCK_DEPTH = {
     # Combat (monsters show up from depth 1)
     "slayer": 1, "executioner": 2, "defense": 3, "smite": 9, "hardhats": 7, "firstaid": 15, "cleave": 22,
     "laststand": 42,
-    "holywater": 11, "torches": 14, "garlic": 21, "salt": 38,   # (specialist counters)
+    "holywater": 11, "torches": 14, "garlic": 21, "salt": 38,   # (specialist counters...)
+    "bells": 47, "poles": 61, "acid": 71, "flares": 86, "cutdown": 66,   # (...and for the deep's monsters)
+    "volatile": 93,
     "trophy": 30, "spree": 35, "boiler": 44,
 }
+# Upgrades whose shown effect grows with the dig as well as their level: the World method giving the factor
+# (passed to the effect as its second argument).
+EFFECT_SCALE = {"click": "glove_scale"}
 # A special price for an upgrade's very first level (its normal curve starts after it).
 FIRST_LEVEL_PRICE = {"miners": 10}
 for _u in UPGRADES:

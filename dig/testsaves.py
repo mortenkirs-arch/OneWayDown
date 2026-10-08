@@ -9,6 +9,7 @@ from .blocks import generate_layer, layer_value
 from .enemies import BOSS_EVERY, BOSSES, ENEMY_TYPES, boss_for
 from .miners import MAX_LEVEL, xp_to_next
 from .upgrades import UPGRADES, ore_mult, ore_richness, value_mult
+from .camp import EXPEDITION_DEPTH, buildable
 from .world import World
 
 # A real player's game at 60m, just after beating the Lich (the boss there at the time), which felt about right:
@@ -20,7 +21,7 @@ ANCHOR_LEVELS = {
     "dynamite": 2, "executioner": 11, "firstaid": 5, "foreman": 1, "goldblock": 3, "golddust": 5, "golden": 7,
     "goldrush": 1, "guard": 4, "hardhats": 5, "laststand": 2, "masterwork": 1, "midas": 1, "miners": 9,
     "graveyardshift": 2, "medic": 2, "veterans": 1, "power": 7, "prospector": 5, "quake": 1, "secondwind": 3, "shockwave": 5, "slam": 1,
-    "slayer": 12, "smite": 7, "speed": 4, "spiritlantern": 2, "steady": 3, "streak": 2, "surveyor": 3,
+    "slayer": 12, "smite": 7, "speed": 4, "spiritlantern": 1, "steady": 3, "streak": 2, "surveyor": 3,
     "teamwork": 4, "traps": 2, "treasure": 5, "value": 8, "vault": 1, "vein": 1, "whetstone": 1,
 }
 # ...the common artifacts, in the order they were found...
@@ -82,14 +83,20 @@ def test_levels(depth):
 
 def test_world(depth, gold=None, seed=None):
     """A fresh World at `depth`: upgrades, crew experience, earlier bosses' trophies and a few artifacts as a
-    player there would have them, and some gold to spend. A boss guarding this depth rises straight away."""
+    player there would have them, and some gold to spend. A boss guarding this depth rises straight away.
+    Past EXPEDITION_DEPTH it's a later expedition: the camp has one build per expedition finished."""
     rng = random.Random(depth if seed is None else seed)
     w = World()
+    if depth > EXPEDITION_DEPTH:
+        w.expedition = (depth - 1) // EXPEDITION_DEPTH
+        depth -= EXPEDITION_DEPTH * w.expedition
+        for _ in range(w.expedition):   # (a spread of buildings: whatever's next in line)
+            w.camp.append(buildable(w.camp)[0])
     w.levels.update(test_levels(depth))
     w.depth = depth
     prospector = w.lv("prospector")
-    w.current = generate_layer(depth, ore_mult(prospector), rng=rng, richness=ore_richness(prospector))
-    w.next = generate_layer(depth + 1, ore_mult(prospector), rng=rng, richness=ore_richness(prospector))
+    w.current = w.new_layer(depth, ore_mult(prospector), rng=rng, richness=ore_richness(prospector))
+    w.next = w.new_layer(depth + 1, ore_mult(prospector), rng=rng, richness=ore_richness(prospector))
     w.layer_value = layer_value(w.current)
     beaten = [b for b in BOSSES[:max(0, depth - 1) // BOSS_EVERY]]   # bosses already behind them
     found = min(len(COMMON), round(len(ANCHOR_COMMONS) * depth / ANCHOR_DEPTH))
@@ -105,7 +112,7 @@ def test_world(depth, gold=None, seed=None):
         k = by_role[m.role] = by_role.get(m.role, -1) + 1
         m.level = min(MAX_LEVEL, 1 + round((spread[min(k, len(spread) - 1)] - 1) * progress(depth)))
         m.xp = rng.uniform(0, xp_to_next(m.level)) if m.level < MAX_LEVEL else 0.0
-    w.gold = layer_value(w.current) * value_mult(w.lv("value")) * 3 if gold is None else gold
+    w.gold = layer_value(w.current) * value_mult(w.lv("value")) * 3 * w.cycle() if gold is None else gold
     w.enemy_timer = w.wave_interval()
     if boss_for(depth):
         w.spawn_boss()

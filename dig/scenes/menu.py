@@ -67,7 +67,7 @@ class MenuScene(Scene):
             self.title = Title(W)
         self.title.draw(surf, W // 2, 34 + MENU_DY, time.time())
         if self.world:
-            draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.depth}m",
+            draw_gold(surf, self.fonts, f"{fmt(self.world.gold)} gold  -  depth {self.world.display_depth}m",
                       26, TEXT, (W // 2, 280 + MENU_DY), "center")
         b = self.buttons
         b["continue"].enabled = b["load"].enabled = self.has_saves

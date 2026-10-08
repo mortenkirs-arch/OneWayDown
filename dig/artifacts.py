@@ -18,6 +18,11 @@ STAT_KIND = {
     "click_dmg": "mult", "monster_dmg": "mult", "gold": "mult", "bounty": "mult", "clear": "mult",
     "ore": "mult", "xp": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
     "boss_dmg": "mult", "slam_dmg": "mult",
+    # (Base Camp only:)
+    "start_gold": "add",    # gold each expedition starts with
+    "start_level": "add",   # levels new crew start up
+    "boss_time": "add",     # seconds added to a boss's time limit
+    "cost": "mult",         # upgrade prices
 }
 
 ARTIFACTS = {
@@ -81,6 +86,15 @@ ARTIFACTS = {
     "phylactery": dict(name="Archlich's Phylactery", icon="spiritlamp", color=(150, 210, 255), boss="lich",
                        lore="A soul in a jar, bartering for its freedom in gold.",
                        bonus="+25% gold from everything", effects={"gold": 1.25}),
+    "broclaw": dict(name="Brothers' Lucky Claw", icon="fist", color=(200, 150, 100), boss="burrowbros",
+                    lore="Dig and Delve used to fight over it. Now the crew do.",
+                      bonus="Monsters pay 50% bigger bounties", effects={"bounty": 1.5}),
+    "heartstone": dict(name="Mountain's Heartstone", icon="gem", color=(150, 120, 255), boss="mountain",
+                       lore="Still warm, still slow to anger. Your crew stand a little firmer near it.",
+                       bonus="Crew have 30% more health", effects={"miner_hp": 1.3}),
+    "voidpearl": dict(name="Void Pearl", icon="moon", color=(175, 120, 255), boss="voidmaw",
+                      lore="It drinks the light around it - and the crew's weariness with it.",
+                      bonus="Miners swing 15% faster", effects={"swing": 0.85}),
 }
 COMMON = [k for k, a in ARTIFACTS.items() if "boss" not in a]
 TROPHY_OF = {a["boss"]: k for k, a in ARTIFACTS.items() if "boss" in a}

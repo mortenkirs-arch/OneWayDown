@@ -263,6 +263,49 @@ def draw_icon(surf, kind, c, s, col):
         for d in (-0.3, 0.0, 0.3):
             pygame.draw.line(surf, dark, (x + d * s, y - s * 0.25), (x + d * s * 1.4, y + s * 0.65), 1)
         pygame.draw.polygon(surf, col, [(x - s * 0.15, y - s * 0.3), (x + s * 0.15, y - s * 0.3), (x, y - s * 0.95)])
+    elif kind == "bell":   # a hand bell on a stake, ringing
+        pygame.draw.line(surf, col, (x, y + s * 0.95), (x, y - s * 0.2), max(2, int(s * 0.15)))
+        pygame.draw.polygon(surf, col, [(x - s * 0.55, y + s * 0.2), (x - s * 0.35, y - s * 0.55), (x, y - s * 0.75),
+                                        (x + s * 0.35, y - s * 0.55), (x + s * 0.55, y + s * 0.2)])
+        pygame.draw.circle(surf, dark, (x, y + s * 0.25), max(2, s * 0.14))
+        for d in (-1, 1):
+            pygame.draw.arc(surf, col, (x + d * s * 0.55 - s * 0.35, y - s * 0.6, s * 0.7, s * 0.7),
+                            -0.6 if d > 0 else math.pi - 0.6, 0.6 if d > 0 else math.pi + 0.6, 2)
+    elif kind == "pole":   # a long pole prodding a chest
+        chest = pygame.Rect(x + s * 0.05, y + s * 0.05, s * 0.8, s * 0.6)
+        pygame.draw.rect(surf, col, chest, border_top_left_radius=int(s * 0.25), border_top_right_radius=int(s * 0.25))
+        pygame.draw.line(surf, dark, (chest.x, chest.y + s * 0.25), (chest.right, chest.y + s * 0.25), 2)
+        pygame.draw.line(surf, col, (x - s * 0.95, y - s * 0.85), (x + s * 0.05, y + s * 0.2), max(2, int(s * 0.14)))
+        pygame.draw.line(surf, col, (x + s * 0.2, y - s * 0.3), (x + s * 0.35, y - s * 0.5), 2)   # ...a startled jolt
+        pygame.draw.line(surf, col, (x + s * 0.55, y - s * 0.25), (x + s * 0.75, y - s * 0.45), 2)
+    elif kind == "acid":   # a dripping blade
+        pygame.draw.polygon(surf, col, [(x - s * 0.8, y + s * 0.8), (x + s * 0.55, y - s * 0.55), (x + s * 0.8, y - s * 0.8),
+                                        (x + s * 0.65, y - s * 0.3), (x - s * 0.6, y + s * 0.95)])
+        for dx, dy, r in ((0.1, 0.05, 0.16), (0.35, 0.45, 0.13), (-0.15, 0.6, 0.1)):
+            pygame.draw.circle(surf, (170, 240, 110), (x + dx * s, y + dy * s), max(2, s * r))
+    elif kind == "flare":   # a flare burning white-hot, rays off it
+        pygame.draw.line(surf, col, (x - s * 0.5, y + s * 0.9), (x, y - s * 0.05), max(2, int(s * 0.2)))
+        pygame.draw.circle(surf, (255, 250, 220), (x + s * 0.1, y - s * 0.25), max(2, s * 0.3))
+        for k in range(6):
+            a = k * math.pi / 3
+            pygame.draw.line(surf, col, (x + s * 0.1 + math.cos(a) * s * 0.45, y - s * 0.25 + math.sin(a) * s * 0.45),
+                             (x + s * 0.1 + math.cos(a) * s * 0.75, y - s * 0.25 + math.sin(a) * s * 0.75), 2)
+    elif kind == "volatile":   # a skull bursting, shards flying off it
+        for k in range(8):
+            a = k * math.pi / 4 + 0.3
+            pygame.draw.line(surf, col, (x + math.cos(a) * s * 0.65, y + math.sin(a) * s * 0.65),
+                             (x + math.cos(a) * s * 0.95, y + math.sin(a) * s * 0.95), 2)
+        pygame.draw.circle(surf, col, (x, y - s * 0.08), s * 0.45)
+        pygame.draw.rect(surf, col, (x - s * 0.25, y + s * 0.2, s * 0.5, s * 0.3), border_radius=2)
+        for d in (-1, 1):
+            pygame.draw.circle(surf, dark, (x + d * s * 0.18, y - s * 0.1), max(1, s * 0.12))
+    elif kind == "cutdown":   # a big silhouette and a small one, an arrow shrinking it
+        pygame.draw.circle(surf, dark, (x - s * 0.4, y - s * 0.45), s * 0.32)
+        pygame.draw.rect(surf, dark, (x - s * 0.8, y - s * 0.12, s * 0.8, s * 0.95), border_radius=int(s * 0.2))
+        pygame.draw.circle(surf, col, (x + s * 0.55, y + s * 0.2), s * 0.18)
+        pygame.draw.rect(surf, col, (x + s * 0.33, y + s * 0.4, s * 0.44, s * 0.45), border_radius=int(s * 0.12))
+        pygame.draw.line(surf, col, (x - s * 0.05, y - s * 0.75), (x + s * 0.4, y - s * 0.25), 2)
+        pygame.draw.polygon(surf, col, [(x + s * 0.48, y - s * 0.15), (x + s * 0.2, y - s * 0.22), (x + s * 0.4, y - s * 0.45)])
     elif kind == "salt":   # a heap of salt crystals with a pinch falling
         pygame.draw.polygon(surf, col, [(x - s * 0.85, y + s * 0.7), (x, y - s * 0.2), (x + s * 0.85, y + s * 0.7)])
         for i, (dx, dy) in enumerate(((-0.3, -0.75), (0.1, -0.9), (0.35, -0.6), (-0.05, -0.5))):

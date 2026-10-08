@@ -6,7 +6,7 @@ import pygame
 
 from .config import BAD, BLOCK_H, GOOD, GRID, MUTED
 from .dynamite import FUSE_LEN, STICK_H, STICK_STAGGER, STICK_W, fuse_points
-from .enemies import (ELITE_SCALE, ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, THROW_ANIM_SECS,
+from .enemies import (ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, THROW_ANIM_SECS,
                       THROW_RELEASE, TRANSFORM_SECS)
 from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
@@ -21,7 +21,9 @@ CRIT_WINDUP = -1.6  # pick angle at the start of a crit: raised back behind the 
 ENEMY_HIT_RADIUS = {"zombie": 26, "spider": 20, "bat": 20, "vampire": 26, "wisp": 16, "ghost": 24,
                     "zombieking": 54, "broodmother": 56, "vampirelord": 54, "lich": 56, "eggsac": 18,
                     "skeleton": 24, "greatbat": 54, "bonetyrant": 66,
-                    "slime": 22, "slimeling": 20, "slimechunk": 26, "slimeking": 54}
+                    "slime": 22, "slimeling": 20, "slimechunk": 26, "slimeking": 54,
+                    "mimic": 20, "golem": 30, "shade": 26, "burrower": 20,
+                    "burrowbros": 56, "mountain": 66, "voidmaw": 72}
 BONE_COL, BONE_SHADE = (232, 226, 205), (150, 142, 120)
 BOSS_CANVAS = (180, 240)   # a boss is drawn on this canvas around its feet, then scaled up
 ZOMBIE_SKIN, ZOMBIE_SHIRT = (118, 168, 92), (70, 88, 130)
@@ -160,7 +162,9 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         pygame.draw.line(surf, MEDIC_RED, (head[0] - 2 * m.facing - 2, head[1] - 7),
                          (head[0] - 2 * m.facing + 2, head[1] - 7), 2)
     lamp = (head[0] + 5 * m.facing, head[1] - 6)
-    if role == "guard":   # a proper lantern on the helmet, glowing
+    if getattr(m, "shaded", False):   # an Abyssal Shade's darkness: the lamp gutters out
+        pygame.draw.circle(surf, (70, 66, 80), lamp, 2)
+    elif role == "guard":   # a proper lantern on the helmet, glowing
         pygame.draw.circle(surf, (255, 220, 120), lamp, 4)
         pygame.draw.circle(surf, (255, 255, 230), lamp, 2)
     elif spirit:   # Spirit Lantern: a cold blue light that keeps spirits from fading
@@ -487,6 +491,9 @@ def _fly_bob(e):
 
 def enemy_anchor(e, rise, t):
     """Centre of the enemy's body on screen; used for clicking and effects."""
+    if e.state == "burrowing":   # a Burrower's mound
+        fx, fy = _feet(e, rise)
+        return fx, fy - 4
     if getattr(e, "mode", "") == "pile":   # the Bone Tyrant in pieces on the ground
         fx, fy = _feet(e, rise)
         return fx, fy - 12
@@ -522,6 +529,8 @@ def _base_anchor(e, rise, t):
         return fx, fy - SLIME_SIZE.get(e.kind, 13) * 0.9
     if e.flying and e.state != "transforming":
         return fx, fy - e.altitude * BLOCK_H + _fly_bob(e)
+    if e.kind in ("mimic", "burrower"):   # (squat: the middle of the body, not head height)
+        return fx, fy - 12
     return (fx, fy - 22) if e.spec["grab"] == "side" else (fx, fy - 8)
 
 
@@ -530,7 +539,7 @@ def pick_enemy(world, pos, t):
         if not e.targetable:
             continue
         ax, ay = enemy_anchor(e, world.rise, t)
-        if math.hypot(pos[0] - ax, pos[1] - ay) <= ENEMY_HIT_RADIUS[e.kind] * (ELITE_SCALE if e.elite else 1):
+        if math.hypot(pos[0] - ax, pos[1] - ay) <= ENEMY_HIT_RADIUS[e.kind] * ((e.draw_scale or 1) if e.elite else 1):
             return e
     return None
 
@@ -578,7 +587,7 @@ def _draw_boss(surf, e, rise, t, hovered, scale):
     with origin_at((ox + ax - fx, oy + ay - fy)):
         _draw_enemy(canvas, e, rise, t, hovered)
     own = e.kind in boss_sprites.DRAWERS   # (drawn facing right, crowned, flashing by itself)
-    if own and e.facing < 0:
+    if own and e.facing < 0 and e.kind not in boss_sprites.NO_FLIP:
         canvas = pygame.transform.flip(canvas, True, False)
     if own and e.flash > 0:
         canvas.fill((150, 150, 150), special_flags=pygame.BLEND_RGB_ADD)
@@ -1210,9 +1219,200 @@ def _draw_slime(surf, e, rise, t, hovered, dy=0):
         _hp_bar(surf, fx, int(top) - 5, e.hp / e.max_hp, BAD, 28 if r >= 10 else 20)
 
 
+# ----- the deep: Mimic, Rock Golem, Abyssal Shade -------------------------------------------------------------------
+WOOD, WOOD_DARK, CHEST_GOLD = (140, 90, 50), (88, 54, 30), (230, 180, 60)
+STONE_COL, STONE_EDGE, MOSS = (128, 126, 138), (78, 76, 90), (96, 130, 80)
+
+
+def _draw_mimic(surf, e, rise, t, hovered, dy=0):
+    """A treasure chest... with teeth. Lurking it sits shut on its block, a tongue flicking out now and then;
+    sprung, it hops along on stubby legs, lid gaping, and chomps whoever it catches."""
+    fx, fy = _feet(e, rise)
+    fy += dy
+    lurking = e.state == "lurking"
+    attacking = e.state == "attacking" and e.victim is not None
+    flash = e.flash > 0
+    wood = (255, 255, 255) if flash else WOOD
+    if hovered:
+        pygame.draw.ellipse(surf, BAD, (fx - 16, fy - 6, 32, 12), 2)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 12, fy - 4, 24, 8))
+    hop = 0 if lurking else abs(math.sin(e.anim_t * 7)) * (5 if e.state == "hunting" else 2)
+    if attacking:
+        fx += struggle_shake(t, 0.9) * 0.5
+    base = fy - hop
+    if not lurking:   # stubby legs under it
+        for d in (-6, 6):
+            pygame.draw.line(surf, WOOD_DARK, (fx + d, base - 2), (fx + d + math.sin(e.anim_t * 14 + d) * 2, fy), 3)
+    box = pygame.Rect(fx - 11, base - 12, 22, 11)
+    pygame.draw.rect(surf, wood, box, border_radius=2)
+    pygame.draw.rect(surf, WOOD_DARK, box, 1, border_radius=2)
+    for bx in (box.x + 4, box.right - 5):   # iron-bound with gold
+        pygame.draw.line(surf, CHEST_GOLD, (bx, box.y), (bx, box.bottom - 1), 2)
+    if lurking:   # shut tight - but now and then a tongue flicks out of the seam
+        lid = pygame.Rect(fx - 11, base - 18, 22, 7)
+        pygame.draw.rect(surf, wood, lid, border_top_left_radius=5, border_top_right_radius=5)
+        pygame.draw.rect(surf, WOOD_DARK, lid, 1, border_top_left_radius=5, border_top_right_radius=5)
+        pygame.draw.rect(surf, CHEST_GOLD, (fx - 2, base - 14, 4, 4))   # the clasp
+        if (t + e.x * 3.1) % 4.0 < 0.3:
+            pygame.draw.line(surf, (220, 80, 100), (fx + 4 * e.facing, base - 12), (fx + 9 * e.facing, base - 9), 2)
+        return
+    gape = 0.55 + 0.35 * abs(math.sin(t * (14 if attacking else 5)))   # how wide the lid is open
+    pygame.draw.polygon(surf, (90, 20, 30), [(box.x + 1, box.y + 1), (box.right - 1, box.y + 1),
+                                             (box.right - 1, box.y - 8 * gape), (box.x + 1, box.y - 8 * gape)])
+    for k in range(4):   # teeth along both jaws
+        tx = box.x + 3 + k * 5
+        pygame.draw.polygon(surf, (245, 240, 225), [(tx, box.y), (tx + 4, box.y), (tx + 2, box.y - 3)])
+    lid_y = box.y - 8 - 8 * gape
+    lid = pygame.Rect(fx - 11, int(lid_y), 22, 7)
+    pygame.draw.rect(surf, wood, lid, border_top_left_radius=5, border_top_right_radius=5)
+    pygame.draw.rect(surf, WOOD_DARK, lid, 1, border_top_left_radius=5, border_top_right_radius=5)
+    for k in range(4):
+        tx = lid.x + 3 + k * 5
+        pygame.draw.polygon(surf, (245, 240, 225), [(tx, lid.bottom), (tx + 4, lid.bottom), (tx + 2, lid.bottom + 3)])
+    for d in (-4, 4):   # beady eyes glinting inside the lid
+        pygame.draw.circle(surf, (255, 220, 80), (fx + d, int(lid.bottom + 4)), 1)
+    tongue = [(fx, box.y - 2), (fx + 7 * e.facing, box.y + 2 + math.sin(t * 9) * 2), (fx + 10 * e.facing, box.y)]
+    pygame.draw.lines(surf, (220, 80, 100), False, tongue, 2)
+    if e.targetable:
+        _hp_bar(surf, fx, int(lid_y) - 6, e.hp / e.max_hp, BAD, 24)
+
+
+def _draw_golem(surf, e, rise, t, hovered, dy=0):
+    """A hulking golem of stacked boulders. Armoured, it's plated in mossy slabs; once a heavy hit cracks it,
+    the slabs are gone and a glowing core shows through the cracks."""
+    fx, fy = _feet(e, rise)
+    fy += dy
+    entering = e.state == "emerging"
+    attacking = e.state == "attacking" and e.victim is not None
+    cracked = getattr(e, "cracked", False)
+    flash = e.flash > 0
+    stone = (255, 255, 255) if flash else STONE_COL
+    if hovered:
+        pygame.draw.ellipse(surf, BAD, (fx - 20, fy - 7, 40, 14), 2)
+    if not entering:
+        pygame.draw.ellipse(surf, (16, 12, 20), (fx - 15, fy - 5, 30, 10))
+    if attacking:
+        fx += struggle_shake(t, 0.5) * 0.4
+    stomp = math.sin(e.anim_t * 4) * 2 if e.state == "hunting" else 0
+    for d, st in ((-6, stomp), (6, -stomp)):   # stumpy legs
+        pygame.draw.rect(surf, STONE_EDGE, (fx + d - 4, fy - 10 + min(0, st), 8, 10 - min(0, st)), border_radius=3)
+    body = pygame.Rect(fx - 14, fy - 34, 28, 26)
+    pygame.draw.rect(surf, stone, body, border_radius=9)
+    pygame.draw.rect(surf, STONE_EDGE, body, 2, border_radius=9)
+    if cracked:   # the armour's gone: glowing cracks over a hot core
+        pulse = 0.6 + 0.4 * math.sin(t * 5)
+        glow = (255, int(150 + 60 * pulse), 70)
+        for pts in (((fx - 8, fy - 30), (fx - 2, fy - 22), (fx - 6, fy - 14)),
+                    ((fx + 6, fy - 31), (fx + 2, fy - 24), (fx + 8, fy - 16)), ((fx - 1, fy - 18), (fx + 3, fy - 10))):
+            pygame.draw.lines(surf, glow, False, pts, 2)
+    else:   # mossy slabs of armour over the chest and shoulders
+        for plate in ((fx - 13, fy - 33, 12, 12), (fx + 1, fy - 33, 12, 12), (fx - 9, fy - 20, 18, 10)):
+            pygame.draw.rect(surf, (104, 102, 116), plate, border_radius=3)
+            pygame.draw.rect(surf, STONE_EDGE, plate, 1, border_radius=3)
+        pygame.draw.line(surf, MOSS, (fx - 12, fy - 33), (fx - 4, fy - 33), 2)
+        pygame.draw.line(surf, MOSS, (fx + 3, fy - 21), (fx + 9, fy - 21), 2)
+    head = (int(fx + 2 * e.facing), fy - 39)   # a small boulder of a head, sunk between the shoulders
+    pygame.draw.circle(surf, stone, head, 7)
+    pygame.draw.circle(surf, STONE_EDGE, head, 7, 1)
+    eye = (255, 170, 80) if cracked else (120, 230, 255)
+    for d in (-3, 2):
+        pygame.draw.line(surf, eye, (head[0] + d * e.facing, head[1] - 1), (head[0] + (d + 2) * e.facing, head[1] - 1), 2)
+    shoulder = (fx, fy - 30)
+    if attacking:   # both great fists round the miner
+        nx, ny = miner_neck(e.victim, rise, t)
+        for d in (-4, 4):
+            pygame.draw.line(surf, STONE_EDGE, (shoulder[0] + d, shoulder[1]), (nx + d, ny), 6)
+            pygame.draw.circle(surf, stone, (int(nx + d), int(ny)), 5)
+    else:   # long arms swinging, knuckles near the ground
+        swing = math.sin(e.anim_t * 4) * 3
+        for d in (-1, 1):
+            hand = (fx + d * 16, fy - 10 + swing * d)
+            pygame.draw.line(surf, STONE_EDGE, (fx + d * 12, fy - 30), hand, 6)
+            pygame.draw.circle(surf, stone, (int(hand[0]), int(hand[1])), 6)
+            pygame.draw.circle(surf, STONE_EDGE, (int(hand[0]), int(hand[1])), 6, 1)
+    if not entering:
+        _hp_bar(surf, head[0], head[1] - 13, e.hp / e.max_hp, BAD, 30)
+
+
+def _draw_shade(surf, e, rise, t, hovered, dy=0, alpha=1.0):
+    """A drifting knot of darkness with two pale eyes, ragged wisps trailing beneath it."""
+    cx, cy = _base_anchor(e, rise, t)
+    cy += dy
+    flash = e.flash > 0
+    if e.state == "hunting":   # (its pool of darkness on the ground is drawn by the renderer)
+        fx, fy = _feet(e, rise)
+        pygame.draw.ellipse(surf, (10, 8, 16), (fx - 12, fy - 4, 24, 8))
+    if hovered:
+        pygame.draw.circle(surf, BAD, (int(cx), int(cy)), 24, 2)
+    img = pygame.Surface((80, 90), pygame.SRCALPHA)
+    ox, oy = 40, 40
+    body = (230, 230, 245) if flash else (24, 16, 40)
+    for k in range(9):   # a churning knot of dark puffs
+        a = k / 9 * math.tau + e.anim_t * 0.8
+        r = 9 + 3 * math.sin(e.anim_t * 2 + k)
+        pygame.draw.circle(img, (*body, 200), (int(ox + math.cos(a) * 8), int(oy + math.sin(a) * 6)), int(r))
+    pygame.draw.circle(img, (*body, 235), (ox, oy), 12)
+    pygame.draw.circle(img, (110, 80, 170, 110), (ox, oy), 19, 2)   # a faint violet rim, so it reads on the dark
+    for k in range(4):   # ragged wisps trailing below
+        x = ox - 10 + k * 7
+        sway = math.sin(e.anim_t * 3 + k) * 3
+        pygame.draw.polygon(img, (*body, 170), [(x - 3, oy + 8), (x + 3, oy + 8), (x + sway, oy + 26 + (k % 2) * 5)])
+    glint = 0.75 + 0.25 * math.sin(e.anim_t * 1.7)
+    for d in (-5, 5):   # two pale eyes
+        pygame.draw.ellipse(img, (int(200 * glint), int(215 * glint), 255, 255), (ox + d - 2 + e.facing, oy - 4, 4, 6))
+    img.set_alpha(int(255 * alpha))
+    surf.blit(img, (cx - ox, cy - oy))
+    if e.targetable:
+        _hp_bar(surf, cx, cy - 22, e.hp / e.max_hp, BAD, 24)
+
+
+FUR, FUR_DARK, CLAW = (120, 88, 64), (78, 56, 40), (230, 220, 200)
+
+
+def _draw_burrower(surf, e, rise, t, hovered, dy=0):
+    """Underground: a mound of earth ploughing along, clods flying. Up: a big-clawed, near-blind mole-thing."""
+    fx, fy = _feet(e, rise)
+    fy += dy
+    flash = e.flash > 0
+    if hovered:
+        pygame.draw.ellipse(surf, BAD, (fx - 16, fy - 7, 32, 14), 2)
+    if e.state == "burrowing":   # just the mound it pushes up as it tunnels
+        churn = math.sin(e.anim_t * 10) * 1.5
+        pygame.draw.ellipse(surf, (16, 12, 20), (fx - 12, fy - 4, 24, 8))
+        mound = pygame.Rect(fx - 11, fy - 9 + churn, 22, 11)
+        pygame.draw.ellipse(surf, (255, 255, 255) if flash else (118, 88, 60), mound)
+        pygame.draw.ellipse(surf, (72, 52, 34), mound, 1)
+        for k in range(3):   # clods of earth thrown up behind it
+            a = (e.anim_t * 3 + k * 0.33) % 1
+            pygame.draw.circle(surf, (96, 70, 46), (int(fx - 8 * e.facing - a * 6 * e.facing), int(fy - 8 - a * 10 + a * a * 12)), 2)
+        pygame.draw.line(surf, (60, 44, 30), (fx + 9 * e.facing, fy - 2), (fx + 14 * e.facing, fy + 1), 1)   # cracks ahead
+        return
+    attacking = e.state == "attacking" and e.victim is not None
+    fur = (255, 255, 255) if flash else FUR
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 12, fy - 4, 24, 8))
+    if attacking:
+        fx += struggle_shake(t, 0.6) * 0.5
+    body = pygame.Rect(fx - 11, fy - 20, 22, 18)
+    pygame.draw.ellipse(surf, fur, body)
+    pygame.draw.ellipse(surf, FUR_DARK, body, 1)
+    head = (int(fx + 7 * e.facing), fy - 16)
+    pygame.draw.circle(surf, fur, head, 7)
+    pygame.draw.circle(surf, (240, 140, 150), (head[0] + 6 * e.facing, head[1] + 1), 3)   # pink snout
+    pygame.draw.circle(surf, (20, 16, 20), (head[0] + 2 * e.facing, head[1] - 3), 1)       # tiny eye
+    reach = math.sin(e.anim_t * 8) * 3
+    for d in (-1, 1):   # great digging claws
+        paw = (fx + (8 + reach) * e.facing + d * 3, fy - 8 + d * 3)
+        pygame.draw.circle(surf, fur, (int(paw[0]), int(paw[1])), 4)
+        for k in range(3):
+            pygame.draw.line(surf, CLAW, paw, (paw[0] + 6 * e.facing, paw[1] - 2 + k * 2), 1)
+    if e.targetable:
+        _hp_bar(surf, fx, fy - 30, e.hp / e.max_hp, BAD, 22)
+
+
 DRAWERS = {"zombie": _draw_zombie, "spider": _draw_spider, "bat": _draw_bat, "vampire": _draw_vampire,
            "wisp": _draw_wisp, "ghost": _draw_ghost, "eggsac": _draw_eggsac, "skeleton": _draw_skeleton,
-           "slime": _draw_slime, "slimeling": _draw_slime, "slimechunk": _draw_slime}
+           "slime": _draw_slime, "slimeling": _draw_slime, "slimechunk": _draw_slime,
+           "mimic": _draw_mimic, "golem": _draw_golem, "shade": _draw_shade, "burrower": _draw_burrower}
 DRAWERS.update({kind: DRAWERS[spec["look"]] for kind, spec in ENEMY_TYPES.items() if "look" in spec})   # bosses
 
 from . import boss_sprites   # noqa: E402  (bosses with sprites of their own; it borrows the helpers above)

@@ -602,3 +602,262 @@ def draw_archlich(s, e, rise, t, hovered, dy, pos):
 
 DRAWERS = {"broodmother": draw_broodmother, "greatbat": draw_behemoth, "bonetyrant": draw_bone_tyrant,
            "slimeking": draw_slime_king, "vampirelord": draw_count, "lich": draw_archlich}
+
+
+# ----- the deep: The Burrow Brothers, The Mountain, The Void Maw ------------------------------------------------------------
+def _poly(s, col, pts, edge, w=2):
+    pygame.draw.polygon(s, col, pts)
+    pygame.draw.polygon(s, edge, pts, w)
+
+
+BRO_LOOKS = [   # Dig, then Delve: fur, its shadow, belly, and what they wear on their heads
+    dict(fur=(130, 92, 62), dark=(82, 56, 36), belly=(176, 138, 104), hat="hardhat"),
+    dict(fur=(98, 102, 120), dark=(58, 60, 76), belly=(150, 152, 168), hat="goggles"),
+]
+
+
+@_drawer
+def draw_burrow_bros(s, e, rise, t, hovered, dy, pos):
+    """One of The Burrow Brothers, whichever is above ground: a hulking mole-man with shovel claws and a crown.
+    Dig wears a hard hat with its lamp lit; Delve, brass goggles. Fresh up out of the ground, he heaves himself
+    out of the hole; winding up, the claws go up."""
+    fx, ground = _feet(e, rise)
+    look = BRO_LOOKS[getattr(e, "up", 0)]
+    fur, dark, belly = look["fur"], look["dark"], look["belly"]
+    c = _charge(e)
+    if hovered:
+        _hovered(s, fx, ground, 110)
+    if e.state != "emerging":
+        _shadow(s, fx, ground, 96)
+    rising = min(1.0, getattr(e, "surface_t", 9.0) / 0.5)   # (just burst up: still climbing out of the hole)
+    top = ground + dy + int((1 - _ease_out(rising)) * 80)
+    clip = s.get_clip()
+    s.set_clip(pygame.Rect(0, 0, s.get_width(), ground + 2))   # (below ground: hidden)
+    step = math.sin(e.anim_t * 4) * 3 if _walking(e) else 0
+    for d, st in ((-1, step), (1, -step)):   # stubby legs
+        pygame.draw.ellipse(s, dark, (fx + d * 16 - 9, top - 14 - max(0, st), 18, 14))
+    body = pygame.Rect(fx - 30, top - 74, 60, 66)
+    pygame.draw.ellipse(s, dark, body.inflate(4, 4))
+    pygame.draw.ellipse(s, fur, body)
+    pygame.draw.ellipse(s, belly, (fx - 17, top - 60, 34, 46))
+    for k in range(5):   # shaggy fur along the flanks
+        pygame.draw.line(s, dark, (fx - 28 + k * 2, top - 60 + k * 8), (fx - 32 + k * 2, top - 54 + k * 8), 2)
+        pygame.draw.line(s, dark, (fx + 28 - k * 2, top - 60 + k * 8), (fx + 32 - k * 2, top - 54 + k * 8), 2)
+    head = (fx + 6, top - 80)
+    pygame.draw.circle(s, dark, head, 21)
+    pygame.draw.circle(s, fur, head, 19)
+    snout = pygame.Rect(head[0] + 6, head[1] - 2, 22, 14)   # long snout, pink nose
+    pygame.draw.ellipse(s, belly, snout)
+    pygame.draw.ellipse(s, dark, snout, 1)
+    pygame.draw.circle(s, (240, 140, 150), (snout.right - 2, snout.centery - 1), 5)
+    for d in (0, 5):   # buck teeth
+        pygame.draw.rect(s, (245, 240, 225), (snout.x + 6 + d, snout.bottom - 2, 4, 6))
+    for d in (-1, 1):   # whiskers
+        pygame.draw.line(s, dark, (snout.right - 6, snout.centery + d * 2), (snout.right + 8, snout.centery + d * 6), 1)
+    if look["hat"] == "goggles":   # Delve: brass goggles over little eyes
+        pygame.draw.line(s, (90, 70, 40), (head[0] - 19, head[1] - 6), (head[0] + 12, head[1] - 6), 4)
+        for gx in (head[0] - 4, head[0] + 8):
+            pygame.draw.circle(s, (200, 160, 70), (gx, head[1] - 6), 6)
+            pygame.draw.circle(s, (150, 220, 230), (gx, head[1] - 6), 4)
+            pygame.draw.circle(s, (255, 255, 255), (gx - 1, head[1] - 8), 1)
+        _crown(s, head[0] - 2, head[1] - 16, 20, 10)
+    else:   # Dig: a battered hard hat with its lamp lit, the crown jammed on top
+        for gx in (head[0] - 2, head[0] + 8):
+            pygame.draw.circle(s, (20, 14, 16), (gx, head[1] - 4), 2)
+        hat = pygame.Rect(head[0] - 20, head[1] - 22, 40, 18)
+        pygame.draw.ellipse(s, (240, 200, 40), hat)
+        pygame.draw.rect(s, (240, 200, 40), (head[0] - 24, head[1] - 9, 48, 5), border_radius=2)
+        pygame.draw.ellipse(s, (170, 130, 20), hat, 1)
+        _glow(s, (head[0] + 14, head[1] - 14), 8, (255, 240, 170), 140, over=True)
+        pygame.draw.circle(s, (255, 250, 210), (head[0] + 14, head[1] - 14), 3)
+        _crown(s, head[0] - 2, head[1] - 20, 20, 10)
+    lift = 46 * c   # the great shovel claws: out in front, raised overhead for a slam
+    swing = math.sin(e.anim_t * 4) * 3 if _walking(e) else 0
+    for d in (-1, 1):
+        paw = (fx + d * 26 + 14, top - 34 - lift + swing * d)
+        pygame.draw.line(s, dark, (fx + d * 20, top - 52), paw, 9)
+        pygame.draw.ellipse(s, belly, (paw[0] - 9, paw[1] - 7, 18, 14))
+        for k in range(4):
+            tip = (paw[0] + 12, paw[1] - 7 + k * 5)
+            pygame.draw.line(s, (235, 228, 210), (paw[0] + 5, paw[1] - 5 + k * 4), tip, 3)
+    s.set_clip(clip)
+    if rising < 1:   # the hole he's climbing out of, earth thrown up round it
+        pygame.draw.ellipse(s, (40, 26, 18), (fx - 34, ground - 8, 68, 16))
+        for k in range(7):
+            a = k / 7 * math.pi
+            pygame.draw.circle(s, (120, 88, 58), (int(fx + math.cos(a) * 38), int(ground - 4 + math.sin(a) * 3)), 5)
+
+
+ANCHOR.update({"burrowbros": 50, "mountain": 80, "voidmaw": 70})
+RISE_DEPTH.update({"burrowbros": 90, "mountain": 150})
+BAR_HEIGHT.update({"burrowbros": 116, "mountain": 152, "voidmaw": 140})
+
+
+MOUNTAIN_PLATES = 4   # (knocked off in this order: left shoulder, right shoulder, chest, brow)
+STONE, STONE_DARK, STONE_HI = (120, 118, 132), (66, 64, 78), (160, 158, 172)
+PLATE, PLATE_DARK, MOSS = (98, 96, 112), (52, 50, 64), (96, 140, 80)
+
+
+def _boulder(s, rect, col=STONE, dark=STONE_DARK):
+    r = pygame.Rect(rect)
+    pygame.draw.ellipse(s, col, r)
+    pygame.draw.ellipse(s, dark, r, 2)
+    pygame.draw.arc(s, STONE_HI, r.inflate(-r.w // 3, -r.h // 3).move(-r.w // 8, -r.h // 8), 1.6, 2.8, 2)
+
+
+def _plate(s, pts):
+    _poly(s, PLATE, pts, PLATE_DARK, 2)
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    for dx, dy in ((-4, -3), (4, 3)):
+        pygame.draw.circle(s, STONE_HI, (int(cx + dx), int(cy + dy)), 1)
+
+
+def _scar(s, pts, t):
+    """Where a plate was knocked off: bare stone, cracked and glowing."""
+    pulse = 0.6 + 0.4 * math.sin(t * 5)
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    glow = (255, int(140 + 60 * pulse), 70)
+    pygame.draw.lines(s, glow, False, [(cx - 8, cy - 5), (cx - 1, cy + 1), (cx - 5, cy + 7)], 2)
+    pygame.draw.lines(s, glow, False, [(cx + 6, cy - 6), (cx + 2, cy), (cx + 8, cy + 5)], 2)
+
+
+@_drawer
+def draw_mountain(s, e, rise, t, hovered, dy, pos):
+    """The Mountain: a towering golem of stacked boulders in stone plates. Each plate knocked off leaves a glowing
+    scar; the arms rise for a stomp."""
+    fx, ground = _feet(e, rise)
+    fy = ground + dy
+    c = _charge(e)
+    plates = getattr(e, "plates", MOUNTAIN_PLATES)
+    gone = MOUNTAIN_PLATES - plates
+    if hovered:
+        _hovered(s, fx, ground, 130)
+    if e.state != "emerging":
+        _shadow(s, fx, ground, 120)
+    step = math.sin(e.anim_t * 3) * 3 if _walking(e) else 0
+    for d, st in ((-1, step), (1, -step)):   # tree-trunk legs of stacked stone
+        _boulder(s, (fx + d * 22 - 12, fy - 26 - max(0, st), 24, 26))
+        _boulder(s, (fx + d * 20 - 14, fy - 46 - max(0, st) * 0.5, 28, 24))
+    sway = math.sin(e.anim_t * 3) * 2 if _walking(e) else 0
+    top = fy - int(4 * c)   # it rears up for a stomp
+    _boulder(s, (fx - 36, top - 106, 72, 64))   # the great torso
+    for d in (-1, 1):   # arms: boulder upon boulder, raised overhead as it winds up
+        lift = 40 * c
+        _boulder(s, (fx + d * 48 - 15, top - 100 - lift * 0.3, 30, 28))
+        _boulder(s, (fx + d * 54 - 12, top - 76 - lift * 0.9 + sway * d, 24, 24))
+        _boulder(s, (fx + d * 56 - 14, top - 54 - lift * 1.6 + sway * d, 28, 26))
+    shoulders = {-1: [(fx - 36, top - 108), (fx - 60, top - 102), (fx - 62, top - 86), (fx - 38, top - 84)],
+                 1: [(fx + 36, top - 108), (fx + 60, top - 102), (fx + 62, top - 86), (fx + 38, top - 84)]}
+    chest = [(fx - 24, top - 98), (fx + 24, top - 98), (fx + 20, top - 62), (fx, top - 54), (fx - 20, top - 62)]
+    for k, pts in enumerate((shoulders[-1], shoulders[1], chest)):
+        if gone > k:
+            _scar(s, pts, t)
+        else:
+            _plate(s, pts)
+    head = pygame.Rect(fx - 17, top - 132, 34, 30)
+    _boulder(s, head)
+    brow = [(fx - 17, top - 126), (fx + 17, top - 126), (fx + 14, top - 116), (fx - 14, top - 116)]
+    if gone > 3:
+        _scar(s, brow, t)
+    else:
+        _plate(s, brow)
+    eye = (255, 170, 80) if plates == 0 else _lerp((120, 230, 255), (255, 120, 90), c)
+    for d in (-7, 7):   # glowing eye slits
+        pygame.draw.rect(s, (20, 18, 30), (fx + d - 5, top - 114, 10, 5))
+        _glow(s, (fx + d, top - 112), 4, eye, 120, over=True)
+        pygame.draw.line(s, eye, (fx + d - 3, top - 112), (fx + d + 3, top - 112), 2)
+    for x, y, w in ((fx - 34, top - 104, 14), (fx + 6, top - 58, 10)):   # moss
+        pygame.draw.line(s, MOSS, (x, y), (x + w, y), 3)
+    for x, y, h in ((fx + 54, top - 104, 12), (fx - 52, top - 106, 10), (fx - 20, fy - 46, 9)):   # crystals
+        _poly(s, (150, 120, 255), [(x, y - h), (x + 3, y - h // 3), (x, y), (x - 3, y - h // 3)], (75, 60, 128), 1)
+    cr = [(fx - 18, top - 128), (fx - 16, top - 142), (fx - 9, top - 134), (fx - 2, top - 148), (fx + 5, top - 134),
+          (fx + 12, top - 144), (fx + 18, top - 128)]   # a crown of jagged rock, studded with crystal
+    _poly(s, (150, 140, 120), cr, (80, 72, 60), 2)
+    for x, y, col in ((fx - 2, top - 136, SAPPHIRE), (fx - 12, top - 132, (150, 120, 255)),
+                      (fx + 10, top - 133, (80, 220, 120))):
+        pygame.draw.circle(s, col, (x, y), 2)
+
+
+VOID, VOID_RIM, VIOLET = (14, 10, 28), (78, 58, 120), (175, 120, 255)
+# The Void Maw's eyes: (x, y from its feet in canvas px, radius). One opens at a time: the weak point.
+VOID_EYES = [(-36, -92, 6), (-12, -108, 5), (20, -104, 8), (42, -86, 5), (-48, -64, 5), (50, -52, 5),
+             (-4, -82, 5), (30, -76, 5)]
+
+
+def void_eye_screen(e, rise):
+    """Screen position and radius of the Void Maw's open eye, or None while they're all shut."""
+    if getattr(e, "eye", None) is None:
+        return None
+    fx, fy = _feet(e, rise)
+    ex, ey, r = VOID_EYES[e.eye]
+    k = e.draw_scale or 1
+    return fx + ex * k, fy + ey * k, r * k
+
+
+@_drawer
+def draw_void_maw(s, e, rise, t, hovered, dy, pos):
+    """The Void Maw: a mass of darkness rising out of its pool, tendrils lashing; one pale eye open at a time,
+    and a vast toothed maw that gapes as it winds up."""
+    fx, fy = _feet(e, rise)
+    fy += dy
+    c = _charge(e)
+    if hovered:
+        _hovered(s, fx, fy, 150)
+    _shadow(s, fx, fy, 146)
+    pool = pygame.Surface((160, 30), pygame.SRCALPHA)
+    pygame.draw.ellipse(pool, (6, 4, 14, 210), (0, 4, 160, 22))
+    pygame.draw.ellipse(pool, (*VIOLET, 70), (0, 4, 160, 22), 2)
+    s.blit(pool, (fx - 80, fy - 16))
+    for k, (bx, tip, ctrl) in enumerate(((-58, (-74, -46), (-72, -14)), (-40, (-62, -84), (-30, -40)),
+                                         (46, (70, -62), (66, -18)), (60, (76, -24), (78, -8)))):
+        wave = math.sin(e.anim_t * 2 + k * 1.7) * 6
+        pts = [(fx + bx, fy - 6), (fx + ctrl[0] + wave * 0.5, fy + ctrl[1]),
+               (fx + tip[0] + wave, fy + tip[1] - wave * 0.4)]
+        pygame.draw.lines(s, VOID_RIM, False, pts, 7)
+        pygame.draw.lines(s, VOID, False, pts, 5)
+        pygame.draw.circle(s, VOID_RIM, (int(pts[-1][0]), int(pts[-1][1])), 3)
+    heave = 0   # (the eyes are aimed at, so the mass doesn't bob)
+    mass = [(fx - 56, fy - 8), (fx - 62, fy - 56), (fx - 48, fy - 96), (fx - 22, fy - 122), (fx + 10, fy - 128),
+            (fx + 40, fy - 112), (fx + 58, fy - 78), (fx + 60, fy - 30), (fx + 52, fy - 8)]
+    _poly(s, VOID, mass, VOID_RIM, 3)
+    sheen = pygame.Surface(s.get_size(), pygame.SRCALPHA)
+    pygame.draw.ellipse(sheen, (60, 30, 110, 90), (fx - 40, fy - 116, 70, 60))
+    s.blit(sheen, (0, 0))
+    gape = 44 + int(20 * c)   # the maw gapes as it winds up
+    maw = pygame.Rect(fx - 40, fy - 44 - gape // 2, 84, gape)
+    pygame.draw.ellipse(s, (40, 6, 24), maw)
+    pygame.draw.ellipse(s, VOID_RIM, maw, 2)
+    pygame.draw.ellipse(s, (8, 2, 10), maw.inflate(-30, -18))
+    pygame.draw.ellipse(s, (120, 70, 190), maw.inflate(-56, -int(gape * 0.7)), 1)
+    for k in range(9):   # teeth round the rim
+        a = math.pi + (k + 0.5) / 9 * math.pi
+        x, y = maw.centerx + math.cos(a) * 40, maw.centery + math.sin(a) * gape / 2.2
+        _poly(s, (225, 220, 240), [(x - 3, y), (x + 3, y), (x, y + 8)], (120, 110, 150), 1)
+        a2 = (k + 0.5) / 9 * math.pi
+        x2, y2 = maw.centerx + math.cos(a2) * 40, maw.centery + math.sin(a2) * gape / 2.2
+        _poly(s, (225, 220, 240), [(x2 - 3, y2), (x2 + 3, y2), (x2, y2 - 8)], (120, 110, 150), 1)
+    open_eye = getattr(e, "eye", None)
+    for i, (ex, ey, r) in enumerate(VOID_EYES):
+        x, y = fx + ex, fy + ey + heave
+        if i == open_eye:   # wide open, glowing: the one place a blow lands properly
+            _glow(s, (x, y), r + 8, (220, 230, 255), 140, over=True)
+            pygame.draw.ellipse(s, (235, 240, 255), (x - r, y - r * 0.7, r * 2, r * 1.4))
+            pygame.draw.ellipse(s, VIOLET, (x - r * 0.45, y - r * 0.55, r * 0.9, r * 1.1))
+            pygame.draw.ellipse(s, (20, 10, 40), (x - 1, y - r * 0.4, 2, r * 0.8))
+        else:   # half-lidded
+            pygame.draw.ellipse(s, (200, 205, 230), (x - r, y - r * 0.5, r * 2, r))
+            pygame.draw.circle(s, (40, 20, 70), (int(x), int(y)), max(1, r // 2))
+            pygame.draw.rect(s, VOID, (x - r - 1, y - r, r * 2 + 2, r * 0.9))
+            pygame.draw.line(s, VOID_RIM, (x - r, y - r * 0.15), (x + r, y - r * 0.15), 1)
+    tx, ty = fx - 6, fy - 124   # a crown of black spikes lit violet from within
+    spikes = [(-22, 2), (-18, -16), (-11, -2), (-5, -24), (1, -3), (8, -20), (14, -2), (20, -12), (24, 4)]
+    _poly(s, (30, 22, 46), [(tx + dx, ty + dy) for dx, dy in spikes], VIOLET, 2)
+    for dx, dy in ((-5, -18), (8, -14), (-18, -10)):
+        _glow(s, (tx + dx, ty + dy), 5, VIOLET, 160)
+    pygame.draw.circle(s, (230, 200, 255), (int(tx + 1), int(ty - 6)), 2)
+
+
+NO_FLIP = {"voidmaw"}   # (its eyes are aimed at: it stays put, facing the same way)
+DRAWERS.update({"burrowbros": draw_burrow_bros, "mountain": draw_mountain, "voidmaw": draw_void_maw})
