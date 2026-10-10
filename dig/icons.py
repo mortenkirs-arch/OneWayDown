@@ -374,6 +374,12 @@ def draw_icon(surf, kind, c, s, col):
             pygame.draw.circle(surf, dark, (x + d * s * 0.25, y - s * 0.15), max(2, s * 0.17))
         for d in (-0.15, 0.15):
             pygame.draw.line(surf, dark, (x + d * s, y + s * 0.35), (x + d * s, y + s * 0.65), 2)
+    elif kind == "bone":
+        a, b = (x - s * 0.5, y + s * 0.5), (x + s * 0.5, y - s * 0.5)
+        pygame.draw.line(surf, col, a, b, max(3, int(s * 0.3)))
+        for ex, ey in (a, b):   # a pair of knobs at each end
+            for d in (-1, 1):
+                pygame.draw.circle(surf, col, (ex + d * s * 0.16, ey + d * s * 0.16), max(2, s * 0.22))
     elif kind == "bag":
         pygame.draw.circle(surf, col, (x, y + s * 0.2), s * 0.6)
         pygame.draw.polygon(surf, col, [(x - s * 0.3, y - s * 0.7), (x + s * 0.3, y - s * 0.7),

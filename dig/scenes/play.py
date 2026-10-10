@@ -12,6 +12,7 @@ SLAM_MIN_HOLD = 0.35    # hold at least this long for a slam (a quick click is j
 SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
 TOP_PANEL = pygame.Rect(16, 16, 420, 160)
 HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
+from ..achievements import ACHIEVEMENTS
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
 from ..camp import COLLAPSE_FADE, COLLAPSE_SECS
 from ..enemies import ENEMY_START_DEPTH, max_enemies
@@ -38,8 +39,11 @@ class PlayScene(Scene):
             Button((W - 178, 16, 160, 46), "Menu (Esc)", game.to_menu, size=26, color=(70, 64, 90)),
             Button((W - 360, 72, 170, 40), "Crew (C)", game.open_crew, size=24, color=(50, 96, 140)),
             Button((W - 178, 72, 160, 40), "Artifacts (A)", game.open_artifacts, size=24, color=(110, 70, 150)),
-            Button((W - 360, 122, 342, 38), "Base Camp (B)", game.open_camp, size=24, color=(120, 86, 50)),
+            Button((W - 360, 122, 170, 38), "Base Camp (B)", game.open_camp, size=24, color=(120, 86, 50)),
+            Button((W - 178, 122, 160, 38), "Achievements (H)", game.open_achievements, size=24,
+                   color=(150, 110, 40)),
         ]
+        self.banner = None   # [achievement, real time it went up]: the one being announced
 
     def handle(self, event):
         for b in self.buttons:
@@ -56,6 +60,8 @@ class PlayScene(Scene):
                 self.game.open_artifacts()
             elif event.key == pygame.K_b:
                 self.game.open_camp()
+            elif event.key == pygame.K_h:
+                self.game.open_achievements()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.world.reveals and self.reveal_rect().collidepoint(event.pos):
                 if self.reveal_close_rect().collidepoint(event.pos):   # only the X closes the found card...
@@ -66,6 +72,8 @@ class PlayScene(Scene):
             if self.world.collapse is not None:   # the shaft's coming down: nothing left to dig or fight
                 return
             self.world.combo_click()   # every click counts towards the combo, whatever it lands on
+            if "claygolem" in self.world.camp:   # ...and towards Mitts' next leap
+                self.world.mitts_click(self.mitts_target(event.pos))
             self.world.combo_held = True   # ...and holding the button keeps it from running down
             if self.world.lv("slam"):   # Charged Slam: holding the button anywhere on the play area charges
                 self.charge = time.time()
@@ -107,6 +115,13 @@ class PlayScene(Scene):
             self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD),
                             target=pick_enemy(self.world, pos, time.time()))
 
+    def mitts_target(self, pos):
+        """Where Mitts should come down for a click at `pos`: the monster under it, or else the block."""
+        enemy = pick_enemy(self.world, pos, time.time())
+        if enemy:
+            return self.world.cell_of(enemy.x, enemy.y)
+        return self.slam_target(pos)
+
     def slam_target(self, pos):
         """The block under the cursor, or failing that the block nearest to it on screen."""
         hit = pick_block(self.world, pos)
@@ -138,11 +153,44 @@ class PlayScene(Scene):
             self.draw_notice(surf, w)
         if w.reveals:
             self.draw_reveal(surf, w, mouse)
+        self.draw_achievement_banner(surf, w)
         if w.collapse is not None and w.collapse > COLLAPSE_SECS - COLLAPSE_FADE:   # the dust settles... to black
             fade = pygame.Surface(surf.get_size())
             fade.fill((0, 0, 0))
             fade.set_alpha(int(255 * min(1.0, (w.collapse - (COLLAPSE_SECS - COLLAPSE_FADE)) / COLLAPSE_FADE)))
             surf.blit(fade, (0, 0))
+
+    BANNER_SECS = 4.0   # an achievement's banner stays up this long (less while others are waiting behind it)
+
+    def draw_achievement_banner(self, surf, w):
+        """ACHIEVEMENT UNLOCKED: a banner sliding up at the bottom of the screen, one achievement at a time."""
+        now = time.time()
+        if self.banner:
+            key, since = self.banner
+            secs = self.BANNER_SECS if not w.achievement_queue else 2.0
+            if now - since > secs:
+                self.banner = None
+        if self.banner is None:
+            if not w.achievement_queue:
+                return
+            self.banner = [w.achievement_queue.pop(0), now]
+        key, since = self.banner
+        a = ACHIEVEMENTS[key]
+        legendary = a.get("legendary", False)
+        color = (255, 196, 70) if legendary else (120, 200, 255)
+        age = now - since
+        secs = self.BANNER_SECS if not w.achievement_queue else 2.0
+        slide = min(1.0, age / 0.25, max(0.0, (secs - age) / 0.25))   # in and out
+        box = pygame.Rect(0, 0, 460, 70)
+        box.midbottom = (W // 2 - 10, H - 18 + int((1 - slide) * 100))   # (clear of the HUD and the hints)
+        draw_panel(surf, box)
+        pygame.draw.rect(surf, color, box, 2, border_radius=10)
+        ic = (box.x + 38, box.centery)
+        pygame.draw.circle(surf, tuple(c // 3 for c in color), ic, 24)
+        draw_icon(surf, a["icon"], ic, 17, color)
+        heading = "LEGENDARY ACHIEVEMENT!" if legendary else "ACHIEVEMENT UNLOCKED"
+        draw_text(surf, self.fonts, heading, 18, color, (box.x + 74, box.y + 18), "midleft")
+        draw_text(surf, self.fonts, a["name"], 28, TEXT, (box.x + 74, box.y + 44), "midleft")
 
     REVEAL_W = 250   # the found-artifact notification: a slim card down the left side, beside the board
 
@@ -382,7 +430,7 @@ class PlayScene(Scene):
         draw_text(surf, f, f"{len(w.current)}/{GRID * GRID} left", 24, MUTED, (420, 72), "topright")
         camp = self.buttons[4]
         locked = not w.expedition and not w.camp_ready   # (no camp until The Void Maw has fallen once)
-        camp.text = "Base Camp  -  locked till 100m" if locked else "Base Camp (B)"
+        camp.text = "Camp - 100m" if locked else "Base Camp (B)"
         camp.color = (64, 60, 72) if locked else (120, 86, 50)
         for b in self.buttons:
             b.draw(surf, f, mouse)

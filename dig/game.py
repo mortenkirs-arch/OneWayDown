@@ -11,7 +11,7 @@ from .biomes import BIOMES, biome_at
 from .appicon import set_app_icon
 from .audio import Audio
 from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
-from .scenes import ArtifactScene, CampScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
+from .scenes import AchievementScene, ArtifactScene, CampScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
 from .ui import Fonts
 from .world import World
 
@@ -51,6 +51,7 @@ class Game:
             "upgrades": UpgradeScene(self),
             "crew": CrewScene(self),
             "artifacts": ArtifactScene(self),
+            "achievements": AchievementScene(self),
             "settings": SettingsScene(self),
             "slots": SlotScene(self),
             "camp": CampScene(self),
@@ -146,6 +147,10 @@ class Game:
         """Base Camp from the dig: a look round between visits (or, before you've ever made camp, a locked teaser)."""
         if self.world:
             self.switch("camp")
+
+    def open_achievements(self):
+        if self.world:
+            self.switch("achievements")
 
     def open_artifacts(self):
         if self.world:

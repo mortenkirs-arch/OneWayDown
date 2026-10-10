@@ -11,13 +11,13 @@ import time
 
 import pygame
 
-from ..camp import EXPEDITION_DEPTH, HIRES, TENTS, hireable
+from ..camp import EXPEDITION_DEPTH, HIRES, ITEMS, TENTS, hireable, open_items
 from ..config import GOLD, GOOD, H, MUTED, TEXT, W
 from ..effects import Particle
 from ..icons import draw_icon, draw_padlock
 from ..iso import draw_cube, iso, origin_at, point_in_poly
 from ..miners import CAMP_LOOKS, Miner
-from ..sprites import draw_miner
+from ..sprites import draw_ledger_desk, draw_miner, draw_pet_chest
 from ..ui import Button, draw_glow, draw_panel, draw_text, wrap_text
 from ..upgrades import BRANCHES
 from ..util import fmt, shade
@@ -39,6 +39,7 @@ SPROUTS = [(2.9, 4.4), (3.3, 6.9), (6.8, 3.3), (7.2, 5.9), (1.2, 3.6), (5.6, 2.9
 STALAGMITES = [(2.8, 0.35, 1.0), (6.1, 0.4, 1.3), (0.35, 5.6, 0.9), (0.4, 7.1, 1.2)]
 GLOWS = {"teal": ((90, 230, 210), (36, 120, 118)), "violet": ((190, 130, 255), (92, 60, 142)),
          "amber": ((255, 190, 90), (140, 90, 40))}
+ITEM_SCALE = 1.6                            # the camp's items are drawn this much bigger than on the dig
 TENT_HALF = (0.8, 0.62)                     # a tent's footprint (half its length and width, in tiles)...
 TENT_HIGH = 1.45                            # ...and the height of its ridge (in block heights)
 PLAIN = (238, 234, 224)                     # an unclaimed tent's bare canvas
@@ -50,7 +51,7 @@ STYLES = {   # a tent once its hire has moved in: canvas, trim, the emblem on it
     "combat":  dict(canvas=(182, 58, 52), trim=(240, 240, 235), icon="target"),
 }
 LORE = "The Void Maw's death-throes brought the shaft down - but the crew scrambled clear, into the cavern where you " \
-       "made camp. Each of the five tents can take on a hire who stays with you for good: one new face per visit."
+       "made camp. One thing to take per visit, for good: a hire for an empty tent, or something of theirs once it's theirs."
 
 
 VIEW_LORE = "The cavern where you made camp, at the bottom of the shaft. Your people go down with every " \
@@ -128,7 +129,7 @@ class CampScene(Scene):
         self.backdrop = None
         self.halos = {}            # (radius, colour, strength) -> a glow, cached
         p = PANEL_RECT
-        self.hire_button = Button((p.x + 20, p.bottom - 70, p.w - 40, 52), "", self.hire, size=28,
+        self.hire_button = Button((p.x + 20, p.bottom - 70, p.w - 40, 52), "", self.choose, size=28,
                                   color=(60, 130, 80))
         self.go_button = Button((p.x, p.bottom + 14, p.w, 56), "", self.set_off, size=28, color=(70, 100, 160))
         self.mode = "visit"        # visit: the shaft just came down (hire, then set off) | view: a look round from the
@@ -139,7 +140,8 @@ class CampScene(Scene):
         self.mode = "visit" if w.camp_ready else ("view" if w.expedition else "locked")
         self.hired = w.visit_hire if self.mode == "visit" else None   # (hired already, then the game was closed?)
         open_tents = [k for k, t in TENTS.items() if t["hire"] in hireable(w.camp)]
-        self.selected = open_tents[0] if open_tents else "crew"
+        items = open_items(w.camp, w.camp_items)
+        self.selected = open_tents[0] if open_tents else (items[0] if items and self.mode == "visit" else "crew")
         self.people = {}
         for hire in w.camp:   # whoever's already with you, as they are in the crew
             them = next((m for m in w.miners if m.role == hire), None)
@@ -159,6 +161,31 @@ class CampScene(Scene):
         return m
 
     # ----- actions --------------------------------------------------------------------------------------------
+    def choosing(self):
+        """Still to make this visit's pick (a hire, or one of the items)?"""
+        w = self.world
+        return self.mode == "visit" and not self.hired and bool(hireable(w.camp) or open_items(w.camp, w.camp_items))
+
+    def choose(self):
+        if self.selected in ITEMS:
+            self.take_item()
+        else:
+            self.hire()
+
+    def take_item(self):
+        key, w = self.selected, self.world
+        if self.mode != "visit" or self.hired or key not in open_items(w.camp, w.camp_items):
+            return
+        self.hired = key
+        w.take_camp_item(key)
+        self.game.save()   # (yours for good: closing the game before setting off can't lose it)
+        with origin_at(ORIGIN):
+            px, py = iso(*ITEMS[key]["pos"], 1.0)
+        color = BRANCHES[ITEMS[key]["tent"]]["color"]
+        for _ in range(40):   # a puff as it becomes real
+            self.particles.append(Particle(px, py - 14, random.choice([GOLD, (255, 255, 255), color]), big=True))
+        self.game.toast = (f"The {ITEMS[key]['name']} is yours - for good!", 3.5)
+
     def hire(self):
         tent = TENTS[self.selected]
         if self.mode != "visit" or self.hired or tent["hire"] not in hireable(self.world.camp):
@@ -188,13 +215,30 @@ class CampScene(Scene):
         if self.hire_button.handle(event) or self.go_button.handle(event):
             return
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            tent = self.tent_under(event.pos)
-            if tent:
-                self.selected = tent
+            pick = self.item_under(event.pos) or self.tent_under(event.pos)
+            if pick:
+                self.selected = pick
         elif event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE):
             self.set_off()
         elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_b) and self.mode != "visit":
             self.game.switch("play")
+
+    def shown_items(self):
+        """{item: faded?} - the camp's items on the board: yours, solid; while you're choosing, the ones you could
+        take, faded (gone again once you've chosen)."""
+        w = self.world
+        shown = {k: False for k in w.camp_items}
+        if self.choosing():
+            shown.update({k: True for k in open_items(w.camp, w.camp_items)})
+        return shown
+
+    def item_under(self, pos):
+        for key in self.shown_items():
+            with origin_at(ORIGIN):
+                x, y = iso(*ITEMS[key]["pos"], 1.0)
+            if abs(pos[0] - x) < 32 and y - 70 < pos[1] < y + 12:
+                return key
+        return None
 
     def tent_under(self, pos):
         for tent, polys in self.tent_polys.items():
@@ -241,14 +285,14 @@ class CampScene(Scene):
                 m.anim = max(0.0, math.sin(t * 1.3 + k)) if busy else 0.0
             m.task = "forging" if busy and m.role == "blacksmith" else "idle"
             if m.role == "claygolem":   # (practising its slam on the turf, fists up and down)
-                m.task, m.anim = ("winding", (t * 0.7) % 1) if busy else ("plodding", 0.0)
+                m.task, m.anim = ("leaping", (t * 0.7) % 1) if busy else ("idle", 0.0)
 
     # ----- drawing -------------------------------------------------------------------------------------------
     def draw(self, s):
         w, f = self.world, self.fonts
         t = time.time()
         mouse = pygame.mouse.get_pos()
-        hovered = self.tent_under(mouse)
+        hovered = self.item_under(mouse) or self.tent_under(mouse)
         s.blit(self.get_backdrop(), (0, 0))
         draw_text(s, f, "BASE CAMP", 54, GOLD, (24, 18))
         if self.mode == "locked":
@@ -364,6 +408,9 @@ class CampScene(Scene):
             items.append((cx + cy + 0.4, "tent", tent))
         for tent, m in self.people.items():
             items.append((m.x + m.y, "person", m))
+        for key, faded in self.shown_items().items():
+            x, y = ITEMS[key]["pos"]
+            items.append((x + y, "item", (key, faded)))
         items.sort(key=lambda it: it[0])
         self.tent_polys = {}
         for _, kind, data in items:
@@ -378,8 +425,34 @@ class CampScene(Scene):
                     self.draw_fire(s, t)
             elif kind == "tent":
                 self.draw_tent(s, data, t, hovered == data, self.selected == data)
+            elif kind == "item":
+                self.draw_item(s, *data, t, hovered == data[0], self.selected == data[0])
             else:
                 draw_miner(s, self.fonts, data, 0.0, t)
+
+    def item_art(self, s, key, x, y, t, faded):
+        """One of the camp's items, standing at (x, y) on screen (its feet)."""
+        if key == "chompers":   # dozing by the tent - and now and then, a big yawn
+            yawn = 0.0 if faded else max(0.0, math.sin(t * 0.6)) ** 6
+            draw_pet_chest(s, x, y, t, yawn)
+        else:
+            draw_ledger_desk(s, x, y, t, lit=not faded)
+
+    def draw_item(self, s, key, faded, t, hovered, selected):
+        """A camp item: yours, drawn as it is; one you could take, a faded ghost of it on a glowing ring."""
+        x, y = iso(*ITEMS[key]["pos"], 1.0)
+        color = BRANCHES[ITEMS[key]["tent"]]["color"]
+        if faded or selected:
+            ring = pygame.Rect(0, 0, 76, 28)
+            ring.center = (x, y)
+            pulse = 0.5 + 0.5 * math.sin(t * 3)
+            pygame.draw.ellipse(s, shade(color, 0.6 + 0.4 * pulse) if faded else color, ring, 2)
+        art = pygame.Surface((80, 80), pygame.SRCALPHA)   # (drawn on its own, scaled up - and if it's not yours
+        self.item_art(art, key, 40, 66, t, faded)          # yet, faded right back)
+        art = pygame.transform.scale(art, (int(80 * ITEM_SCALE), int(80 * ITEM_SCALE)))
+        if faded:
+            art.set_alpha(190 if hovered or selected else int(95 + 30 * math.sin(t * 2.5)))
+        s.blit(art, (x - 40 * ITEM_SCALE, y - 66 * ITEM_SCALE))
 
     def draw_stream(self, s, t):
         """The underground stream: one smooth ribbon of dark water between wet banks, ripples running down it,
@@ -611,14 +684,25 @@ class CampScene(Scene):
             pygame.draw.circle(s, (255, 226, 150), (lx, ly - 30), 4)
 
     def draw_labels(self, s, hovered):
-        """Each tent's name on a little plate under it."""
+        """Each open tent's name on a little plate under it, while there's a hire to choose (a tent that's been
+        taken has its owner's colours to go by instead). Once this visit's hire is made, or just looking round from
+        the dig, only the tent under the mouse keeps its plate."""
         f = self.fonts
+        choosing = self.mode == "locked" or self.choosing()
+        plates = []
         for tent, spec in TENTS.items():
+            if tent != hovered and (not choosing or tent in self.people):
+                continue
             cx, cy = spec["pos"]
+            plates.append((tent, spec["name"], BRANCHES[tent]["color"], (cx + 0.6, cy + 0.7)))
+        for key, faded in self.shown_items().items():   # (the items you could take, too)
+            if key == hovered or (faded and choosing):
+                x, y = ITEMS[key]["pos"]
+                plates.append((key, ITEMS[key]["name"], BRANCHES[ITEMS[key]["tent"]]["color"], (x + 0.25, y + 0.25)))
+        for key, name, color, at in plates:
             with origin_at(ORIGIN):
-                x, y = iso(cx + 0.6, cy + 0.7, 1.0)
-            color = BRANCHES[tent]["color"]
-            img = f[18].render(spec["name"], True, (255, 255, 255) if tent in (hovered, self.selected) else TEXT)
+                x, y = iso(*at, 1.0)
+            img = f[18].render(name, True, (255, 255, 255) if key in (hovered, self.selected) else TEXT)
             box = img.get_rect(midtop=(x, y + 4)).inflate(12, 4)
             pygame.draw.rect(s, (20, 16, 28), box, border_radius=6)
             pygame.draw.rect(s, color, box, 1, border_radius=6)
@@ -641,6 +725,12 @@ class CampScene(Scene):
         w, f = self.world, self.fonts
         p = PANEL_RECT
         draw_panel(s, p)
+        btn = self.hire_button
+        if self.selected in ITEMS:
+            self.draw_item_panel(s, t)
+            btn.draw(s, f, mouse)
+            self.draw_footer(s, mouse, t)
+            return
         tent = self.selected
         spec = TENTS[tent]
         color = BRANCHES[tent]["color"]
@@ -678,11 +768,54 @@ class CampScene(Scene):
                 camped = EXPEDITION_DEPTH * (w.expedition + 1)
                 btn.text, btn.enabled = f"Hire at your next visit ({camped}m)", False
             elif self.hired:
-                btn.text, btn.enabled = "One new hire per visit", False
+                btn.text, btn.enabled = "One new pick per visit", False
             else:
                 btn.text, btn.enabled = f"Hire {name}", True
                 draw_glow(s, btn.rect, t)
         btn.draw(s, f, mouse)
+        self.draw_footer(s, mouse, t)
+
+    def draw_item_panel(self, s, t):
+        """The panel for one of the camp's items: what it is, what it does, and the button to take it."""
+        w, f = self.world, self.fonts
+        p, key = PANEL_RECT, self.selected
+        item = ITEMS[key]
+        tent = item["tent"]
+        color = BRANCHES[tent]["color"]
+        owner = CAMP_LOOKS[TENTS[tent]["hire"]]["name"]
+        pygame.draw.rect(s, color, (p.x, p.y + 14, 5, 60))
+        draw_text(s, f, item["name"], 32, TEXT, (p.x + 22, p.y + 16))
+        draw_text(s, f, f"{TENTS[tent]['name']}  -  {owner}'s", 18, color, (p.x + 24, p.y + 52))
+        y = p.y + 84
+        art = pygame.Surface((64, 60), pygame.SRCALPHA)   # (a big picture of it)
+        self.item_art(art, key, 32, 52, t, False)
+        s.blit(pygame.transform.scale(art, (128, 120)), (p.x + 4, y - 14))
+        ours = key in w.camp_items
+        status = ("Just taken!" if key == self.hired else "Yours") if ours else "Up for grabs"
+        draw_text(s, f, status, 22, GOOD if ours else MUTED, (p.x + 140, y + 40))
+        y += 120
+        for line in wrap_text(f[20], item["blurb"], p.w - 40):
+            draw_text(s, f, line, 20, MUTED, (p.x + 20, y))
+            y += 21
+        y += 8
+        for line in item["does"]:
+            draw_text(s, f, f"- {line}", 20, TEXT, (p.x + 24, y))
+            y += 22
+        btn = self.hire_button
+        if ours:
+            btn.text, btn.enabled = "Yours, for good", False
+        elif self.mode != "visit":
+            btn.text, btn.enabled = "Take it at your next visit", False
+        elif self.hired:
+            btn.text, btn.enabled = "One new pick per visit", False
+        else:
+            btn.text, btn.enabled = f"Take the {item['name']}", True
+            draw_glow(s, btn.rect, t)
+
+    def draw_footer(self, s, mouse, t):
+        """Under the panel: the lifetime record, and the button to set off (or go back to the dig)."""
+        w, f = self.world, self.fonts
+        p = PANEL_RECT
         self.draw_record(s)
         go = self.go_button
         if self.mode == "view":
@@ -690,7 +823,7 @@ class CampScene(Scene):
             go.draw(s, f, mouse)
             return
         go.text = f"Set off: expedition {w.expedition + 2}, from {w.display_depth + 1}m"
-        if self.hired or not hireable(w.camp):
+        if not self.choosing():
             draw_glow(s, go.rect, t)
         go.draw(s, f, mouse)
         draw_text(s, f, "The same 100m again - no tougher - with your camp along", 18, MUTED,

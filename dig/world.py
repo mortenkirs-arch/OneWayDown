@@ -3,11 +3,13 @@ import math
 import random
 import time
 
+from .achievements import (ACHIEVEMENTS, CHECKED, HIRE_UPGRADES, QUICK_KILL_SECS, SPEED_DEMON_SECS, new_feats,
+                           new_run)
 from .artifacts import (ARTIFACT_CHANCE, ARTIFACT_MIN_DEPTH, ARTIFACTS, COMMON, FIRST_ARTIFACT_BY, STAT_KIND,
                         TROPHY_OF)
 from .biomes import biome_at, block_color
 from .blocks import BLOCKS, DEEP_ROCK_FROM, HP_GROWTH, Block, crack_share, generate_layer, layer_value
-from .camp import (CAMP_ROLES, HIRES, CLIMB_STYLES, COLLAPSE_SECS, CRUMBLE_FROM, CRUMBLE_SPREAD, EXPEDITION_DEPTH,
+from .camp import (CAMP_ROLES, ITEMS, HIRES, CLIMB_STYLES, COLLAPSE_SECS, CRUMBLE_FROM, CRUMBLE_SPREAD, EXPEDITION_DEPTH,
                    ROLE_CLIMB, ROPE_DROP)
 from .config import BAD, GOLD, GOLD_HUD_COIN, GOOD, GRID, TEXT, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS, Bomb
@@ -24,14 +26,15 @@ from .enemies import (ELITE_HP, boss_minion_cap, boss_minion_mult,
                       RALLY_TOUGH, SHIELD_MAX, SHIELD_PER_WISP, WEB_SECS, WEB_SLOW, Enemy, boss_for, choose_kind,
                       crew_hp_at, elite_chance,
                       edge_cells, max_enemies, spawn_interval,
-                      GOLEM_ARMOUR, SHADE_RADIUS, SHADE_SLOW, BRO_MOUND_SPEED, BRO_NAMES, BRO_SURFACE_RADIUS,
-                      BRO_SWAP, MOUNTAIN_ARMOUR, MOUNTAIN_HEAVE,
+                      ELITE_GRIP, GOLEM_ARMOUR, GRIP_FROM, SHADE_DPS, SHADE_RADIUS, SHADE_SLOW,
+                      BRO_MOUND_SPEED, BRO_NAMES, BRO_SURFACE_RADIUS,
+                      BRO_PEEK_CHANCE, BRO_PEEK_SECS, BRO_SWAP, MOUNTAIN_ARMOUR, MOUNTAIN_HEAVE,
                       VOID_EYE, VOID_EYE_OPEN, VOID_EYE_SHUT, VOID_GLANCE, VOID_BITE, VOID_BITE_RADIUS, VOID_INHALE_EVERY, VOID_INHALE_PULL, VOID_INHALE_RADIUS,
                       VOID_INHALE_SECS, VOID_POOL_DRAIN, VOID_POOL_EVERY,
                       VOID_POOL_SECS, VOID_POOLS)
 from .iso import iso
-from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
-                           STEAM_SECS, WHETSTONE_POS)
+from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_EVERY, FEMUR_SECS, MITTS_CLICKS, ROCK_SECS,
+                           SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .miners import (CAMP_LOOKS, CRIT_ANIM_SECS, MAX_LEVEL, ROLES, Miner, base_name, level_mult, new_stats, numbered_name,
                      xp_to_next)
 from .sprites import bomb_fuse_tip, enemy_anchor
@@ -67,14 +70,23 @@ HERO_STRIKE = 0.25           # ...and each rescue blow takes this share of a mon
 HERO_SWING = 0.6             # ...this often...
 HERO_RESCUE_RANGE = 2.5      # ...for anyone grabbed this close (further off, they keep digging)
 FORGE_WORK = 1.6             # Goblin Blacksmith: seconds hammering a pick...
-FORGE_SECS = 40.0            # ...which then stays reforged this long...
-FORGE_BOOST = 0.25           # ...hitting this much harder (times the goblin's level bonus: up to +50%)
-ARCHER_DRAW = 1.0            # Archer: seconds between arrows...
-ARCHER_SHARE = 0.10          # ...each taking this share of a monster's max health (times the level bonus)...
+FORGE_SECS = 40.0            # ...which then stays explosive this long: every hit also blasts...
+FORGE_BLAST = 0.15           # ...the 8 blocks round it for this share of the hit (times the goblin's level bonus)...
+FORGE_BELOW = 0.10           # ...and cracks the 3x3 underneath for this share (never breaking them, like Deep Strike)
+FORGE_FX_GAP = 0.35          # (a digger's blasts show at most this often: a late crew swings dozens of times a second)
+ARCHER_DRAW = 0.5            # Archer: seconds between arrows, each hitting like one of your clicks on a monster
+                             # (Executioner's minimum and all) times the archer's level bonus: up to 2x...
 ARCHER_RANGE = 5.0           # ...from up to this far away
 ARROW_SECS = 0.3             # (an arrow's flight)
-MITTS_WINDUP = 0.9           # Clay Golem: seconds raising its fists before a slam...
-MITTS_EVERY = 2.5            # ...and resting after one before the next (plus however long it takes to plod over)
+CHOMP_HOP = 0.7              # Chompers (the camp's Friendly Mimic): every CHOMP_EVERY seconds it hops off to gobble
+                             # a block, this long in the air getting there...
+CHOMP_PAYOUT = 2.0           # ...and coughs up this many times what the block was worth
+LEDGER_CHANCE = 1 / 6        # Crooked Ledger: the share of upgrades bought that never make it onto the page (free)
+MITTS_LEAP = 0.45            # Clay Golem: every MITTS_CLICKS of your clicks, Mitts leaps to where you clicked,
+                             # this long in the air, fists up, and comes down in a slam...
+MITTS_IDLE = 10.0            # ...left to himself (no clicks of yours this long), he goes anyway, to the thick of it...
+MITTS_CRACK = 0.15           # ...levelling the block under him and taking this share of the 8 round it (times his
+                             # level bonus; deep rock only cracks: blocks.crack_share) - or your slam, if that's more
 TAX_BLOCKS = 1.0             # Tax Collector: each crew member pays this many average blocks' worth of gold...
 TAX_DEEPER = 50              # ...and one more for every this many metres down (a bigger crew, bigger takings),
                              # times his level bonus...
@@ -104,6 +116,7 @@ ROCK_SHARE = 0.0015          # layer cleared but the boss still up: each rock a 
 ROCK_EVERY = (2.0, 3.0)      # ...one every this many seconds (random in the range)...
 ROCK_RANGE = 6.0             # ...from no further than this (tiles)
 XP_PER_ROCK = 0.25
+FEMUR_SHARE = 0.35           # Tyrant's Femur: each bone takes this share of the grabbing monster's max health
 SKIRMISH_KEEP_AWAY = 2.6     # diggers keep at least this far from the boss (clear of its slam)
 MAX_FLYING_COINS = 40
 MILESTONE_EVERY = 5          # every 5th metre is a milestone with a bigger clear bonus (see Surveyor's Contract)
@@ -197,7 +210,16 @@ class World:
         self.collapse = None               # seconds since the shaft started coming down (The Void Maw fell), or None
         self.crumble = {}                  # ...and when each cell of the floor gives way
         self.camp_ready = False            # the shaft has come down: time to build at camp
-        self.visit_hire = None             # ...and who's been taken on at camp this visit (one per visit)
+        self.visit_hire = None             # ...and who's been taken on at camp this visit (one per visit; or an item)
+        self.camp_items = []               # the camp's items taken so far (camp.ITEMS: they survive every reset too)
+        self.achievements = []             # achievements earned, in order (achievements.py: kept for good)...
+        self.achievement_queue = []        # ...those still to be announced on the dig...
+        self.feats = new_feats()           # ...counts of the things they need that the lifetime record doesn't keep...
+        self.run = new_run(0.0)            # ...and how this expedition is going, for the legendary ones
+        self.achieve_timer = 0.0           # (the checks run about once a second)
+        self.boss_fight_start = 0.0        # game clock when the boss on the board rose (Untouchable)
+        self.chomper = None                # Chompers, the camp's tame Mimic, on the dig: {x, y, timer, hop, chomp_at}
+        self.ledger_lost = False           # the Crooked Ledger just lost an upgrade's receipt (for the upgrades screen)
         self.boss_return = 0.0             # seconds until The Void Maw rises again, after it retreated
         self.lifetime = dict(blocks=0, gold=0.0, monsters=0, bosses=0, expeditions=0, deepest=0)
         self.steam = None                                       # ...and seconds since it last vented (the steam fx)
@@ -226,6 +248,8 @@ class World:
         self.ballista_aim = 0.0                                 # direction the ballista is pointing (radians)
         self.bolts = []                                         # [start (x, y), enemy, age] in flight
         self.rocks = []                                         # [thrower, start (x, y), boss, age] in flight
+        self.femur_throws = []                                  # [thrower, start (x, y), monster, age]: Tyrant's Femur
+        self.femur_timer = 0.0                                  # seconds until the crew can throw the next bone
         self.bone_throws = []                                   # [start (x, y), target miner, age]: Bone Tyrant
         self.chest_fx = []                                      # [x, y, age] treasure chests bursting open
         self.spike_fx = []                                      # [cell, age] Booby Traps springing
@@ -278,10 +302,13 @@ class World:
         w = cls()
         w.expedition = old.expedition + 1
         w.camp = list(old.camp)
+        w.camp_items = list(old.camp_items)
+        w.achievements, w.feats = list(old.achievements), old.feats
         w.graveyard = old.graveyard
         w.lifetime = dict(old.lifetime)
         w.lifetime["expeditions"] = w.expedition
         w.clock = old.clock
+        w.run = new_run(w.clock)
         w.refresh_artifacts()
         w.depth = 1   # (just below the camp: 101m)
         w.current, w.next = w.new_layer(1), w.new_layer(2)
@@ -537,6 +564,7 @@ class World:
         if mimic.state != "lurking":
             return
         mimic.state = "hunting"
+        self.achieve("mimic")
         px, py = enemy_anchor(mimic, self.rise, time.time())
         poles = self.lv("poles") if not mimic.boss else 0   # Ten-Foot Poles: prodded from a safe distance
         self.floaters.append(Floater("Prodded - it's a MIMIC!" if poles else "It's a MIMIC!", px, py - 30,
@@ -618,7 +646,7 @@ class World:
         boss = self.boss()
         if boss is None or boss.kind != "zombieking" or self.depth != 10 or boss.state == "emerging":
             return None
-        per_click = self.enemy_hit_damage(boss, self.monster_hit_damage()) * self.art_mult("boss_dmg")
+        per_click = self.enemy_hit_damage(boss, self.monster_hit_damage())
         clicks = math.ceil(boss.hp / per_click)
         if clicks <= COMBAT_TIP_CLICKS:
             return None
@@ -646,6 +674,7 @@ class World:
         cell = (GRID // 2, GRID // 2)
         self.enemies.append(Enemy(kind, self.depth, cell, self.column_height(*cell), delay=1.2,
                                   hp_mult=self.art_mult("enemy_hp")))
+        self.boss_fight_start = self.clock
         spec = ENEMY_TYPES[kind]
         self.announcement = [f"{the(spec['name']).upper()} {spec['arrival'].upper()}!", 4.0]
         self.notice = [f"Boss! Defeat {the(spec['name'])} within {int(self.boss_time_limit())}s for a trophy", 6.0, ""]
@@ -850,10 +879,16 @@ class World:
             boss.mound = [min(GRID - 0.5, boss.x + 2.5), boss.y]
         boss.surface_t += dt
         if boss.bro_hp[1 - boss.up] <= 0:   # the other's fallen: no more tunnelling
-            boss.mound = None
+            boss.mound, boss.peek = None, None
             return
+        if boss.peek is not None:   # the tunneller has popped his head up for a look (and stays put meanwhile)
+            boss.peek += dt
+            if boss.peek >= BRO_PEEK_SECS:
+                boss.peek = None
+        elif boss.peek_at is not None and boss.swap_timer <= boss.peek_at:
+            self.bro_peek(boss)
         crew = [m for m in self.miners if m.state == "working"]
-        if crew:   # the mound creeps towards whoever is nearest
+        if crew and boss.peek is None:   # the mound creeps towards whoever is nearest
             target = min(crew, key=lambda m: math.hypot(m.x - boss.mound[0], m.y - boss.mound[1]))
             dx, dy = target.x - boss.mound[0], target.y - boss.mound[1]
             dist = math.hypot(dx, dy)
@@ -870,6 +905,8 @@ class World:
         (boss.x, boss.y), boss.mound = boss.mound, [boss.x, boss.y]
         boss.up = 1 - boss.up
         boss.swap_timer, boss.surface_t, boss.windup = BRO_SWAP, 0.0, 0.0
+        boss.peek = None
+        boss.peek_at = random.uniform(BRO_SWAP * 0.45, BRO_SWAP * 0.7) if random.random() < BRO_PEEK_CHANCE else None
         boss.cooldown = max(boss.cooldown, 1.5)
         px, py = self.entity_screen(boss)
         for _ in range(30):
@@ -881,6 +918,15 @@ class World:
         self.floaters.append(Floater(text or f"{BRO_NAMES[boss.up]} bursts up!", px, py - 110, (230, 190, 140),
                                      life=1.4, size=28))
         self.slam_crew(boss, BRO_SURFACE_RADIUS)
+
+    def bro_peek(self, boss):
+        """The brother below pops his head up out of his mound to see how the fight's going, then ducks back."""
+        boss.peek, boss.peek_at = 0.0, None
+        px, py = iso(boss.mound[0], boss.mound[1], self.column_height(*self.cell_of(*boss.mound)) + self.rise)
+        for _ in range(12):
+            self.particles.append(Particle(px, py, random.choice([(110, 84, 60), (80, 60, 44), (140, 110, 80)])))
+        self.floaters.append(Floater(f"{BRO_NAMES[1 - boss.up]} pops up for a look!", px, py - 120,
+                                     (230, 190, 140), life=1.4, size=24))
 
     def bro_hit(self, boss, dealt):
         """A blow on the brother above. If he falls with the other still going, the other comes up to fight alone."""
@@ -1209,7 +1255,7 @@ class World:
         self.bone_throws.append([hand, target, 0.0, self.entity_screen(boss)])
         self.cues.append(("hit", 0.4))
 
-    def collapse(self, boss):
+    def bone_collapse(self, boss):
         """The Bone Tyrant falls apart - for now: a heap of bones you have a few seconds to smash."""
         self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
         boss.reformed = True
@@ -1304,6 +1350,7 @@ class World:
     def boss_retreat(self, boss):
         """Time's up: the boss withdraws into the dark. No trophy, but the dig can go on."""
         self.cues.append("-windup")   # (a growl mid-wind-up stops with it)
+        self.achieve("boss_fled")
         self.enemies.remove(boss)
         for chunk in boss.chunks:   # (the Slime King's chunks ooze away with him)
             if chunk in self.enemies:
@@ -1334,6 +1381,14 @@ class World:
         else:
             self.find_artifact(px, py)
         self.lifetime["bosses"] += 1
+        if boss.kind not in self.feats["bosses"]:
+            self.feats["bosses"].append(boss.kind)
+        if boss.fight_time <= QUICK_KILL_SECS:
+            self.achieve("quick_kill")
+        start = self.boss_fight_start
+        if all(m.last_hurt < start for m in self.miners) and not any(g.get("died_clock", 0) >= start
+                                                                     for g in self.graveyard):
+            self.achieve("untouchable")
         self.finish_boss_fight()
         if self.depth >= EXPEDITION_DEPTH:   # the bottom of the expedition: the shaft comes down, there and then
             self.start_collapse()
@@ -1476,6 +1531,30 @@ class World:
             return 1 + (SHADE_SLOW - 1) * max(0.0, 1 - flare_ease(self.lv("flares")))
         return 1.0
 
+    def shade_chill(self, dt):
+        """Abyssal Shades: the darkness round each eats at the crew standing in it (Flares keep some of it off)."""
+        shades = [e for e in self.enemies if e.spec.get("aura") and e.targetable]
+        if not shades:
+            return
+        ease = max(0.0, 1 - flare_ease(self.lv("flares")))
+        for m in self.miners:
+            if m.state == "down":
+                continue
+            shade = next((s for s in shades if math.hypot(m.x - s.x, m.y - s.y) <= SHADE_RADIUS), None)
+            if shade is None:
+                continue
+            dps = SHADE_DPS * max(1.0, crew_hp_at(shade.depth) / crew_hp_at(GRIP_FROM))
+            if shade.elite and shade.humbled is None:
+                dps *= ELITE_GRIP
+            self.hurt(m, dps * ease * dt)
+            if random.random() < dt * 4:   # the cold seeping into them
+                px, py = self.entity_screen(m, 30)
+                self.particles.append(Particle(px, py, random.choice([(110, 90, 170), (60, 50, 90)])))
+            if m.hp <= 0:
+                if m.attacker:
+                    m.attacker.release()
+                self.miner_down(m, killer=shade)
+
     def flare_burn(self, shade, dt):
         """Flares: an Abyssal Shade burns away in the glare."""
         if not self.lv("flares") or shade.boss or not shade.targetable:
@@ -1571,6 +1650,7 @@ class World:
         miner.state = "down"
         miner.curse = 0.0
         miner.respawn = RESPAWN_SECS
+        self.run["no_deaths"] = False
         miner.attacker = None
         miner.target = None
         self.bury(miner, killer)
@@ -1625,7 +1705,7 @@ class World:
             return
         holy = self.holy(enemy)
         dealt = ((self.enemy_hit_damage(enemy, dmg) if floor else dmg) * enemy.dmg_taken * holy
-                 * self.armour(enemy, heavy) * (self.art_mult("boss_dmg") if enemy.boss else 1))
+                 * self.armour(enemy, heavy))
         enemy.hp -= dealt
         if enemy.bro_hp:   # The Burrow Brothers: the blow lands on the one above ground
             self.bro_hit(enemy, dealt)
@@ -1646,13 +1726,14 @@ class World:
             return
         if enemy.hp <= 0:
             if enemy.kind == "bonetyrant" and not enemy.reformed:
-                self.collapse(enemy)
+                self.bone_collapse(enemy)
                 return
             self.kill_enemy(enemy, by)
 
     def player_hit_enemy(self, enemy, pos=None):
         """You click a monster: Monster Slayer damage, Critical Smite, then Cleave onto neighbours.
         `pos` is where you clicked (The Void Maw only really feels a click on its open eye)."""
+        self.run["no_monster_clicks"] = False
         dmg = self.monster_hit_damage() * self.combo_mult()
         if random.random() < 0.05 * self.lv("smite"):
             dmg *= 3
@@ -1723,6 +1804,8 @@ class World:
     def kill_enemy(self, enemy, by=None):
         self.enemies.remove(enemy)
         self.lifetime["monsters"] += 1
+        if enemy.elite and not enemy.boss:
+            self.achieve("elite")
         bounty = self.earn(self.bounty_worth(enemy) * self.kill_bonus(enemy))
         credit = self.kill_credit(enemy, by)
         if credit:   # a guard who was fighting it, or a miner who fought it off themselves
@@ -1785,8 +1868,18 @@ class World:
     def buy(self, up):
         if not self.can_buy(up):
             return False
-        self.gold -= self.cost(up)
+        cost = self.cost(up)
+        self.ledger_lost = "ledger" in self.camp_items and random.random() < LEDGER_CHANCE
+        if not self.ledger_lost:   # (the Crooked Ledger: it never made it onto the page)
+            self.gold -= cost
         self.levels[up["key"]] += 1
+        if up["key"] in HIRE_UPGRADES or (up["key"] == "miners" and self.levels["miners"] > 1):
+            self.run["one_miner"] = False   # (Protect Mr. President)
+        if "ledger" in self.camp_items:
+            self.feats["ledger"] += self.ledger_lost
+            self.feats["ledger_streak"] = self.feats["ledger_streak"] + 1 if self.ledger_lost else 0
+            if self.feats["ledger_streak"] >= 3:
+                self.achieve("lucky")
         self.sync_miners(announce=True)
         return True
 
@@ -1842,8 +1935,37 @@ class World:
         below = self.next.get(cell)
         if below and self.lv("deepstrike"):   # Deep Strike: crack the block underneath (never breaks it)
             below.hp = max(below.max_hp * 0.05, below.hp - dmg * 0.1 * self.lv("deepstrike"))
-        if self.damage(cell, dmg, by=miner) and crit and self.lv("quake"):
+        if not self.damage(cell, dmg, by=miner):
+            return
+        if miner and getattr(miner, "forged", 0) > 0:   # an explosive pick from the Goblin Blacksmith
+            if not self.forge_blast(cell, dmg, miner):
+                return
+        if crit and self.lv("quake"):
             self.splash(cell, dmg * 0.25 * self.lv("quake"), BRANCHES["tools"]["color"], by=miner)
+
+    def forge_blast(self, cell, dmg, miner):
+        """An explosive pick goes off: the 8 blocks round the one it hit take a share of the blow, and the 3x3
+        underneath is cracked (never broken). False if the layer changed (stop chaining)."""
+        depth = self.depth
+        share = miner.blast
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                c = (cell[0] + dx, cell[1] + dy)
+                below = self.next.get(c)
+                if below:
+                    below.hp = max(below.max_hp * 0.05, below.hp - dmg * FORGE_BELOW * share / FORGE_BLAST)
+                if (dx or dy) and c in self.current:
+                    self.damage(c, dmg * share, sparks=0, by=miner)
+                    if self.depth != depth:
+                        return False
+        if self.clock - getattr(miner, "blast_fx", -1e9) >= FORGE_FX_GAP:   # a puff of flame and smoke
+            miner.blast_fx = self.clock
+            px, py = self.cell_screen(cell)
+            self.rings.append([px, py, 0.0, 60, (255, 150, 60)])
+            for _ in range(8):
+                self.particles.append(Particle(px, py, random.choice([(255, 200, 90), (255, 120, 40), (90, 80, 76)]),
+                                               big=True))
+        return True
 
     def pick_bonus(self, miner, cell, weight):
         """Hot Streak (hits in a row on one block) and a freshly sharpened pick (Whetstone).
@@ -1860,8 +1982,6 @@ class World:
                 self.particles.append(Particle(px, py - 4, random.choice([(255, 150, 40), (255, 210, 80)])))
         if miner.sharp > 0:
             bonus *= 1 + whetstone_boost(self.lv("whetstone"))
-        if getattr(miner, "forged", 0) > 0:   # reforged by the Goblin Blacksmith
-            bonus *= miner.forge_boost
         return bonus
 
     def crit_effects(self, cell, miner):
@@ -1900,6 +2020,7 @@ class World:
         dmg = self.click_hit_damage()
         px, py = self.cell_screen(cell)
         if manual:
+            self.run["no_block_clicks"] = False
             dmg *= self.combo_mult()
             if self.golden and self.golden[0] == cell:
                 self.golden_jackpot(cell, block)
@@ -1925,12 +2046,22 @@ class World:
         for _ in range(2):
             self.particles.append(Particle(px, py, random.choice([GOLD, (255, 240, 170)])))
 
+    def mitts_click(self, cell):
+        """One of your clicks, at `cell`, counts towards Mitts' next leap (he goes for the latest one)."""
+        for golem in self.miners:
+            if golem.role == "claygolem":
+                golem.clicks = min(MITTS_CLICKS, getattr(golem, "clicks", 0) + 1)
+                golem.leap_to, golem.idle = cell, 0.0
+
     def combo_click(self):
         """Count one of your clicks towards the combo - any click, hit or miss, keeps it going."""
+        self.feats["clicks"] += 1
         if not self.lv("combo"):
             return
         self.combo = self.combo + 1 if self.combo_timer > 0 else 1
         self.combo_timer = COMBO_WINDOW
+        if self.combo >= 20:
+            self.achieve("combo_max")
 
     def combo_mult(self):
         """Damage multiplier the current combo gives your clicks."""
@@ -1939,8 +2070,12 @@ class World:
         return 1 + combo_step(self.lv("combo")) * min(self.combo, COMBO_CAP)
 
     def golden_jackpot(self, cell, block):
+        """Golden Blocks: a jackpot of this layer's average block many times over - or of the golden block itself,
+        if it's richer (so it's never a let-down for having landed on plain rock)."""
         self.cues.append("jackpot")
-        jackpot = self.earn(block.value * value_mult(self.lv("value")) * golden_payout(self.lv("goldblock")))
+        self.feats["jackpots"] += 1
+        base = max(block.value, self.layer_value / (GRID * GRID))
+        jackpot = self.earn(base * value_mult(self.lv("value")) * golden_payout(self.lv("goldblock")))
         px, py = self.cell_screen(cell)
         self.floaters.append(Floater(f"JACKPOT! +{fmt(jackpot)}", px, py - 50, GOLD, life=2.2, size=36, coin=True))
         self.fly_coins(px, py, 14)
@@ -1954,12 +2089,18 @@ class World:
         Monsters in the blast - and `target`, the one under the cursor - take up to 2x a monster click."""
         if cell not in self.current:
             return
+        if self.golden and self.golden[0] == cell:   # slammed, not clicked: the jackpot is still yours
+            self.golden_jackpot(cell, self.current[cell])
+        self.run["no_block_clicks"] = False
+        if charge >= 1:
+            self.achieve("full_slam")
         power = 0.3 + 0.7 * charge
         dmg = self.click_hit_damage() * slam_mult(self.lv("slam")) * power
         click = self.monster_hit_damage() * self.combo_mult()
         for e in list(self.enemies):
             in_blast = max(abs(e.x - (cell[0] + 0.5)), abs(e.y - (cell[1] + 0.5))) <= 1.5
             if e.targetable and (in_blast or e is target):
+                self.run["no_monster_clicks"] = False
                 self.hit_enemy(e, self.enemy_hit_damage(e, click) * SLAM_MONSTER_MULT * power, floor=False,
                                heavy=True)
         px, py = self.cell_screen(cell)
@@ -1983,6 +2124,7 @@ class World:
         if self.boiler < 1.0:
             return False
         self.boiler, self.steam = 0.0, 0.0
+        self.achieve("boiler")
         self.cues += [("fuse", 1.0), ("boom", 0.5)]
         self.shake, self.shake_power = 0.4, 5
         for e in list(self.enemies):
@@ -2089,6 +2231,7 @@ class World:
             self.fly_coins(px, py, 6)
             self.rings.append([px, py, 0.0, 90, GOLD])
         if block.chest:   # Buried Treasure
+            self.feats["chests"] += 1
             self.cues.append("chest")
             treasure = block.value * value_mult(self.lv("value")) * CHEST_PAYOUT
             earned += treasure
@@ -2309,6 +2452,44 @@ class World:
         self.walk_to(guard, *guard.goal, speed * 0.6, dt)
 
     # ----- the camp's people (Base Camp hires) ----------------------------------------------------------------
+    # ----- achievements ---------------------------------------------------------------------------------------
+    def achieve(self, key, quiet=False):
+        """Earn an achievement (once): it's announced on the dig, unless `quiet`."""
+        if key in self.achievements:
+            return
+        self.achievements.append(key)
+        if not quiet:
+            self.achievement_queue.append(key)
+            self.cues.append("chest")
+
+    def check_achievements(self, quiet=False):
+        for key in CHECKED:
+            if key not in self.achievements and ACHIEVEMENTS[key]["check"](self):
+                self.achieve(key, quiet)
+
+    def expedition_won(self):
+        """The Void Maw has fallen: the legendary achievements that take a whole expedition."""
+        r = self.run
+        self.achieve("voidmaw")
+        if not r["clean"]:   # (tracked from part-way through: it can't count)
+            return
+        if r["one_miner"] and r["no_deaths"]:
+            self.achieve("president")
+        if r["no_block_clicks"]:
+            self.achieve("hands_off")
+        if r["no_monster_clicks"]:
+            self.achieve("objector")
+        if r["no_deaths"]:
+            self.achieve("flawless")
+        if self.clock - r["start"] < SPEED_DEMON_SECS:
+            self.achieve("speed_demon")
+
+    def take_camp_item(self, key):
+        """Take one of the camp's items (instead of a new hire, this visit): yours from now on, for good."""
+        if key not in self.camp_items:
+            self.camp_items.append(key)
+        self.visit_hire = key
+
     def hire_at_camp(self, hire):
         """Take someone on at Base Camp: they're with you from this moment (saved straight away by the camp),
         whatever happens before you set off."""
@@ -2340,7 +2521,7 @@ class World:
 
     def update_blacksmith(self, smith, dt, speed):
         """The Goblin Blacksmith: trots to whichever digger's pick has gone longest unforged, and reforges it on
-        the spot - a couple of seconds of hammering, then it bites harder for FORGE_SECS."""
+        the spot - a couple of seconds of hammering, then every blow it lands explodes for FORGE_SECS."""
         if smith.task == "forging" and smith.goal in self.miners and smith.goal.state == "working":
             smith.task_timer -= dt
             smith.anim = 1.0 if (self.clock * 5) % 1 < 0.5 else 0.2   # (hammering away)
@@ -2349,9 +2530,9 @@ class World:
                 self.particles.append(Particle(px + 8 * smith.facing, py, random.choice([(255, 200, 90), (255, 140, 50)])))
             if smith.task_timer <= 0:
                 m = smith.goal
-                m.forged, m.forge_boost = FORGE_SECS, 1 + FORGE_BOOST * level_mult(smith.level)
+                m.forged, m.blast = FORGE_SECS, FORGE_BLAST * level_mult(smith.level)
                 px, py = self.entity_screen(m, 56)
-                self.floaters.append(Floater("Reforged!", px, py, (255, 170, 80), life=1.1, size=20))
+                self.floaters.append(Floater("Explosive pick!", px, py, (255, 170, 80), life=1.1, size=20))
                 self.give_xp(smith, XP_PER_BLOCK * 0.5)
                 smith.task, smith.goal, smith.anim = "idle", None, 0.0
             return
@@ -2367,30 +2548,40 @@ class World:
             smith.facing = 1 if (m.x - smith.x) - (m.y - smith.y) >= 0 else -1
 
     def update_clay_golem(self, golem, dt, speed):
-        """Mitts the Clay Golem: plods over to wherever the blocks are thickest, raises both fists and slams the
-        ground - a full Charged Slam of its own, every few seconds, upgrade or no upgrade."""
-        golem.swing = max(0.0, golem.swing - dt)
-        if golem.task == "winding":
+        """Mitts the Clay Golem works off your clicks: every MITTS_CLICKS of them, he leaps to where you last
+        clicked, fists up, and comes down in a full Charged Slam of his own - upgrade or no upgrade. With no clicks
+        from you for MITTS_IDLE seconds, he goes anyway, to wherever the blocks are thickest."""
+        if golem.task == "leaping":
             golem.task_timer -= dt
-            golem.anim = 1 - golem.task_timer / MITTS_WINDUP   # (fists going up)
+            q = min(1.0, 1 - golem.task_timer / MITTS_LEAP)
+            (x0, y0), (x1, y1) = golem.leap_from, (golem.goal[0] + 0.5, golem.goal[1] + 0.5)
+            golem.x, golem.y = x0 + (x1 - x0) * q, y0 + (y1 - y0) * q
+            golem.hop, golem.anim = math.sin(q * math.pi), min(1.0, q * 2)   # (up and over, fists going up)
             if golem.task_timer <= 0:
-                if golem.goal in self.current:
-                    self.golem_slam(golem, golem.goal)
-                golem.task, golem.goal, golem.anim, golem.swing = "resting", None, 0.0, MITTS_EVERY
+                self.golem_slam(golem, golem.goal)
+                golem.task, golem.goal, golem.anim, golem.hop = "idle", None, 0.0, 0.0
             return
-        golem.anim = 0.0
-        if golem.goal not in self.current:
-            golem.goal = self.phantom_target() if self.current else None
-            golem.task = "plodding"
-        if golem.goal is None:
+        golem.anim, golem.hop = 0.0, 0.0
+        golem.clicks = getattr(golem, "clicks", 0)   # (so his click meter shows from the start)
+        golem.idle = getattr(golem, "idle", 0.0) + dt
+        if golem.clicks >= MITTS_CLICKS and getattr(golem, "leap_to", None) is not None:
+            golem.clicks, golem.goal, golem.leap_to = 0, golem.leap_to, None
+        elif golem.idle >= MITTS_IDLE and self.current:   # no clicks from you for a while: off he goes anyway
+            golem.goal = self.phantom_target()
+        else:
             return
-        tx, ty = golem.goal[0] + 0.5, golem.goal[1] + 0.5
-        if self.walk_to(golem, tx, ty, speed, dt, stop=0.2) and golem.swing <= 0:
-            golem.task, golem.task_timer = "winding", MITTS_WINDUP
+        if golem.goal is not None:
+            golem.idle = 0.0
+            golem.task, golem.task_timer, golem.leap_from = "leaping", MITTS_LEAP, (golem.x, golem.y)
+            dx, dy = golem.goal[0] + 0.5 - golem.x, golem.goal[1] + 0.5 - golem.y
+            golem.facing = 1 if dx - dy >= 0 else -1
+            self.cues.append(("hit", 0.3))
 
     def golem_slam(self, golem, cell):
-        """Mitts' fists come down: the block under them takes a full Charged Slam's worth (your click damage times
-        the slam), the eight around it half that, and monsters close by are walloped."""
+        """Mitts' fists come down: the block under them is levelled and the eight round it lose MITTS_CRACK of
+        their health - or, if it's more, a full Charged Slam's worth of your click damage (half for the eight) -
+        and monsters close by are walloped. (Where he lands, the block may be gone by now: the ones round it still
+        take the blow.)"""
         power = slam_mult(self.lv("slam")) * level_mult(golem.level)
         dmg = self.click_hit_damage() * power
         for e in list(self.enemies):
@@ -2405,13 +2596,19 @@ class World:
         self.cues.append(("smash", 0.5))
         self.floaters.append(Floater("THUD!", px, py - 60, (215, 150, 105), life=0.8, size=26))
         self.give_xp(golem, XP_PER_BLOCK)
-        depth = self.depth
-        if not self.damage(cell, dmg, sparks=10, by=golem):
-            return
+        depth, crack = self.depth, crack_share(self.depth)
+        block = self.current.get(cell)
+        if block:
+            level = block.hp + 1e-9 if depth <= DEEP_ROCK_FROM else block.max_hp * crack
+            if not self.damage(cell, max(dmg, level), sparks=10, by=golem):
+                return
+        share = MITTS_CRACK * level_mult(golem.level) * crack
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
-                if (dx, dy) != (0, 0) and self.depth == depth:
-                    self.damage((cell[0] + dx, cell[1] + dy), dmg * 0.5, sparks=2, by=golem)
+                around = self.current.get((cell[0] + dx, cell[1] + dy))
+                if (dx, dy) != (0, 0) and around and self.depth == depth:
+                    self.damage((cell[0] + dx, cell[1] + dy), max(dmg * 0.5, around.max_hp * share), sparks=2,
+                                by=golem)
 
     def update_archer(self, archer, dt, speed):
         """The Archer: shoots whatever's grabbing someone first, then the nearest monster, from a distance;
@@ -2441,14 +2638,14 @@ class World:
         self.walk_to(archer, *archer.goal, speed * 0.6, dt)
 
     def update_arrows(self, dt):
-        """Arrows in flight: each lands on its target for a share of its health."""
+        """Arrows in flight: each lands on its target like one of your clicks (times the archer's level bonus)."""
         for arrow in self.arrows:
             arrow[2] += dt
             _, foe, age, archer = arrow
             if age >= ARROW_SECS and foe in self.enemies and foe.targetable:
-                share = ARCHER_SHARE * level_mult(archer.level)
-                self.give_xp(archer, share * XP_PER_MONSTER * GUARD_XP_SHARE)
-                self.hit_enemy(foe, foe.max_hp * share * foe.pct_scale, floor=False, ring=(180, 220, 140), by=archer)
+                dmg = self.enemy_hit_damage(foe, self.monster_hit_damage()) * level_mult(archer.level)
+                self.give_xp(archer, min(1.0, dmg / foe.max_hp) * XP_PER_MONSTER * GUARD_XP_SHARE)
+                self.hit_enemy(foe, dmg, floor=False, ring=(180, 220, 140), by=archer)
         self.arrows = [a for a in self.arrows if a[2] < ARROW_SECS]
 
     def update_taxman(self, tax, dt, speed):
@@ -2620,6 +2817,65 @@ class World:
                 self.rocks.append([m, self.entity_screen(m, 34), boss, 0.0])
                 self.give_xp(m, XP_PER_ROCK)
 
+    def update_chompers(self, dt):
+        """Chompers waits a while, then hops over to the richest block in the layer and gobbles it whole."""
+        if self.chomper is None:
+            self.chomper = dict(x=0.5, y=0.5, timer=CHOMP_EVERY * 0.5, hop=None, chomp_at=-1e9, lift=0.0)
+        c = self.chomper
+        if c["hop"]:
+            start, cell, age = c["hop"]
+            age += dt
+            q = min(1.0, age / CHOMP_HOP)
+            c["x"] = start[0] + (cell[0] + 0.5 - start[0]) * q
+            c["y"] = start[1] + (cell[1] + 0.5 - start[1]) * q
+            c["lift"], c["hop"] = math.sin(q * math.pi), [start, cell, age]
+            if q >= 1:
+                c["hop"], c["lift"] = None, 0.0
+                self.chomp(cell)
+            return
+        c["timer"] -= dt
+        if c["timer"] <= 0 and self.current:
+            cell = max(self.current, key=lambda k: (self.current[k].value, random.random()))   # (expensive tastes)
+            c["hop"], c["timer"] = [(c["x"], c["y"]), cell, 0.0], CHOMP_EVERY
+            c["facing"] = 1 if (cell[0] + 0.5 - c["x"]) - (cell[1] + 0.5 - c["y"]) >= 0 else -1
+
+    def chomp(self, cell):
+        """Chompers lands on its block and gobbles it whole: it breaks (paying as usual), and Chompers coughs up
+        the rest of CHOMP_PAYOUT times its worth."""
+        block = self.current.get(cell)
+        if block is None:   # (someone else got there first: it sulks, then tries again soon)
+            self.chomper["timer"] = 2.0
+            return
+        self.chomper["chomp_at"] = self.clock
+        self.feats["chomps"] += 1
+        bonus = block.value * value_mult(self.lv("value")) * (CHOMP_PAYOUT - 1)
+        px, py = self.cell_screen(cell)
+        self.cues.append(("smash", 0.35))
+        self.damage(cell, block.hp + 1e-9, sparks=12)
+        gained = self.earn(bonus)
+        self.floaters.append(Floater(f"CHOMP! +{fmt(gained)}", px, py - 60, GOLD, life=1.6, size=26, coin=True))
+        self.fly_coins(px, py, 5)
+
+    def throw_femur(self):
+        """Tyrant's Femur: the crew member nearest a monster that has hold of someone hurls a bone at it
+        (the one whose victim is worst off first). Bosses are left to you."""
+        aimed = {id(f[2]) for f in self.femur_throws}
+        grabbers = [e for e in self.enemies if e.state == "attacking" and e.victim is not None and not e.boss
+                    and e.targetable and id(e) not in aimed]
+        if not grabbers:
+            return
+        enemy = min(grabbers, key=lambda e: e.victim.hp / max(1e-9, e.victim.max_hp))
+        crew = [m for m in self.miners if m.state == "working" and m is not enemy.victim]
+        if not crew:
+            return
+        m = min(crew, key=lambda c: math.hypot(c.x - enemy.x, c.y - enemy.y))
+        m.anim = 1.0
+        m.facing = 1 if (enemy.x - m.x) - (enemy.y - m.y) >= 0 else -1
+        self.femur_throws.append([m, self.entity_screen(m, 34), enemy, 0.0])
+        self.femur_timer = self.art_add("femur")
+        self.give_xp(m, XP_PER_ROCK)
+        self.cues.append(("hit", 0.3))
+
     def update_whetstone_trip(self, m, dt, speed):
         sx, sy = WHETSTONE_POS
         if m.task == "whetstone":
@@ -2677,6 +2933,14 @@ class World:
                     m = min(blunt, key=lambda c: math.hypot(c.x - WHETSTONE_POS[0], c.y - WHETSTONE_POS[1]))
                     m.task, m.target = "whetstone", None
                 self.whet_timer = WHET_GAP
+        # Chompers, the camp's tame Mimic
+        if "chompers" in self.camp_items:
+            self.update_chompers(dt)
+        # Tyrant's Femur
+        if self.art_add("femur") and combat:
+            self.femur_timer -= dt
+            if self.femur_timer <= 0:
+                self.throw_femur()
         # Ballista
         if self.lv("ballista") and combat:
             self.ballista_timer -= dt
@@ -2715,6 +2979,15 @@ class World:
                 self.hit_enemy(boss, boss.max_hp * ROCK_SHARE * level_mult(thrower.level), floor=False,
                                ring=(170, 150, 130), by=thrower)
         self.rocks = [r for r in self.rocks if r[3] < ROCK_SECS]
+        for throw in self.femur_throws:
+            throw[3] += dt
+            thrower, _, enemy, age = throw
+            if age >= FEMUR_SECS and enemy in self.enemies and enemy.targetable:
+                self.hit_enemy(enemy, enemy.max_hp * FEMUR_SHARE, floor=False, ring=(235, 228, 205), by=thrower)
+                px, py = enemy_anchor(enemy, self.rise, time.time())
+                for _ in range(8):   # the bone shatters
+                    self.particles.append(Particle(px, py, random.choice([(235, 228, 205), (170, 160, 135)])))
+        self.femur_throws = [f for f in self.femur_throws if f[3] < FEMUR_SECS]
         for bolt in self.bolts:
             bolt[2] += dt
             if bolt[2] >= BOLT_SECS:
@@ -2769,7 +3042,8 @@ class World:
         The floor caves in from its hole outwards; a rope drops to each crew member just before the ground under
         them goes, and they climb out - every one in their own way. Monsters and graves go down with the floor."""
         self.collapse = 0.0
-        self.bombs, self.bolts, self.rocks, self.bone_throws = [], [], [], []
+        self.expedition_won()
+        self.bombs, self.bolts, self.rocks, self.bone_throws, self.femur_throws = [], [], [], [], []
         c = GRID / 2
         self.crumble = {(x, y): CRUMBLE_FROM + CRUMBLE_SPREAD * math.hypot(x + 0.5 - c, y + 0.5 - c)
                         + random.uniform(0, 0.35) for x in range(GRID) for y in range(GRID)}
@@ -2833,6 +3107,10 @@ class World:
     def update(self, dt, combat=True):
         """Advance the simulation. With combat=False enemies freeze and none spawn."""
         self.clock += dt
+        self.achieve_timer -= dt
+        if self.achieve_timer <= 0:
+            self.achieve_timer = 1.0
+            self.check_achievements()
         if self.collapse is not None:   # The Void Maw has fallen: the shaft comes down (nothing else goes on)
             self.update_collapse(dt)
             self.update_effects(dt)
@@ -2964,6 +3242,7 @@ class World:
                 self.shrivel(e, dt)
             for e in [e for e in self.enemies if e.kind == "shade"]:
                 self.flare_burn(e, dt)
+            self.shade_chill(dt)
             self.boss_auras()
             for e in list(self.enemies):
                 e.update(self, dt)
@@ -3064,7 +3343,8 @@ class World:
                     crew=[m.to_dict() for m in self.miners], graveyard=self.graveyard,
                     clock=self.clock, grid=GRID, artifacts=self.artifacts, boss_done=self.boss_done,
                     expedition=self.expedition, camp=self.camp, lifetime=self.lifetime,
-                    camp_ready=self.camp_ready or self.collapse is not None, visit_hire=self.visit_hire)
+                    camp_ready=self.camp_ready or self.collapse is not None, visit_hire=self.visit_hire,
+                    camp_items=self.camp_items, achievements=self.achievements, feats=self.feats, run=self.run)
 
     @classmethod
     def from_dict(cls, d):
@@ -3076,6 +3356,9 @@ class World:
         w.lifetime.update(d.get("lifetime", {}))
         w.camp_ready = d.get("camp_ready", False)
         w.visit_hire = d.get("visit_hire") if w.camp_ready else None
+        w.camp_items = [k for k in d.get("camp_items", []) if k in ITEMS]
+        w.achievements = [k for k in d.get("achievements", []) if k in ACHIEVEMENTS]
+        w.feats.update(d.get("feats", {}))
         w.levels.update({k: v for k, v in d["levels"].items() if k in w.levels})
         for up in UPGRADES:   # (an upgrade's cap was lowered since: e.g. Spirit Lantern's 3 levels became 1)
             if up["max"] and w.levels[up["key"]] > up["max"]:
@@ -3089,7 +3372,8 @@ class World:
         w.total_blocks = d.get("total_blocks", 0)
         w.clock = d.get("clock", 0.0)
         w.graveyard = d.get("graveyard", [])
-        renamed = {"idol": "medal", "goldtooth": "broclaw"}   # (retired: the Cursed Idol, the Hoard's Golden Tooth)
+        renamed = {"idol": "medal", "goldtooth": "broclaw", "jawbone": "femur"}
+        # (retired: the Cursed Idol, the Hoard's Golden Tooth, the Tyrant's Jawbone)
         w.artifacts = [k for k in (renamed.get(k, k) for k in d.get("artifacts", [])) if k in ARTIFACTS]
         w.refresh_artifacts()
         w.boss_done = d.get("boss_done", w.depth if boss_for(w.depth) else -1)   # older saves: no boss mid-layer
@@ -3118,5 +3402,8 @@ class World:
         w.enemy_timer = w.wave_interval()   # first wave on the saved depth's schedule, not depth 1's
         if boss_for(w.depth) and w.boss_done < w.depth and not w.camp_ready:   # saved mid boss fight: it comes back
             w.spawn_boss()
+        w.run = d.get("run") or dict(new_run(w.clock), clean=w.depth <= 1)   # (older saves: from here on, if at all)
+        if "achievements" not in d:   # a save from before achievements: what it's already done, quietly
+            w.check_achievements(quiet=True)
 
         return w

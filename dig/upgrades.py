@@ -33,7 +33,7 @@ def click_damage(lv): return (2 + 2 * lv) * 1.1 ** lv
 def dynamite_interval(lv): return max(4, 16 - 2 * lv)
 def combo_step(lv): return 0.005 * lv                 # Combo Clicks: bonus per click in the combo
 def golden_interval(lv): return max(15, 60 - 9 * lv)  # Golden Blocks: seconds between golden blocks
-def golden_payout(lv): return 20 + 10 * lv            # ...jackpot, in multiples of the block's value
+def golden_payout(lv): return 40 + 20 * lv            # ...jackpot, in multiples of the layer's average block
 def slam_mult(lv): return 3 + 2 * lv                  # Charged Slam: x click damage at full charge
 def phantom_interval(lv): return 24 - 3.2 * lv        # Phantom Slam: seconds between the ghostly hand's slams...
 PHANTOM_CHARGE = 0.6                                  # ...each charged this far (a full slam you charge beats it),
@@ -292,7 +292,7 @@ UPGRADES = [
         "few it cracks - no slam needed.",
         lambda l: "no acid" if l == 0 else f"armour cracks after {ACID_HITS} hits"),
     _up("flares", "Flares", "combat", "flare", (3, 4.5), [("spiritlantern", 1)], 60000000, 2.6, 3,
-        "Magnesium flares light up the dark: crew in an Abyssal Shade's darkness are slowed far less, and the "
+        "Magnesium flares light up the dark: crew in an Abyssal Shade's darkness are slowed and hurt far less, and the "
         "shades burn away in the glare.",
         lambda l: "no flares" if l == 0 else
         f"-{round(100 * flare_ease(l))}% slowdown, shades burn {round(100 * flare_burn(l))}% hp/s"),

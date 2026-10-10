@@ -10,6 +10,7 @@ from .enemies import (ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, THRO
                       THROW_RELEASE, TRANSFORM_SECS)
 from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
+from .world_layout import MITTS_CLICKS
 
 HI_VIS = (255, 140, 30)
 HELMETS = {"miner": (240, 200, 40), "foreman": (245, 245, 250), "driller": (240, 130, 40),
@@ -539,15 +540,22 @@ def _top_hat(surf, m, head, t):
     pygame.draw.line(surf, (240, 200, 70), (hx + 3 * f, hy + 3), (hx + 1 * f, hy + 9), 1)
 
 
+MITTS_HOP_PX = 70   # how high Mitts goes at the top of a leap
+
+
 def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
     """Mitts the Clay Golem: a lumpy, lumbering body of river clay, a glowing rune on its chest, eyes like coals,
     and two huge fists - hanging at its sides, or raised overhead as it winds up a slam."""
     clay, dark, light = (186, 116, 74), (132, 80, 50), (214, 150, 104)
     if grabbed:
         fx += struggle_shake(t)
-    up = m.anim if getattr(m, "task", "") == "winding" else 0.0
-    walk = math.sin(t * 6 + m.x * 3) * 2 if getattr(m, "task", "") == "plodding" else 0.0
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 17, fy - 5, 34, 10))
+    leaping = getattr(m, "task", "") == "leaping"
+    up = m.anim if leaping else 0.0
+    walk = 0.0
+    hop = getattr(m, "hop", 0.0)
+    sw = 34 - 14 * hop   # (the shadow shrinks as he goes up)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 5 + 2 * hop, sw, 10 - 4 * hop))
+    fy -= int(hop * MITTS_HOP_PX)
     for d in (-1, 1):   # stumpy legs
         pygame.draw.rect(surf, dark, (fx + d * 7 - 5, fy - 12 + (walk * d if d > 0 else -walk * d) * 0.5, 10, 12),
                          border_radius=4)
@@ -575,6 +583,24 @@ def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
         pygame.draw.circle(surf, clay, (int(fist[0]), int(fist[1])), 7)
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 58, m.hp / m.max_hp, GOOD, 30)
+    if not leaping and getattr(m, "clicks", None) is not None:   # a pip per click of yours towards his next leap
+        _mitts_pips(surf, fx, fy - (66 if m.hp < m.max_hp else 60), getattr(m, "clicks", 0), t)
+
+
+def _mitts_pips(surf, x, y, clicks, t):
+    """Mitts' click meter: MITTS_CLICKS little pips over his head, lit one per click (all of them pulsing once
+    he's ready to go and just waiting to be let loose)."""
+    full = clicks >= MITTS_CLICKS
+    pulse = 0.5 + 0.5 * math.sin(t * 10)
+    gap = 6
+    for i in range(MITTS_CLICKS):
+        px = int(x - (MITTS_CLICKS - 1) * gap / 2 + i * gap)
+        pygame.draw.circle(surf, (24, 16, 14), (px, y), 4)   # (a dark rim: it has to read over lava and ore)
+        if i < clicks:
+            col = (255, int(190 + 50 * pulse), 110) if full else (230, 160, 100)
+            pygame.draw.circle(surf, col, (px, y), 3)
+        else:
+            pygame.draw.circle(surf, (90, 60, 44), (px, y), 2)
 
 
 def _golem_brow(surf, m, head, t):
@@ -814,10 +840,10 @@ def pick_enemy(world, pos, t):
     return None
 
 
-def draw_enemy(surf, e, rise, t, hovered=False):
+def draw_enemy(surf, e, rise, t, hovered=False, bar=True):
     scale = e.draw_scale
     if scale:
-        _draw_boss(surf, e, rise, t, hovered, scale)
+        _draw_boss(surf, e, rise, t, hovered, scale, bar)
     else:
         _draw_enemy(surf, e, rise, t, hovered)
 
@@ -831,7 +857,7 @@ def _draw_enemy(surf, e, rise, t, hovered):
         DRAWERS[e.kind](surf, e, rise, t, hovered)
 
 
-def _draw_boss(surf, e, rise, t, hovered, scale):
+def _draw_boss(surf, e, rise, t, hovered, scale, bar=True):
     """A boss drawn on a canvas around its feet, then scaled up: its own sprite (boss_sprites.py), or the
     Zombie King's zombie with a crown on top."""
     if e.mode == "split":   # the Slime King in pieces: only its chunks are on the board
@@ -866,7 +892,7 @@ def _draw_boss(surf, e, rise, t, hovered, scale):
         big.fill((255, 150, 140), special_flags=pygame.BLEND_RGB_MULT)
     surf.blit(big, (fx - ax * scale, fy - ay * scale))
     if own:
-        if e.targetable:
+        if e.targetable and bar:
             _hp_bar(surf, fx, fy - boss_sprites.bar_height(e) * scale, e.hp / e.max_hp, BAD, 60)
     elif e.state != "emerging" and e.boss:
         bx, by = enemy_anchor(e, rise, t)
@@ -1492,6 +1518,71 @@ def _draw_slime(surf, e, rise, t, hovered, dy=0):
 # ----- the deep: Mimic, Rock Golem, Abyssal Shade -------------------------------------------------------------------
 WOOD, WOOD_DARK, CHEST_GOLD = (140, 90, 50), (88, 54, 30), (230, 180, 60)
 STONE_COL, STONE_EDGE, MOSS = (128, 126, 138), (78, 76, 90), (96, 130, 80)
+
+
+def draw_pet_chest(surf, fx, fy, t, gape=0.0, facing=1, lift=0.0):
+    """Chompers, the camp's Friendly Mimic: a treasure chest on stubby legs with a gold collar, big friendly eyes peeping
+    out of the seam - lid shut (`gape` 0) or flung open (1) with a tongue lolling out. `lift`: px off the ground."""
+    fx, fy = int(fx), int(fy)
+    sw = 24 - lift * 0.2
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 4, sw, 8))
+    base = int(fy - lift - abs(math.sin(t * 3)) * 1.5)
+    for d in (-6, 6):   # stubby legs
+        pygame.draw.line(surf, WOOD_DARK, (fx + d, base - 2), (fx + d + (math.sin(t * 10 + d) * 2 if lift else 0), base + 2), 3)
+    box = pygame.Rect(fx - 11, base - 12, 22, 11)
+    pygame.draw.rect(surf, WOOD, box, border_radius=2)
+    pygame.draw.rect(surf, WOOD_DARK, box, 1, border_radius=2)
+    for bx in (box.x + 4, box.right - 5):   # iron-bound with gold
+        pygame.draw.line(surf, CHEST_GOLD, (bx, box.y), (bx, box.bottom - 1), 2)
+    pygame.draw.line(surf, (250, 215, 90), (box.x, box.bottom - 3), (box.right - 1, box.bottom - 3), 2)   # its collar
+    pygame.draw.circle(surf, (250, 215, 90), (fx, box.bottom - 1), 2)   # (and tag)
+    open_by = 9 * gape
+    if gape > 0.05:   # mouth open: a friendly row of blunt teeth and a tongue lolling out
+        pygame.draw.polygon(surf, (110, 30, 40), [(box.x + 1, box.y + 1), (box.right - 1, box.y + 1),
+                                                  (box.right - 1, box.y - open_by), (box.x + 1, box.y - open_by)])
+        for k in range(3):
+            pygame.draw.rect(surf, (245, 240, 225), (box.x + 4 + k * 6, box.y - 2, 4, 3), border_radius=1)
+        tongue = [(fx, box.y - 1), (fx + 6 * facing, box.y + 4 + math.sin(t * 9) * 1.5), (fx + 9 * facing, box.y + 1)]
+        pygame.draw.lines(surf, (230, 90, 110), False, tongue, 3)
+    lid = pygame.Rect(fx - 11, int(box.y - 7 - open_by), 22, 7)
+    pygame.draw.rect(surf, WOOD, lid, border_top_left_radius=5, border_top_right_radius=5)
+    pygame.draw.rect(surf, WOOD_DARK, lid, 1, border_top_left_radius=5, border_top_right_radius=5)
+    blink = (t * 0.7 + fx * 0.01) % 3.0 < 0.12
+    for d in (-4, 4):   # big friendly eyes, peeping out from under the lid
+        ey = lid.bottom + 2
+        if blink:
+            pygame.draw.line(surf, (30, 20, 20), (fx + d - 2, ey), (fx + d + 2, ey), 1)
+        else:
+            pygame.draw.circle(surf, (250, 250, 240), (fx + d, ey), 3)
+            pygame.draw.circle(surf, (30, 20, 20), (fx + d + facing, ey), 1)
+    if gape <= 0.05:
+        pygame.draw.rect(surf, CHEST_GOLD, (fx - 2, box.y - 1, 4, 3))   # the clasp
+
+
+def draw_ledger_desk(surf, bx, by, t, lit=True):
+    """The Crooked Ledger on its writing desk at camp: a fat book open on a slanted top, a quill in the inkpot, and
+    (once it's yours) a candle burning low beside it."""
+    bx, by = int(bx), int(by)
+    pygame.draw.ellipse(surf, (16, 12, 20), (bx - 18, by - 4, 36, 9))
+    for d in (-12, 12):   # legs
+        pygame.draw.line(surf, WOOD_DARK, (bx + d, by), (bx + d * 0.8, by - 18), 3)
+    top = [(bx - 17, by - 18), (bx + 17, by - 18), (bx + 14, by - 26), (bx - 14, by - 26)]
+    pygame.draw.polygon(surf, WOOD, top)
+    pygame.draw.polygon(surf, WOOD_DARK, top, 1)
+    for side in (-1, 1):   # the open book: two pages, lines of figures, a red ribbon down the middle
+        page = [(bx, by - 21), (bx + side * 12, by - 22), (bx + side * 11, by - 30), (bx, by - 28)]
+        pygame.draw.polygon(surf, (236, 226, 196), page)
+        pygame.draw.polygon(surf, (150, 130, 100), page, 1)
+        for k in range(3):
+            y = by - 27 + k * 2
+            pygame.draw.line(surf, (120, 110, 100), (bx + side * 2, y), (bx + side * 9, y - 1), 1)
+    pygame.draw.line(surf, (200, 40, 50), (bx, by - 28), (bx + 1, by - 19), 2)
+    pygame.draw.rect(surf, (30, 30, 40), (bx + 9, by - 30, 5, 4), border_radius=1)   # the inkpot...
+    pygame.draw.line(surf, (240, 240, 230), (bx + 11, by - 30), (bx + 17, by - 42), 2)   # ...and its quill
+    if lit:   # a candle burning low
+        pygame.draw.rect(surf, (236, 230, 210), (bx - 15, by - 33, 4, 8))
+        flick = math.sin(t * 11) * 1.2
+        pygame.draw.polygon(surf, (255, 200, 90), [(bx - 15, by - 33), (bx - 13 + flick, by - 40), (bx - 11, by - 33)])
 
 
 def _draw_mimic(surf, e, rise, t, hovered, dy=0):

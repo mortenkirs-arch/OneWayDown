@@ -630,7 +630,8 @@ def draw_burrow_bros(s, e, rise, t, hovered, dy, pos):
     if e.state != "emerging":
         _shadow(s, fx, ground, 96)
     rising = min(1.0, getattr(e, "surface_t", 9.0) / 0.5)   # (just burst up: still climbing out of the hole)
-    top = ground + dy + int((1 - _ease_out(rising)) * 80)
+    sunk = getattr(e, "sunk", 0)   # (the brother below, peeking out of his mound: only this far out of it)
+    top = ground + dy + int((1 - _ease_out(rising)) * 80) + sunk
     clip = s.get_clip()
     s.set_clip(pygame.Rect(0, 0, s.get_width(), ground + 2))   # (below ground: hidden)
     step = math.sin(e.anim_t * 4) * 3 if _walking(e) else 0
@@ -681,7 +682,7 @@ def draw_burrow_bros(s, e, rise, t, hovered, dy, pos):
             tip = (paw[0] + 12, paw[1] - 7 + k * 5)
             pygame.draw.line(s, (235, 228, 210), (paw[0] + 5, paw[1] - 5 + k * 4), tip, 3)
     s.set_clip(clip)
-    if rising < 1:   # the hole he's climbing out of, earth thrown up round it
+    if rising < 1 or sunk:   # the hole he's climbing out of, earth thrown up round it
         pygame.draw.ellipse(s, (40, 26, 18), (fx - 34, ground - 8, 68, 16))
         for k in range(7):
             a = k / 7 * math.pi

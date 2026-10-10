@@ -202,6 +202,8 @@ class UpgradeScene(Scene):
         """Spend: coins pour out of the gold counter into the upgrade's star, which bursts when they land."""
         if not self.world.buy(up):
             return
+        if self.world.ledger_lost:
+            self.game.toast = ("The Crooked Ledger lost the receipt - that one's free!", 2.5)
         x, y = self.to_screen(self.star[up["key"]])
         for i in range(12):
             self.coins.append(CoinFly(self.counter_coin, (x, y), delay=i * 0.025, duration=0.45, size=7,

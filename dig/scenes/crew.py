@@ -302,9 +302,9 @@ class CrewScene(Scene):
                                                                           "heading": "Off to reforge a pick"},
                     "archer": {"shooting": "Shooting"}, "taxman": {"visiting": f"Off to collect from {m.goal.name}" if m.task == "visiting" and m.goal else "Doing the rounds",
                                "collecting": "Collecting taxes", "waiting": "Waiting for someone to tax"},
-                    "claygolem": {"winding": "Winding up a slam!", "plodding": "Plodding to the thick of it"}}[m.role]
+                    "claygolem": {"leaping": "Leaping in to slam!"}}[m.role]
             idle = {"hero": "Digging", "blacksmith": "Looking for a dull pick", "archer": "Keeping watch",
-                    "taxman": "Doing the rounds", "claygolem": "Getting its breath back"}[m.role]
+                    "taxman": "Doing the rounds", "claygolem": "Waiting on your clicks"}[m.role]
             label, color = busy.get(m.task, idle), ROLE_BADGES[m.role][1]
         elif m.role == "medic":
             patient = m.goal if m.task == "healing" and m.goal in self.world.miners else None

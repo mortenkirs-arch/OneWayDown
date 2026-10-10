@@ -9,6 +9,8 @@ before - no tougher, no richer: with the camp's people along, every run should g
 The camp is five tents on a board, one per upgrade branch. A tent's first upgrade is a hire: a permanent character
 who digs, fights or earns in every expedition after (see HIRES; the scene is scenes/camp.py).
 """
+from .world_layout import CHOMP_EVERY, MITTS_CLICKS
+
 EXPEDITION_DEPTH = 100   # an expedition ends at this many metres (The Void Maw)
 # The collapse when The Void Maw falls (seconds from its death): the floor caves in from its hole outwards while
 # ropes come down and the crew climb out, then a fade to the camp
@@ -39,26 +41,51 @@ HIRES = {
                  does=["Digs as hard as four miners", "Charges to free crew grabbed nearby",
                        "No monster can get a grip on them"]),
     "blacksmith": dict(title="Goblin Blacksmith", tent="tools",
-                       blurb="Trots from digger to digger with a hammer and a portable anvil, reforging picks on "
-                             "the spot. A reforged pick bites harder for a good while.",
-                       does=["Reforges one digger's pick at a time", "Reforged picks hit 25% harder for 40s",
-                             "More as the goblin levels up"]),
+                       blurb="Trots from digger to digger with a hammer, a portable anvil and a pouch of blasting "
+                             "powder, reforging picks on the spot. A reforged pick goes off with every blow.",
+                       does=["Reforges one digger's pick at a time", "Every hit blasts the 3x3 round it for 40s",
+                             "...and cracks the blocks underneath", "Bigger blasts as the goblin levels up"]),
     "taxman": dict(title="Tax Collector", tent="fortune",
                    blurb="Does the rounds of the dig with a ledger, walking from one crew member to the next and "
                          "collecting the Crown's dues - which, somehow, end up with you.",
                    does=["Each crew member pays a few blocks' worth", "Dues keep step with the depth",
                          "About a fifth on top of your income", "More as he levels up"]),
     "claygolem": dict(title="Clay Golem", tent="hands",
-                      blurb="A lumbering lump of river clay with fists like anvils. Mitts plods to wherever the blocks "
-                            "are thickest and slams the ground like a fully charged Charged Slam - no upgrade needed.",
-                      does=["A full Charged Slam every few seconds", "Grows with your click damage and slam upgrades",
+                      blurb="A lumbering lump of river clay with fists like anvils. Mitts watches your every click, "
+                            "and when you've clicked enough, leaps to where you're clicking and slams the ground like "
+                            "a fully charged Charged Slam - no upgrade needed.",
+                      does=[f"Leaps in and slams every {MITTS_CLICKS} of your clicks",
+                            "...or now and then on his own, if you're not clicking", "Flattens the block he lands on",
+                            "...and cracks the eight round it", "Harder as he levels up, and with your slam upgrades",
                             "Knocks back monsters caught in it"]),
     "archer": dict(title="Archer", tent="combat",
                    blurb="Keeps the crew covered from a distance, loosing arrows at whatever's grabbing someone "
                          "first, then the nearest monster.",
-                   does=["An arrow a second", "Each takes 10% of a monster's health", "Harder as they level up"]),
+                   does=["Two arrows a second", "Each hits like one of your clicks on a monster",
+                         "Grows with your Combat upgrades", "Up to twice as hard as they level up"]),
 }
 CAMP_ROLES = tuple(HIRES)   # (their roles in the crew are their keys)
+
+# Once a tent's hire has moved in, it branches out: things of theirs that can be taken on a visit instead of a new
+# hire (one pick per visit, whichever it is), each with a quirk of its own for every expedition after.
+# pos: where it sits on the camp board, beside its tent (grid units)
+ITEMS = {
+    "chompers": dict(name="Friendly Mimic", tent="fortune", pos=(1.35, 7.45),
+                     blurb="It looks like a treasure chest. It followed the Tax Collector home one night, and it's been "
+                           "fed ever since. Chompers comes down every shaft with you - and it has expensive tastes.",
+                     does=[f"Every {CHOMP_EVERY:.0f}s it hops to the richest block in the layer...", "...and gobbles it whole",
+                           "Coughs up twice what the block was worth", "Won't touch plain rock if there's ore about"]),
+    "ledger": dict(name="Crooked Ledger", tent="fortune", pos=(3.4, 5.15),
+                   blurb="The Tax Collector's private books: two columns, neither of them honest. Now and then an "
+                         "upgrade you buy just never makes it onto the page.",
+                   does=["1 in 6 upgrades you buy turn out free", "...the gold comes straight back to you",
+                         "Nobody asks where it went"]),
+}
+
+
+def open_items(camp, items):
+    """Items you could take now: their tent's hire is in, and they aren't yours yet."""
+    return [k for k, it in ITEMS.items() if TENTS[it["tent"]]["hire"] in camp and k not in items]
 
 
 def hireable(camp):

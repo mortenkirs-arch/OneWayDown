@@ -1,4 +1,5 @@
 """Drawing the isometric dig site, and mapping the mouse back onto blocks."""
+import copy
 import math
 import random
 import time
@@ -10,14 +11,14 @@ from .blocks import BLOCKS
 from .camp import CRUMBLE_FALL, ROPE_DROP
 from .config import BLOCK_H, GRID, TILE_H, TILE_W, W
 from .dynamite import EXPLOSION_SECS
-from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_SURFACE_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS,
+from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_PEEK_SECS, BRO_SURFACE_RADIUS, CURSE_RADIUS, CURSE_SECS, RALLY_RADIUS,
                       SHADE_RADIUS, VOID_INHALE_RADIUS, VOID_INHALE_SECS)
 from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bone, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
-from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, ROCK_SECS, SPIKE_FX_SECS,
-                           STEAM_SECS, WHETSTONE_POS)
+from .sprites import draw_bone, draw_pet_chest, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
+from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
+                           SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
 from .upgrades import PHANTOM_WINDUP
 from .util import shade
@@ -99,6 +100,11 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         items.append((BALLISTA_POS[0] + BALLISTA_POS[1] - 0.4, 2, "ballista", None))
     if w.lv("boiler"):
         items.append((BOILER_POS[0] + BOILER_POS[1] - 0.4, 2, "boiler", None))
+    if w.chomper:
+        items.append((w.chomper["x"] + w.chomper["y"] - 0.5, 2, "chompers", w.chomper))
+    peeker = bro_peeker(w)
+    if peeker:
+        items.append((peeker.x + peeker.y - 0.5, 2, "enemy", peeker))
     items.sort(key=lambda t: (t[0], t[1]))
 
     for _, _, kind, data in items:
@@ -135,6 +141,11 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y) + ghost_lift(w, data), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
+        elif kind == "chompers":
+            z = w.column_height(*w.cell_of(data["x"], data["y"])) + r
+            sx, sy = iso(data["x"], data["y"], z)
+            gape = 1.0 if w.clock - data["chomp_at"] < CHOMP_SHOW else (0.6 if data["hop"] else 0.0)
+            draw_pet_chest(surf, sx, sy, t, gape, data.get("facing", 1), lift=data["lift"] * 40)
         elif kind == "whetstone":
             busy = any(m.task == "sharpening" for m in w.miners)
             draw_whetstone(surf, _anchor(w, WHETSTONE_POS), t, busy)
@@ -143,7 +154,7 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         elif kind == "boiler":
             draw_boiler(surf, _anchor(w, BOILER_POS), w.boiler, t, hover_boiler)
         else:
-            draw_enemy(surf, data, r - entity_drop(w, data), t, hovered=data is hover_enemy)
+            draw_enemy(surf, data, r - entity_drop(w, data), t, hovered=data is hover_enemy, bar=data is not peeker)
 
     draw_falling_ropes(surf, w, t)
     draw_blast_zones(surf, w, t)
@@ -164,6 +175,7 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     draw_bolts(surf, w, t)
     draw_arrows(surf, w, t)
     draw_rocks(surf, w, t)
+    draw_femur_throws(surf, w, t)
     draw_chests(surf, w)
     for rx, ry, age, max_r, color in w.rings:
         q = age / 0.4
@@ -691,11 +703,28 @@ def draw_boss_auras(surf, world, t):
     surf.blit(overlay, (0, 0))
 
 
+def bro_peeker(world):
+    """The Burrow Brothers: the brother below while he pops his head up out of his mound (a stand-in to draw, out
+    of the ground as far as the peek has got), or None."""
+    boss = world.boss()
+    if not boss or boss.kind != "burrowbros" or not boss.mound or boss.peek is None:
+        return None
+    q = min(1.0, boss.peek / BRO_PEEK_SECS)
+    out = (1 - (1 - min(1.0, q / 0.15)) ** 2) * min(1.0, (1 - q) / 0.25)   # pops up fast, a look round, ducks back
+    peeker = copy.copy(boss)
+    peeker.x, peeker.y = boss.mound
+    peeker.draw_z = world.column_height(*world.cell_of(*boss.mound))
+    peeker.up, peeker.sunk = 1 - boss.up, int(35 + (1 - out) * 75)   # (head and shoulders out, at most)
+    peeker.windup, peeker.flash, peeker.surface_t = 0.0, 0.0, 9.0
+    peeker.facing = 1 if (boss.x - peeker.x) - (boss.y - peeker.y) >= 0 else -1   # (a look at his brother)
+    return peeker
+
+
 def draw_bro_mound(surf, world, t):
     """The Burrow Brothers: the tunnelling brother's mound ploughing towards the crew - and, as he's about to burst
-    up, a red ring where he'll come out."""
+    up, a red ring where he'll come out. (While he's peeking out of it, he's drawn instead: bro_peeker.)"""
     boss = world.boss()
-    if not boss or boss.kind != "burrowbros" or not boss.mound:
+    if not boss or boss.kind != "burrowbros" or not boss.mound or boss.peek is not None:
         return
     x, y = boss.mound
     cx, cy = iso(x, y, world.column_height(*world.cell_of(x, y)) + world.rise)
@@ -1017,6 +1046,15 @@ def draw_rocks(surf, world, t):
         pts = [(x + math.cos(spin + k * 2.1) * 4, y + math.sin(spin + k * 2.1) * 3.5) for k in range(3)]
         pygame.draw.polygon(surf, (130, 118, 108), pts)
         pygame.draw.polygon(surf, (70, 62, 58), pts, 1)
+
+
+def draw_femur_throws(surf, world, t):
+    """Tyrant's Femur: a bone the crew hurl at a monster that has hold of one of them, spinning on a high arc."""
+    for _, (sx, sy), enemy, age in world.femur_throws:
+        q = min(1.0, age / FEMUR_SECS)
+        tx, ty = enemy_anchor(enemy, world.rise, t)
+        x, y = sx + (tx - sx) * q, sy + (ty - sy) * q - math.sin(q * math.pi) * 50
+        draw_bone(surf, x, y, age * 18, 9, 4)
 
 
 def draw_spike_traps(surf, world):
