@@ -1,9 +1,9 @@
 """Achievements page: every achievement - the ones earned lit up, the rest dimmed but readable, so you know what to
-aim for - and, in a section of their own, the legendary ones that look impossible."""
+aim for - then, in sections of their own, the hard ones and the legendary ones that look impossible."""
 import pygame
 
-from ..achievements import ACHIEVEMENTS, LEGENDARY, STANDARD
-from ..config import GOLD, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
+from ..achievements import ACHIEVEMENTS, BY_TIER, TIERS, tier
+from ..config import H, MUTED, PANEL, PANEL_EDGE, TEXT, W
 from ..icons import draw_icon, draw_padlock
 from ..ui import Button, draw_text
 from ..util import shade
@@ -15,8 +15,6 @@ TOP, BOTTOM = 96, H - 70          # the scrolling list sits between these
 GAP = 10
 CARD_H = 66
 COLS = 4
-EARNED = (120, 200, 255)          # an earned achievement's colour...
-LEGEND = (255, 196, 70)           # ...and a legendary one's
 
 
 class AchievementScene(Scene):
@@ -44,10 +42,11 @@ class AchievementScene(Scene):
     def layout(self):
         """[(heading, y)], [(key, rect)] for everything on the page, before scrolling."""
         y, headings, cards = TOP, [], []
-        for heading, keys, cols in ((None, STANDARD, COLS), ("Legendary  -  the ones that look impossible", LEGENDARY, 2)):
-            card_w = (RIGHT - LEFT - GAP * (cols - 1)) // cols   # (the legendary ones have more to say: wider)
+        for t, keys in BY_TIER.items():
+            heading, cols = TIERS[t]["heading"], COLS if t == "standard" else 2
+            card_w = (RIGHT - LEFT - GAP * (cols - 1)) // cols   # (the harder ones have more to say: wider)
             if heading:
-                headings.append((heading, y + 8))
+                headings.append((heading, y + 8, TIERS[t]["color"]))
                 y += 40
             for i, key in enumerate(keys):
                 cards.append((key, pygame.Rect(LEFT + (i % cols) * (card_w + GAP),
@@ -66,13 +65,18 @@ class AchievementScene(Scene):
         got = sum(1 for k in ACHIEVEMENTS if k in w.achievements)
         draw_text(s, f, f"{got} of {len(ACHIEVEMENTS)} earned  -  paused", 26, MUTED,
                   (title.right + 18, title.centery + 2), "midleft")
-        legends = sum(1 for k in LEGENDARY if k in w.achievements)
-        draw_text(s, f, f"Legendary: {legends} of {len(LEGENDARY)}", 24, LEGEND, (RIGHT, title.centery + 2), "midright")
+        x = RIGHT
+        for t in ("legendary", "hard"):   # (right to left: Hard, then Legendary)
+            keys = BY_TIER[t]
+            done = sum(1 for k in keys if k in w.achievements)
+            rect = draw_text(s, f, f"{t.capitalize()}: {done} of {len(keys)}", 24, TIERS[t]["color"],
+                             (x, title.centery + 2), "midright")
+            x = rect.left - 24
         headings, cards, _ = self.layout()
         clip = s.get_clip()
         s.set_clip(pygame.Rect(0, TOP, W, BOTTOM - TOP))
-        for text, y in headings:
-            draw_text(s, f, text, 26, LEGEND, (LEFT, y - self.scroll))
+        for text, y, color in headings:
+            draw_text(s, f, text, 26, color, (LEFT, y - self.scroll))
         for key, rect in cards:
             rect = rect.move(0, -self.scroll)
             if rect.bottom > TOP and rect.top < BOTTOM:
@@ -87,11 +91,11 @@ class AchievementScene(Scene):
         f = self.fonts
         a = ACHIEVEMENTS[key]
         earned = key in self.world.achievements
-        legendary = a.get("legendary", False)
-        color = LEGEND if legendary else EARNED
+        special = tier(key) != "standard"
+        color = TIERS[tier(key)]["color"]
         pygame.draw.rect(s, PANEL if earned else (30, 26, 40), rect, border_radius=10)
-        edge = color if earned else (shade(LEGEND, 0.55) if legendary else PANEL_EDGE)
-        pygame.draw.rect(s, edge, rect, 2 if earned or legendary else 1, border_radius=10)
+        edge = color if earned else (shade(color, 0.55) if special else PANEL_EDGE)
+        pygame.draw.rect(s, edge, rect, 2 if earned or special else 1, border_radius=10)
         ic = (rect.x + 32, rect.centery)
         if earned:
             pygame.draw.circle(s, shade(color, 0.3), ic, 22)
@@ -101,5 +105,6 @@ class AchievementScene(Scene):
             draw_icon(s, a["icon"], ic, 16, (78, 72, 92))
             draw_padlock(s, (ic[0] + 14, ic[1] + 13), 6, (150, 140, 120))
         draw_text(s, f, a["name"], 22, color if earned else (170, 164, 184), (rect.x + 62, rect.y + 16), "midleft")
-        for i, line in enumerate(wrap(f, a["desc"], 18, rect.w - 72)[:2]):
-            draw_text(s, f, line, 18, TEXT if earned else MUTED, (rect.x + 62, rect.y + 36 + i * 16), "midleft")
+        # (20px: the default font's letter spacing goes ragged any smaller - "a ll", "monster s")
+        for i, line in enumerate(wrap(f, a["desc"], 20, rect.w - 72)[:2]):
+            draw_text(s, f, line, 20, TEXT if earned else MUTED, (rect.x + 62, rect.y + 36 + i * 18), "midleft")

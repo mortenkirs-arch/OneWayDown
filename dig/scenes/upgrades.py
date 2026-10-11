@@ -531,6 +531,8 @@ class UpgradeScene(Scene):
         name_img = self.fonts[size].render(up["name"], True, TEXT if state != "locked" else MUTED)
         if self.world.depth < up["depth"]:   # milestone not reached yet: the depth to dig to instead of the level
             lv_text, lv_color = f"at {self.world.shown(up['depth'])}m", (240, 150, 90)
+        elif up["camp"] and not self.world.camp:   # (or, for the camp people's upgrades, someone to use it on)
+            lv_text, lv_color = "needs a camp hire", (240, 150, 90)
         else:
             lv_text = "MAX" if state == "maxed" else (f"{lv}/{up['max']}" if up["max"] else f"Lv {lv}")
             lv_color = GOLD if state == "maxed" else MUTED
@@ -630,6 +632,8 @@ class UpgradeScene(Scene):
         if up["depth"]:
             needs.append((f"Reach depth {w.shown(up['depth'])}m  (you: {w.display_depth}m)", w.depth >= up["depth"],
                           None))
+        if up["camp"]:
+            needs.append(("Someone hired at Base Camp", bool(w.camp), None))
         if needs:
             draw_text(s, f, "Requires", 22, MUTED, (p.x + 20, y))
             y += 26

@@ -46,7 +46,7 @@ from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, ch
                        garlic_delay, garlic_ward, holy_bonus, salt_shrivel, salt_single, torch_grip, torch_singe,
                        SPREE_CAP, SPREE_WINDOW, spree_step, trophy_mult, boiler_charge,
                        bounty_mult, click_damage, depth_reached, dynamite_interval,
-                       enemy_hit_floor, is_maxed, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
+                       enemy_hit_floor, is_maxed, ko_secs, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, last_stand_mult, miner_regen, miner_strike, monster_damage, ore_damage_mult,
                        ore_mult, ore_richness,
                        COFFEE_BOOST, COFFEE_SECS, coffee_cups, coffee_interval, demo_interval, medic_heal, second_wind_boost, swing_time, upgrade_cost, value_mult,
@@ -64,7 +64,6 @@ FOREMAN_BARKS = ["Faster!", "Put your backs into it!", "That ore won't dig itsel
                  "Is that a nap, {name}?", "Gold doesn't wait!"]
 DRILL_HITS_PER_SWING = 7.5   # a driller lands this many small hits in the time a miner swings once...
 DRILL_SHARE = 0.25           # ...each worth this much of a miner's hit: ~1.9x a miner's digging
-KO_SECS = 25.0               # the camp's people are knocked out, not killed: back on their feet after this long
 HERO_POWER = 4.0             # the Hero Miner digs as hard as this many miners...
 HERO_STRIKE = 0.25           # ...and each rescue blow takes this share of a monster's max health (a heavy blow)...
 HERO_SWING = 0.6             # ...this often...
@@ -84,6 +83,7 @@ CHOMP_PAYOUT = 2.0           # ...and coughs up this many times what the block w
 LEDGER_CHANCE = 1 / 6        # Crooked Ledger: the share of upgrades bought that never make it onto the page (free)
 MITTS_LEAP = 0.45            # Clay Golem: every MITTS_CLICKS of your clicks, Mitts leaps to where you clicked,
                              # this long in the air, fists up, and comes down in a slam...
+MITTS_FOLLOW = 0.5           # ...a Charged Slam of yours charged at least this far brings him leaping in after it...
 MITTS_IDLE = 10.0            # ...left to himself (no clicks of yours this long), he goes anyway, to the thick of it...
 MITTS_CRACK = 0.15           # ...levelling the block under him and taking this share of the 8 round it (times his
                              # level bonus; deep rock only cracks: blocks.crack_share) - or your slam, if that's more
@@ -127,6 +127,7 @@ CRIT_QUAKES_SHOWN = 3        # ...and only this many of those waves show at once
 COMBO_WINDOW = 0.9           # Combo Clicks: seconds you can pause between clicks before it drops
 COMBO_CAP = 20               # ...and the most clicks that count
 GOLDEN_SECS = 6.0            # Golden Blocks: how long a golden block lasts
+SLAM_CLICK_RATE = 6.0        # Charged Slam: it pays (Golden Touch) for at least this many clicks a second of holding
 SLAM_MONSTER_MULT = 2.0      # Charged Slam: a full slam hits monsters for this many monster clicks
 GLOVES_TOUGHEN_FROM = 50     # past this depth your clicks toughen with the rock (the deep rock's extra excepted)
 CHEST_PAYOUT = 15            # Buried Treasure: chest worth this many times its block's value
@@ -215,7 +216,7 @@ class World:
         self.achievements = []             # achievements earned, in order (achievements.py: kept for good)...
         self.achievement_queue = []        # ...those still to be announced on the dig...
         self.feats = new_feats()           # ...counts of the things they need that the lifetime record doesn't keep...
-        self.run = new_run(0.0)            # ...and how this expedition is going, for the legendary ones
+        self.run = new_run(0.0)            # ...and how this expedition is going (for the expedition-long ones)
         self.achieve_timer = 0.0           # (the checks run about once a second)
         self.boss_fight_start = 0.0        # game clock when the boss on the board rose (Untouchable)
         self.chomper = None                # Chompers, the camp's tame Mimic, on the dig: {x, y, timer, hop, chomp_at}
@@ -373,8 +374,8 @@ class World:
 
     def glove_scale(self):
         """Power Gloves toughen with the rock: past GLOVES_TOUGHEN_FROM a click (and so every slam, blast and tap
-        built on one) grows as the blocks do. Not with the endgame's deep
-        rock, though - past 70m your hands slow down along with the crew."""
+        built on one) grows as the blocks do. Not with the deep's harder rock, though - past blocks.DEEP_ROCK_FROM
+        your hands slow down along with the crew."""
         return HP_GROWTH ** max(0, self.depth - GLOVES_TOUGHEN_FROM)
 
     def monster_hit_damage(self):
@@ -1389,6 +1390,8 @@ class World:
         if all(m.last_hurt < start for m in self.miners) and not any(g.get("died_clock", 0) >= start
                                                                      for g in self.graveyard):
             self.achieve("untouchable")
+        if not any(self.levels[u["key"]] for u in UPGRADES if u["branch"] == "combat"):
+            self.achieve("hold_beer")   # (not one Combat upgrade to your name)
         self.finish_boss_fight()
         if self.depth >= EXPEDITION_DEPTH:   # the bottom of the expedition: the shaft comes down, there and then
             self.start_collapse()
@@ -1637,9 +1640,9 @@ class World:
 
     def miner_down(self, miner, killer=None):
         """Death is permanent: the miner is buried, and a new recruit arrives when the timer runs out.
-        (The camp's people are only ever knocked out: they get back up after KO_SECS.)"""
+        (The camp's people are only ever knocked out: they get back up after upgrades.ko_secs - Smelling Salts.)"""
         if miner.role in CAMP_ROLES:
-            miner.state, miner.ko, miner.respawn = "down", True, KO_SECS
+            miner.state, miner.ko, miner.respawn = "down", True, ko_secs(self.lv("salts"))
             miner.curse, miner.attacker, miner.target = 0.0, None, None
             px, py = self.entity_screen(miner, 40)
             self.floaters.append(Floater(f"{miner.name} is knocked out!", px, py - 20, (255, 210, 120), life=1.8,
@@ -1853,8 +1856,8 @@ class World:
 
     # ----- upgrades -------------------------------------------------------
     def available(self, up):
-        """Prerequisites owned and depth milestone reached."""
-        return is_unlocked(up, self.levels) and depth_reached(up, self.depth)
+        """Prerequisites owned, depth milestone reached - and for the camp people's upgrades, someone hired."""
+        return is_unlocked(up, self.levels) and depth_reached(up, self.depth) and (bool(self.camp) or not up["camp"])
 
     def can_buy(self, up):
         return self.available(up) and not is_maxed(up, self.levels) and self.gold >= self.cost(up)
@@ -2084,23 +2087,31 @@ class World:
             self.particles.append(Particle(px, py, random.choice([GOLD, (255, 240, 170), (255, 255, 255)]), big=True))
         self.golden = None
 
-    def slam(self, cell, charge, target=None):
+    def slam(self, cell, charge, target=None, held=None):
         """Charged Slam: a huge hit on `cell` (charge 0..1) that shakes the blocks around it.
-        Monsters in the blast - and `target`, the one under the cursor - take up to 2x a monster click."""
+        Monsters in the blast - and `target`, the one under the cursor - take up to 2x a monster click.
+        `held`: seconds you held the button for it (None: not yours - Phantom Slam's ghostly hand)."""
         if cell not in self.current:
             return
+        yours = held is not None
         if self.golden and self.golden[0] == cell:   # slammed, not clicked: the jackpot is still yours
             self.golden_jackpot(cell, self.current[cell])
-        self.run["no_block_clicks"] = False
-        if charge >= 1:
-            self.achieve("full_slam")
+        if yours:
+            self.run["no_block_clicks"] = False
+            if charge >= 1:
+                self.achieve("full_slam")
+            if charge >= MITTS_FOLLOW:   # (the Clay Golem comes in right behind it)
+                self.mitts_follow(cell)
         power = 0.3 + 0.7 * charge
         dmg = self.click_hit_damage() * slam_mult(self.lv("slam")) * power
+        if yours:   # holding for a slam costs you the clicks you'd have made: it pays for them as clicks would
+            self.slam_pay(cell, dmg, max(slam_mult(self.lv("slam")) * power, held * SLAM_CLICK_RATE))
         click = self.monster_hit_damage() * self.combo_mult()
         for e in list(self.enemies):
             in_blast = max(abs(e.x - (cell[0] + 0.5)), abs(e.y - (cell[1] + 0.5))) <= 1.5
             if e.targetable and (in_blast or e is target):
-                self.run["no_monster_clicks"] = False
+                if yours:
+                    self.run["no_monster_clicks"] = False
                 self.hit_enemy(e, self.enemy_hit_damage(e, click) * SLAM_MONSTER_MULT * power, floor=False,
                                heavy=True)
         px, py = self.cell_screen(cell)
@@ -2117,6 +2128,19 @@ class World:
             if self.depth != depth:
                 return
             self.damage(c, dmg * 0.5, sparks=2)
+
+    def slam_pay(self, cell, dmg, clicks):
+        """A Charged Slam of yours earns what clicking would have: Golden Touch for every one of the `clicks` it
+        stands for, and Gold Dust for the share of the block it knocks off."""
+        block = self.current[cell]
+        worth = block.value * value_mult(self.lv("value"))
+        px, py = self.cell_screen(cell)
+        if self.lv("golden"):
+            self.earn(worth * 0.05 * self.lv("golden") * clicks)
+            for _ in range(6):
+                self.particles.append(Particle(px, py, GOLD))
+        if self.lv("golddust"):
+            self.gold_dust(min(dmg, block.hp) / block.max_hp * worth, px, py)
 
     def vent_boiler(self):
         """Steam Boiler: a full head of steam scalds every monster on the board (bosses, and the Slime King's
@@ -2324,7 +2348,7 @@ class World:
             self.floaters.append(Floater(biome["name"].upper(), W / 2, 260, biome["accent"], life=3.5, size=48))
             self.floaters.append(Floater("You've broken into a new part of the mine", W / 2, 300, TEXT, life=3.5,
                                          size=24))
-        unlocked = [u for u in UPGRADES if u["depth"] == self.depth]
+        unlocked = [u for u in UPGRADES if u["depth"] == self.depth and (self.camp or not u["camp"])]
         if unlocked:   # depth milestone: new upgrades open up
             self.new_unlocks.update(u["key"] for u in unlocked)
             names = ", ".join(u["name"] for u in unlocked)
@@ -2468,17 +2492,17 @@ class World:
                 self.achieve(key, quiet)
 
     def expedition_won(self):
-        """The Void Maw has fallen: the legendary achievements that take a whole expedition."""
+        """The Void Maw has fallen: the achievements that take a whole expedition."""
         r = self.run
         self.achieve("voidmaw")
+        if not any(self.levels[u["key"]] for u in UPGRADES if u["branch"] == "fortune"):
+            self.achieve("no_fortune")   # (upgrades can't be sold: what's owned now is all that was bought)
         if not r["clean"]:   # (tracked from part-way through: it can't count)
             return
         if r["one_miner"] and r["no_deaths"]:
             self.achieve("president")
-        if r["no_block_clicks"]:
+        if r["no_block_clicks"] and r["no_monster_clicks"]:
             self.achieve("hands_off")
-        if r["no_monster_clicks"]:
-            self.achieve("objector")
         if r["no_deaths"]:
             self.achieve("flawless")
         if self.clock - r["start"] < SPEED_DEMON_SECS:
@@ -2571,11 +2595,21 @@ class World:
         else:
             return
         if golem.goal is not None:
-            golem.idle = 0.0
-            golem.task, golem.task_timer, golem.leap_from = "leaping", MITTS_LEAP, (golem.x, golem.y)
-            dx, dy = golem.goal[0] + 0.5 - golem.x, golem.goal[1] + 0.5 - golem.y
-            golem.facing = 1 if dx - dy >= 0 else -1
-            self.cues.append(("hit", 0.3))
+            self.golem_leap(golem, golem.goal)
+
+    def golem_leap(self, golem, cell):
+        """Mitts launches himself at `cell`, to come down on it in a slam (update_clay_golem flies him there)."""
+        golem.goal, golem.idle = cell, 0.0
+        golem.task, golem.task_timer, golem.leap_from = "leaping", MITTS_LEAP, (golem.x, golem.y)
+        dx, dy = cell[0] + 0.5 - golem.x, cell[1] + 0.5 - golem.y
+        golem.facing = 1 if dx - dy >= 0 else -1
+        self.cues.append(("hit", 0.3))
+
+    def mitts_follow(self, cell):
+        """A good Charged Slam of yours: Mitts comes leaping in after it, to the same spot (if he's free to)."""
+        for golem in self.miners:
+            if golem.role == "claygolem" and golem.state == "working" and golem.task != "leaping":
+                self.golem_leap(golem, cell)
 
     def golem_slam(self, golem, cell):
         """Mitts' fists come down: the block under them is levelled and the eight round it lose MITTS_CRACK of

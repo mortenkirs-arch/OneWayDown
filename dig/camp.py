@@ -55,6 +55,7 @@ HIRES = {
                             "and when you've clicked enough, leaps to where you're clicking and slams the ground like "
                             "a fully charged Charged Slam - no upgrade needed.",
                       does=[f"Leaps in and slams every {MITTS_CLICKS} of your clicks",
+                            "...right behind your Charged Slams, too",
                             "...or now and then on his own, if you're not clicking", "Flattens the block he lands on",
                             "...and cracks the eight round it", "Harder as he levels up, and with your slam upgrades",
                             "Knocks back monsters caught in it"]),

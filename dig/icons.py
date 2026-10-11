@@ -245,6 +245,12 @@ def draw_icon(surf, kind, c, s, col):
         pygame.draw.circle(surf, dark, (x - s * 0.1, y + s * 0.15), max(2, s * 0.25))
         pygame.draw.circle(surf, col, (x + s * 0.55, y - s * 0.95), max(2, s * 0.2), 2)
         pygame.draw.circle(surf, col, (x + s * 0.85, y - s * 1.05), max(2, s * 0.14), 2)
+    elif kind == "salts":   # a little bottle of smelling salts, fumes curling up out of it
+        pygame.draw.rect(surf, col, (x - s * 0.4, y - s * 0.1, s * 0.8, s * 0.75), border_radius=3)
+        pygame.draw.rect(surf, dark, (x - s * 0.22, y - s * 0.32, s * 0.44, s * 0.24), border_radius=2)
+        pygame.draw.line(surf, dark, (x - s * 0.25, y + s * 0.25), (x + s * 0.25, y + s * 0.25), 2)
+        for d in (-1, 1):
+            pygame.draw.arc(surf, col, (x + d * s * 0.2 - s * 0.2, y - s * 0.95, s * 0.4, s * 0.55), 0.5, 2.6, 2)
     elif kind == "holywater":   # a stoppered flask with a cross on it
         pygame.draw.circle(surf, col, (x, y + s * 0.3), s * 0.6)
         pygame.draw.rect(surf, col, (x - s * 0.2, y - s * 0.65, s * 0.4, s * 0.5))

@@ -32,10 +32,10 @@ BONE_CHANCE = 0.08          # share of plain rock blocks (never ore) with old bo
 
 HP_GROWTH = 1.12
 VALUE_GROWTH = 1.115
-DEEP_ROCK_FROM = 70         # the endgame: past this depth (within each expedition) the rock gets far harder...
-DEEP_ROCK = 1.15            # ...this much more again every metre (on top of HP_GROWTH), without paying any more...
-DEEP_CRACK = 0.8            # ...and anything that breaks rock by a share of it (charges, Vein Follower) manages only
-                            # this much as much, metre on metre...
+DEEP_ROCK_FROM = 70         # the deep: past this depth (within each expedition) the rock gets steadily harder...
+DEEP_ROCK = 1.12            # ...this much more again every metre (on top of HP_GROWTH), without paying any more...
+DEEP_CRACK = DEEP_ROCK ** -1.6   # ...and anything that breaks rock by a share of it (charges, Vein Follower) manages
+                            # only this much as much, metre on metre (falling off a little faster than the rock hardens)...
 DEEP_ROCK_TO = 90           # ...until here: past it the rock only gets the usual harder, so the last few metres to
                             # 100 don't drag (deep enough to be an endgame, short enough to want another run)
 
@@ -45,7 +45,7 @@ def hp_scale(depth):
 
 
 def rock_scale(depth):
-    """How tough a block is at this depth: the usual growth, and the endgame's deep rock past DEEP_ROCK_FROM."""
+    """How tough a block is at this depth: the usual growth, and the deep's harder rock past DEEP_ROCK_FROM."""
     return hp_scale(depth) * DEEP_ROCK ** deep_metres(depth)
 
 
@@ -55,7 +55,7 @@ def crack_share(depth):
 
 
 def deep_metres(depth):
-    """Metres of the endgame's deep rock above this depth (DEEP_ROCK_FROM to DEEP_ROCK_TO)."""
+    """Metres of the deep's harder rock above this depth (DEEP_ROCK_FROM to DEEP_ROCK_TO)."""
     return max(0, min(depth, DEEP_ROCK_TO) - DEEP_ROCK_FROM)
 
 
@@ -73,7 +73,9 @@ class Block:
         self.artifact = artifact   # hides an artifact (which one is decided when it breaks)
         self.bones = bones         # old bones in the rock: a little extra gold if you click it to pieces
         self.max_hp = spec["hp"] * rock_scale(depth)
-        self.hp = self.max_hp if hp is None else hp
+        # (a saved block keeps the damage done to it, but never more toughness than a block like it has now:
+        # one saved while the rock was tougher - an older balance - mustn't stay that tough for good)
+        self.hp = self.max_hp if hp is None else min(hp, self.max_hp)
         self.value = spec["value"] * value_scale(depth)
 
 

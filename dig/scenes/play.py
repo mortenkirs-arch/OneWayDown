@@ -12,7 +12,7 @@ SLAM_MIN_HOLD = 0.35    # hold at least this long for a slam (a quick click is j
 SLAM_FULL_HOLD = 0.9    # ...and this much longer for a full-power slam
 TOP_PANEL = pygame.Rect(16, 16, 420, 160)
 HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bottom-left
-from ..achievements import ACHIEVEMENTS
+from ..achievements import ACHIEVEMENTS, TIERS, tier
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
 from ..camp import COLLAPSE_FADE, COLLAPSE_SECS
 from ..enemies import ENEMY_START_DEPTH, max_enemies
@@ -113,7 +113,7 @@ class PlayScene(Scene):
         cell = self.slam_target(pos)
         if cell:
             self.world.slam(cell, min(1.0, (held - SLAM_MIN_HOLD) / SLAM_FULL_HOLD),
-                            target=pick_enemy(self.world, pos, time.time()))
+                            target=pick_enemy(self.world, pos, time.time()), held=held)
 
     def mitts_target(self, pos):
         """Where Mitts should come down for a click at `pos`: the monster under it, or else the block."""
@@ -176,8 +176,7 @@ class PlayScene(Scene):
             self.banner = [w.achievement_queue.pop(0), now]
         key, since = self.banner
         a = ACHIEVEMENTS[key]
-        legendary = a.get("legendary", False)
-        color = (255, 196, 70) if legendary else (120, 200, 255)
+        color = TIERS[tier(key)]["color"]
         age = now - since
         secs = self.BANNER_SECS if not w.achievement_queue else 2.0
         slide = min(1.0, age / 0.25, max(0.0, (secs - age) / 0.25))   # in and out
@@ -188,7 +187,7 @@ class PlayScene(Scene):
         ic = (box.x + 38, box.centery)
         pygame.draw.circle(surf, tuple(c // 3 for c in color), ic, 24)
         draw_icon(surf, a["icon"], ic, 17, color)
-        heading = "LEGENDARY ACHIEVEMENT!" if legendary else "ACHIEVEMENT UNLOCKED"
+        heading = TIERS[tier(key)]["banner"]
         draw_text(surf, self.fonts, heading, 18, color, (box.x + 74, box.y + 18), "midleft")
         draw_text(surf, self.fonts, a["name"], 28, TEXT, (box.x + 74, box.y + 44), "midleft")
 
@@ -437,11 +436,10 @@ class PlayScene(Scene):
         if locked:   # a padlock on it: there's something down there to unlock
             draw_padlock(surf, (camp.rect.x + 22, camp.rect.centery), 9, (200, 190, 150))
         affordable = sum(1 for u in UPGRADES if w.can_buy(u))
-        for count, button in ((affordable, self.buttons[0]), (len(w.new_artifacts), self.buttons[3])):
-            if count:
-                badge = (button.rect.right - 4, button.rect.top + 2)
-                pygame.draw.circle(surf, BAD, badge, 12)
-                draw_text(surf, f, str(count), 22, TEXT, badge, "center")
+        if affordable:   # (upgrades you can afford get a count; new artifacts don't - you closed their card)
+            badge = (self.buttons[0].rect.right - 4, self.buttons[0].rect.top + 2)
+            pygame.draw.circle(surf, BAD, badge, 12)
+            draw_text(surf, f, str(affordable), 22, TEXT, badge, "center")
 
         down = sum(1 for m in w.miners if m.state == "down")
         specialists = sum(1 for m in w.miners if m.role != "miner")

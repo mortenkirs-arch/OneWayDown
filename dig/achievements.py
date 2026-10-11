@@ -3,12 +3,13 @@
 Each achievement is data:
   name, desc      what it's called, and what it takes
   icon            a kind from icons.draw_icon
-  legendary       True for the ones that look impossible (they get a section, and a border, of their own)
+  tier            "hard" for real challenges, "legendary" for the ones that look impossible (each gets a section,
+                  and a colour, of its own: TIERS); standard if left out
   check           (optional) World -> bool, checked about once a second; without one it's earned where it happens,
                   by World.achieve(key) (a jackpot, a boss falling, the end of an expedition...)
 
 World.feats counts the things the record doesn't (jackpots, chests, clicks...), and World.run tracks how this
-expedition is going for the legendary ones (one miner, no clicks...): see World.expedition_won.
+expedition is going for the ones that take a whole expedition (one miner, no clicks...): see World.expedition_won.
 """
 from .artifacts import COMMON, TROPHY_OF
 from .camp import CAMP_ROLES, HIRES, ITEMS
@@ -20,7 +21,6 @@ from .upgrades import UPGRADES, is_maxed
 HIRE_UPGRADES = ("driller", "guard", "medic", "demolition", "foreman")
 SPEED_DEMON_SECS = 30 * 60   # Speed Demon: an expedition beaten in under this long
 QUICK_KILL_SECS = 10.0       # Ten-Second Takedown: a boss beaten within this long of it rising
-PENNY_DEPTH, PENNY_LEVELS = 30, 5   # Penny Pincher: this deep within an expedition on no more upgrade levels than this
 
 
 def _crew(w):
@@ -137,35 +137,46 @@ ACHIEVEMENTS = {
                        check=lambda w: w.feats["clicks"] >= 10_000),
     "boiler": dict(name="Letting Off Steam", icon="boiler", desc="Vent the Steam Boiler"),
 
-    # ----- legendary: the ones that look impossible ----------------------------------------------------------------
-    "president": dict(name="Protect Mr. President", icon="miner", legendary=True,
+    # ----- hard and legendary: real challenges, and the ones that look impossible -------------------------------------
+    "president": dict(name="Protect Mr. President", icon="miner", tier="legendary",
                       desc="Beat an expedition with a single miner - Hire Miner never past level 1, no other hires - "
                            "and nobody ever falls"),
-    "hands_off": dict(name="Look, No Hands", icon="hand", legendary=True,
-                      desc="Beat an expedition without clicking a single block yourself"),
-    "objector": dict(name="Conscientious Objector", icon="shield", legendary=True,
-                     desc="Beat an expedition without clicking a single monster yourself"),
-    "flawless": dict(name="Not One Lost", icon="cross", legendary=True,
+    "hands_off": dict(name="Look, No Hands", icon="hand", tier="legendary",
+                      desc="Beat an expedition without clicking a single block or monster yourself"),
+    "no_fortune": dict(name="Money Isn't Everything", icon="coins", tier="hard",
+                       desc="Beat an expedition without buying a single Fortune upgrade"),
+    "flawless": dict(name="Not One Lost", icon="cross", tier="legendary",
                      desc="Beat an expedition without losing a single crew member"),
-    "speed_demon": dict(name="Speed Demon", icon="clock", legendary=True,
+    "speed_demon": dict(name="Speed Demon", icon="clock", tier="hard",
                         desc=f"Beat an expedition in under {SPEED_DEMON_SECS // 60} minutes"),
-    "quick_kill": dict(name="Ten-Second Takedown", icon="bolt", legendary=True,
+    "quick_kill": dict(name="Ten-Second Takedown", icon="bolt", tier="hard",
                        desc=f"Defeat a boss within {QUICK_KILL_SECS:.0f} seconds of it rising"),
-    "untouchable": dict(name="Untouchable", icon="shield", legendary=True,
+    "untouchable": dict(name="Untouchable", icon="shield", tier="hard",
                         desc="Defeat a boss without a single one of your crew taking a scratch"),
-    "lucky": dict(name="Against All Odds", icon="star", legendary=True,
+    "hold_beer": dict(name="Hold My Beer", icon="mug", tier="hard",
+                      desc="Defeat a boss without owning a single Combat upgrade"),
+    "lucky": dict(name="Against All Odds", icon="star", tier="hard",
                   desc="Have the Crooked Ledger lose three receipts in a row"),
-    "penny": dict(name="Penny Pincher", icon="coin", legendary=True,
-                  desc=f"Reach {PENNY_DEPTH}m into an expedition owning no more than {PENNY_LEVELS} upgrade levels",
-                  check=lambda w: w.depth >= PENNY_DEPTH and _levels(w) <= PENNY_LEVELS and w.run["clean"]),
 }
-STANDARD = [k for k, a in ACHIEVEMENTS.items() if not a.get("legendary")]
-LEGENDARY = [k for k, a in ACHIEVEMENTS.items() if a.get("legendary")]
+# The tiers, easiest first: how each looks, its heading on the Achievements page, and its banner on the dig
+TIERS = {
+    "standard": dict(color=(120, 200, 255), heading=None, banner="ACHIEVEMENT UNLOCKED"),
+    "hard": dict(color=(245, 120, 90), heading="Hard  -  for those who like a challenge", banner="HARD ACHIEVEMENT!"),
+    "legendary": dict(color=(255, 196, 70), heading="Legendary  -  the ones that look impossible",
+                      banner="LEGENDARY ACHIEVEMENT!"),
+}
+
+
+def tier(key):
+    return ACHIEVEMENTS[key].get("tier", "standard")
+
+
+BY_TIER = {t: [k for k in ACHIEVEMENTS if tier(k) == t] for t in TIERS}
 CHECKED = [k for k, a in ACHIEVEMENTS.items() if "check" in a]
 
 
 def new_run(clock):
-    """How this expedition is going, for the legendary achievements. `clean`: tracked from its very start (an
+    """How this expedition is going, for the achievements that take a whole one. `clean`: tracked from its very start (an
     expedition already under way in a save from before achievements can't count)."""
     return dict(start=clock, clean=True, one_miner=True, no_deaths=True, no_block_clicks=True,
                 no_monster_clicks=True)
