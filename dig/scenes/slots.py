@@ -19,8 +19,7 @@ MODES = [   # (casual?, name, colour, lines of what it means)
                             ("Blocks pay three times the gold", TEXT),
                             ("A relaxed dig: a good place to start", MUTED)]),
     (False, "Normal", BAD, [("The full horde, and bosses at full strength", TEXT),
-                            ("Warning: your crew are expected to die.", BAD),
-                            ("The fallen are gone for good: recruits replace them", MUTED)]),
+                            ("Warning: your crew are expected to die.", BAD)]),
 ]
 
 
