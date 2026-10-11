@@ -42,11 +42,11 @@ from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, ch
                        combo_step, dust_share, golden_interval, golden_payout, milestone_mult, slam_mult, streak_bonus,
                        PHANTOM_CHARGE, PHANTOM_WINDUP, phantom_interval,
                        trap_share, vault_rate, vein_share, whetstone_boost,
-                       ACID_HITS, CUTDOWN_AT, VOLATILE_BLAST, flare_burn, flare_ease, pole_share,
+                       ACID_HITS, CUTDOWN_AT, SWITCH_BLOCKS, SWITCH_MONSTERS, SWITCH_RADIUS, VOLATILE_BLAST, flare_burn, flare_ease, pole_share,
                        garlic_delay, garlic_ward, holy_bonus, salt_shrivel, salt_single, torch_grip, torch_singe,
                        SPREE_CAP, SPREE_WINDOW, spree_step, trophy_mult, boiler_charge,
                        bounty_mult, click_damage, depth_reached, dynamite_interval,
-                       enemy_hit_floor, is_maxed, ko_secs, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
+                       effect_level, enemy_hit_floor, is_maxed, ko_secs, is_unlocked, masterwork_mult, midas_mult, miner_count, miner_damage,
                        miner_max_hp, last_stand_mult, miner_regen, miner_strike, monster_damage, ore_damage_mult,
                        ore_mult, ore_richness,
                        COFFEE_BOOST, COFFEE_SECS, coffee_cups, coffee_interval, demo_interval, medic_heal, second_wind_boost, swing_time, upgrade_cost, value_mult,
@@ -265,7 +265,9 @@ class World:
         self.grab_sound_at = -1e9                               # when the last "crew grabbed" alert sounded
 
     # ----- stats ----------------------------------------------------------
-    def lv(self, key): return self.levels[key]
+    def lv(self, key):
+        """An upgrade's level, as its effect works at (its ranks, each worth more on the trees: effect_level)."""
+        return effect_level(key, self.levels[key])
 
     def refresh_artifacts(self):
         """Combine the effects of every artifact found (multiply 'mult' stats, add 'add' stats)."""
@@ -1654,6 +1656,8 @@ class World:
         miner.curse = 0.0
         miner.respawn = RESPAWN_SECS
         self.run["no_deaths"] = False
+        if self.lv("switch"):
+            self.dead_mans_switch(miner)
         miner.attacker = None
         miner.target = None
         self.bury(miner, killer)
@@ -1665,6 +1669,27 @@ class World:
             self.floaters.append(Floater(f"{miner.name} has died!", px, py - 20, BAD, life=1.8, size=26))
         for _ in range(12):
             self.particles.append(Particle(px, py, miner.shirt, big=True))
+
+    def dead_mans_switch(self, miner):
+        """Dead Man's Switch: a fallen crew member's charge goes off - the monsters close by take a share of their
+        health (bosses shrug most of it off), and the blocks round where they fell take a share of theirs. (Unlike
+        other charges, deep rock doesn't shrug it off: it's an end-game upgrade, and the deep is all it knows.)"""
+        rank = self.lv("switch")
+        px, py = self.entity_screen(miner, 20)
+        self.explosions.append([px, py, 0.0, 70])
+        self.cues.append(("boom", 0.6))
+        self.shake, self.shake_power = max(self.shake, 0.25), 5
+        for e in list(self.enemies):
+            if e.targetable and math.hypot(e.x - miner.x, e.y - miner.y) <= SWITCH_RADIUS:
+                self.hit_enemy(e, e.max_hp * SWITCH_MONSTERS * rank * e.pct_scale, floor=False, ring=(255, 150, 60),
+                               heavy=True)
+        cx, cy = self.cell_of(miner.x, miner.y)
+        depth, share = self.depth, SWITCH_BLOCKS * rank
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                block = self.current.get((cx + dx, cy + dy))
+                if block and self.depth == depth:
+                    self.damage((cx + dx, cy + dy), block.max_hp * share, sparks=4)
 
     def bury(self, miner, killer=None):
         self.graveyard.append({

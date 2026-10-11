@@ -74,6 +74,9 @@ def pole_share(lv): return 0.15 * lv                  # Ten-Foot Poles: share of
 ACID_HITS = 4                                         # Acid Edge: hits that eat through a Rock Golem's armour
 def flare_ease(lv): return 0.3 * lv                   # Flares: share of a shade's slowdown the crew shake off...
 def flare_burn(lv): return 0.03 * lv                  # ...and share of its max hp a shade burns away per second
+SWITCH_MONSTERS = 0.4                                 # Dead Man's Switch: a fallen crew member's blast takes this share of
+SWITCH_BLOCKS = 0.5                                   # nearby monsters' max hp per rank, and this of the blocks' round them
+SWITCH_RADIUS = 1.8                                   # (tiles)
 VOLATILE_BLAST = 1.0                                  # Volatile Remains: a dying monster's blast, in its max hp
                                                       # (monsters and rock grow alike past 90m, so it keeps its share)
 CUTDOWN_AT = 0.4                                      # Cut Down to Size: elites shrink at this share of their health
@@ -103,196 +106,202 @@ UPGRADES = [
     _up("miners", "Hire Miner", "crew", "miner", (0, 0), [], 15, 4.83, 16,
         "Another miner joins the dig.",
         lambda l: f"{miner_count(l)} miner{'s' if miner_count(l) != 1 else ''} hired"),
-    _up("boots", "Mining Boots", "tools", "boot", (-35, 0.5), [("power", 1)], 22, 15.48, 8,
+    _up("boots", "Mining Boots", "tools", "boot", (-35, 0.5), [("power", 1)], 74, 20.75, 8,
         "Miners walk between blocks faster.", lambda l: f"{walk_speed(l):.1f} tiles / s"),
-    _up("teamwork", "Teamwork", "crew", "team", (22, 1.6), [("miners", 1)], 560, 14.10, 5,
+    _up("teamwork", "Teamwork", "crew", "team", (22, 1.6), [("miners", 1)], 1900, 49.73, 5,
         "Every miner on the crew boosts everyone's damage.", lambda l: f"+{3 * l}% dmg per miner"),
-    _up("foreman", "Foreman", "crew", "crown", (24, 3), [("teamwork", 1)], 53000, 13.14, 3,
+    _up("foreman", "Foreman", "crew", "crown", (24, 3), [("teamwork", 1)], 180000, 174.80, 3,
         "Hire a foreman who walks the site barking orders. While they're alive the whole crew swings "
         "faster, and miners they're standing near faster still.",
         lambda l: f"+{round(100 * (1 / 0.9 ** l - 1))}% swing speed"),
-    _up("coffee", "Coffee Break", "crew", "mug", (0, 1), [("miners", 1)], 41, 24.37, 3,
+    _up("coffee", "Coffee Break", "crew", "mug", (0, 1), [("miners", 1)], 140, 1359.17, 3,
         f"Every so often the crew take a coffee break: a digger downs a mug and swings {round(100 * COFFEE_BOOST)}% "
         f"faster for {COFFEE_SECS:.0f} seconds. More levels, more rounds - and more cups in each.",
         lambda l: "no coffee" if l == 0 else
         f"{coffee_cups(l)} cup{'s' if coffee_cups(l) != 1 else ''} every {coffee_interval(l)}s"),
-    _up("secondwind", "Second Wind", "crew", "wind", (2, 2.4), [("coffee", 1)], 6700, 12.91, 3,
+    _up("secondwind", "Second Wind", "crew", "wind", (2, 2.4), [("coffee", 1)], 22000, 295.85, 3,
         "Clearing a layer gives the crew a burst of speed.",
         lambda l: f"+{round(100 * second_wind_boost(l))}% swing speed for 8s"),
-    _up("salts", "Smelling Salts", "crew", "salts", (-7, 3.6), [("secondwind", 1)], 15000, 14.84, 3,
+    _up("salts", "Smelling Salts", "crew", "salts", (-7, 3.6), [("secondwind", 1)], 51000, 252.09, 3,
         "A whiff of smelling salts under the nose: the Base Camp people come round from a knockout sooner.",
         lambda l: f"back on their feet after {ko_secs(l):.0f}s"),
-    _up("driller", "Hire Driller", "crew", "jackhammer", (-22, 1), [("miners", 1)], 52, 23.69, 3,
+    _up("driller", "Hire Driller", "crew", "jackhammer", (-22, 1), [("miners", 1)], 170, 1364.40, 3,
         "A stocky driller with a jackhammer: double health and slow on their feet, but hammers through "
         "blocks almost twice as fast as a miner.", lambda l: f"{l} driller{'s' if l != 1 else ''}"),
-    _up("guard", "Hire Guard", "crew", "lantern", (-27, 2), [("driller", 1), ("defense", 1)], 3100, 12.05, 3,
+    _up("guard", "Hire Guard", "crew", "lantern", (-27, 2), [("driller", 1), ("defense", 1)], 10000, 315.20, 3,
         "A burly guard who patrols the dig and fights monsters on their own, rushing to anyone being grabbed.",
         lambda l: f"{l} guard{'s' if l != 1 else ''}"),
-    _up("demolition", "Demolitionist", "crew", "tnt", (-19, 3), [("guard", 1)], 140000, 11.08, 3,
+    _up("demolition", "Demolitionist", "crew", "tnt", (-19, 3), [("guard", 1)], 470000, 127.11, 3,
         "Hire a demolitionist who plants charges where the blocks are thickest: each one levels every "
         "block in a 3x3. More levels, more charges.",
         lambda l: "no demolitionist" if l == 0 else f"a 3x3 charge every {demo_interval(l):.1f}s"),
-    _up("medic", "Hire Medic", "crew", "medkit", (-33, 3), [("guard", 1), ("firstaid", 1)], 27000, 13.10, 3,
+    _up("switch", "Dead Man's Switch", "crew", "bomb", (-28, 4.4), [("demolition", 1), ("laststand", 1)],
+        620_000_000, 37.01, 3,
+        "Every crew member carries a charge rigged to blow if they fall: when one dies, the blast tears into the "
+        "monsters around them and breaks up the rock where they stood.",
+        lambda l: f"{round(100 * SWITCH_MONSTERS * l)}% of nearby monsters' hp, {round(100 * SWITCH_BLOCKS * l)}% of the "
+                  f"blocks' round them"),
+    _up("medic", "Hire Medic", "crew", "medkit", (-33, 3), [("guard", 1), ("firstaid", 1)], 91000, 187.01, 3,
         "A medic who rushes to whoever is hurt - anyone being grabbed first - and patches them up. Only one ever "
         "signs on: more levels, better medicine.",
         lambda l: "no medic" if l == 0 else f"heals {round(100 * medic_heal(l))}% of health / s"),
-    _up("veterans", "Veterans", "crew", "chevrons", (16, 3.75), [("foreman", 1)], 350000, 9.30, 3,
+    _up("veterans", "Veterans", "crew", "chevrons", (16, 3.75), [("foreman", 1)], 1_200_000, 77.02, 3,
         "Hire experienced hands: new crew, and the replacements for the fallen, arrive already trained.",
         lambda l: f"new crew start at level {veteran_level(l)}"),
-    _up("graveyardshift", "Graveyard Shift", "crew", "grave", (6, 4.3), [("veterans", 1), ("secondwind", 1)], 820000, 8.60, 3, "The dead clock back in: fallen crew rise from the graveyard as ghosts and dig on at the "
+    _up("graveyardshift", "Graveyard Shift", "crew", "grave", (6, 4.3), [("veterans", 1), ("secondwind", 1)], 2_700_000, 71.04, 3, "The dead clock back in: fallen crew rise from the graveyard as ghosts and dig on at the "
         "level they died at. Monsters can't touch them.",
         lambda l: f"up to {l} ghost{'s' if l != 1 else ''} from the graveyard"),
 
     # ----- Tools --------------------------------------------------------------
-    _up("power", "Sharper Pickaxe", "tools", "pick", (0, 0), [("miners", 1)], 8, 4.68, None,   # (needs a miner)
+    _up("power", "Sharper Pickaxe", "tools", "pick", (0, 0), [("miners", 1)], 27, 5.53, None,   # (needs a miner)
         "Miners hit harder.", lambda l: f"{fmt(miner_damage(l))} dmg / hit"),
-    _up("speed", "Swing Speed", "tools", "clock", (22, 1), [("power", 1)], 12, 10.05, 10,
+    _up("speed", "Swing Speed", "tools", "clock", (22, 1), [("power", 1)], 41, 12.20, 10,
         "Miners swing faster.", lambda l: f"{swing_time(l):.2f}s / swing"),
-    _up("crit", "Lucky Strikes", "tools", "star", (24, 2), [("speed", 1)], 190, 14.68, 5,
+    _up("crit", "Lucky Strikes", "tools", "star", (24, 2), [("speed", 1)], 640, 59.19, 5,
         "Miner hits can crit for triple damage.", lambda l: f"{5 * l}% crit chance"),
-    _up("quake", "Seismic Strikes", "tools", "bolt", (27, 3), [("crit", 1), ("shockwave", 1)], 23000, 13.53, 3,
+    _up("quake", "Seismic Strikes", "tools", "bolt", (27, 3), [("crit", 1), ("shockwave", 1)], 78000, 199.75, 3,
         "Crits shake the four neighbouring blocks.", lambda l: f"crits splash {25 * l}%"),
-    _up("diamond", "Diamond Tips", "tools", "tip", (0, 1), [("power", 1)], 30, 19.50, 5,
+    _up("diamond", "Diamond Tips", "tools", "tip", (0, 1), [("power", 1)], 100, 115.20, 5,
         "Miners hit ore blocks much harder.", lambda l: f"x{ore_damage_mult(l):.2f} dmg vs ore"),
-    _up("deepstrike", "Deep Strike", "tools", "drill", (0, 2), [("diamond", 1)], 1400, 17.52, 3,
+    _up("deepstrike", "Deep Strike", "tools", "drill", (0, 2), [("diamond", 1)], 4700, 537.27, 3,
         "Miner hits also crack the block underneath.", lambda l: f"{10 * l}% to the layer below"),
-    _up("streak", "Hot Streak", "tools", "flame", (-22, 1), [("power", 1)], 41, 19.46, 5,
+    _up("streak", "Hot Streak", "tools", "flame", (-22, 1), [("power", 1)], 140, 106.52, 5,
         "Every hit on the same block lands harder than the last (up to 10 in a row).",
         lambda l: f"+{round(100 * streak_bonus(l))}% dmg per hit in a row"),
-    _up("vein", "Vein Follower", "tools", "vein", (-24, 2), [("streak", 1)], 4100, 11.37, 3,
+    _up("vein", "Vein Follower", "tools", "vein", (-24, 2), [("streak", 1)], 14000, 289.91, 3,
         "A miner breaking ore cracks all the same ore connected to it.",
         lambda l: f"{round(100 * vein_share(l))}% to connected ore"),
-    _up("whetstone", "Whetstone", "tools", "whetstone", (-27, 3), [("vein", 1), ("teamwork", 1)], 68000, 12.81, 3,
+    _up("whetstone", "Whetstone", "tools", "whetstone", (-27, 3), [("vein", 1), ("teamwork", 1)], 230000, 156.45, 3,
         "A sharpening wheel on site: miners take turns sharpening, and hit harder for 45s after.",
         lambda l: f"+{round(100 * whetstone_boost(l))}% dmg when sharp"),
-    _up("masterwork", "Earthshaker", "tools", "boulder", (10, 4), [("quake", 1), ("deepstrike", 1)], 530000, 9.03, 3, "Every blow the crew lands rings through the rock: all their digging hits harder.",
+    _up("masterwork", "Earthshaker", "tools", "boulder", (10, 4), [("quake", 1), ("deepstrike", 1)], 1_800_000, 83.15, 3, "Every blow the crew lands rings through the rock: all their digging hits harder.",
         lambda l: f"x{masterwork_mult(l):.2f} miner dmg"),
 
     # ----- Hands --------------------------------------------------------------
-    _up("click", "Power Gloves", "hands", "hand", (-8, 0), [], 22, 3.96, None,
+    _up("click", "Power Gloves", "hands", "hand", (-8, 0), [], 74, 4.31, None,
         "Your clicks hit blocks harder. Past 50m the gloves toughen with the rock: 12% harder every metre.",
         lambda l, k=1: f"{fmt(click_damage(l) * k)} dmg / click"),
-    _up("shockwave", "Shockwave", "hands", "wave", (-22, 1), [("click", 1)], 30, 23.60, 3,
+    _up("shockwave", "Shockwave", "hands", "wave", (-22, 1), [("click", 1)], 100, 1413.28, 3,
         "Your clicks splash onto neighbouring blocks.", lambda l: f"clicks splash {20 * l}%"),
-    _up("autotap", "Auto-Tapper", "hands", "cursor", (-24, 2), [("shockwave", 1)], 9900, 11.23, 5,
+    _up("autotap", "Auto-Tapper", "hands", "cursor", (-24, 2), [("shockwave", 1)], 33000, 24.09, 5,
         "A ghostly hand clicks random blocks for you.", lambda l: f"{l} taps / s"),
-    _up("dynamite", "Dynamite", "hands", "bomb", (-24, 3), [("autotap", 1)], 240000, 9.57, 4,
+    _up("dynamite", "Dynamite", "hands", "bomb", (-24, 3), [("autotap", 1)], 800000, 26.05, 4,
         "Blasts an area for 10x click damage now and then.",
         lambda l: "no dynamite" if l == 0 else f"boom every {dynamite_interval(l)}s"),
-    _up("phantom", "Phantom Slam", "hands", "phantom", (-6, 4.3), [("autotap", 1), ("slam", 1)], 990000, 7.60, 3,
+    _up("phantom", "Phantom Slam", "hands", "phantom", (-6, 4.3), [("autotap", 1), ("slam", 1)], 3_300_000, 70.37, 3,
         "The Auto-Tapper's ghostly hand learns to slam: every so often it charges up over the blocks and "
         "brings down a Charged Slam of its own, wherever it will hit the most.",
         lambda l: "no phantom slams" if l == 0 else f"a slam every {phantom_interval(l):.0f}s"),
-    _up("bigbombs", "Bigger Bombs", "hands", "bigbomb", (-20, 4), [("dynamite", 1)], 1_300_000, 8.23, 2,
+    _up("bigbombs", "Bigger Bombs", "hands", "bigbomb", (-20, 4), [("dynamite", 1)], 4_300_000, 477.72, 2,
         "Dynamite blasts cover a wider area.", lambda l: f"{3 + 2 * l}x{3 + 2 * l} blast"),
-    _up("combo", "Combo Clicks", "hands", "combo", (0, 1), [("click", 1)], 41, 19.46, 5,
+    _up("combo", "Combo Clicks", "hands", "combo", (0, 1), [("click", 1)], 140, 106.52, 5,
         "Clicking quickly builds a combo that powers up your clicks (up to 20 in a row).",
         lambda l: f"up to x{1 + 20 * combo_step(l):.1f} at a full combo"),
-    _up("goldblock", "Golden Blocks", "hands", "goldblock", (26, 1), [("golden", 1)], 400, 13.58, 3,
+    _up("goldblock", "Golden Blocks", "hands", "goldblock", (26, 1), [("golden", 1)], 1300, 717.21, 3,
         "Every so often a block turns to gold for a few seconds. Click it for a jackpot!",
         lambda l: "none" if l == 0 else f"every {golden_interval(l)}s, worth {golden_payout(l)}x"),
-    _up("slam", "Charged Slam", "hands", "slam", (4, 3), [("steady", 1)], 38000, 13.10, 3,
+    _up("slam", "Charged Slam", "hands", "slam", (4, 3), [("steady", 1)], 130000, 187.38, 3,
         "Hold the mouse anywhere on the dig to charge, release for a huge slam that shakes the blocks "
         "and monsters around.",
         lambda l: f"up to {slam_mult(l)}x click dmg"),
-    _up("golden", "Golden Touch", "hands", "touch", (22, 0), [], 8, 24.75, 5,   # first Hands buy
+    _up("golden", "Golden Touch", "hands", "touch", (22, 0), [], 27, 164.38, 5,   # first Hands buy
         "Your own clicks on blocks earn gold as you dig.", lambda l: f"{5 * l}% of block value / click"),
-    _up("steady", "Steady Hands", "hands", "target", (2, 2), [("combo", 1)], 580, 13.18, 5,
+    _up("steady", "Steady Hands", "hands", "target", (2, 2), [("combo", 1)], 1900, 43.48, 5,
         "Your clicks on blocks can crit for triple damage.", lambda l: f"{5 * l}% click crit chance"),
 
     # ----- Fortune ------------------------------------------------------------
-    _up("value", "Hard Bargain", "fortune", "coin", (0, 0), [], 8, 6.82, None,
+    _up("value", "Hard Bargain", "fortune", "coin", (0, 0), [], 27, 8.39, None,
         "You drive a hard bargain: everything you dig up sells for more.",
         lambda l: f"x{value_mult(l):.2f} sale value"),
-    _up("prospector", "Prospector", "fortune", "gem", (-22, 1), [("value", 1)], 68, 18.66, 5,
+    _up("prospector", "Prospector", "fortune", "gem", (-22, 1), [("value", 1)], 230, 96.00, 5,
         "New layers hold more ore, and richer ore: the rarer kinds turn up more often.",
         lambda l: f"x{ore_mult(l):.2f} ore, x{ore_richness(l):.2f} richer"),
-    _up("double", "Double Haul", "fortune", "coins", (-26, 2), [("prospector", 1), ("golden", 1)], 2800, 11.42, 5,
+    _up("double", "Double Haul", "fortune", "coins", (-26, 2), [("prospector", 1), ("golden", 1)], 9400, 26.16, 5,
         "Broken blocks sometimes pay out twice.", lambda l: f"{4 * l}% double pay"),
-    _up("goldrush", "Gold Rush", "fortune", "nugget", (-9, 3.05), [("double", 1)], 410000, 9.10, 3,
+    _up("goldrush", "Gold Rush", "fortune", "nugget", (-9, 3.05), [("double", 1)], 1_400_000, 73.18, 3,
         "Broken blocks may drop a nugget worth 25x.", lambda l: f"{2 * l}% nugget chance"),
-    _up("bounty", "Bounty Hunter", "fortune", "skull", (22, 1), [("value", 1), ("slayer", 1)], 30, 19.50, 5,
+    _up("bounty", "Bounty Hunter", "fortune", "skull", (22, 1), [("value", 1), ("slayer", 1)], 100, 115.20, 5,
         "Monsters pay out bigger bounties.", lambda l: f"x{bounty_mult(l):.1f} bounties"),
-    _up("golddust", "Gold Dust", "fortune", "bag", (-33, 3.6), [("goldblock", 1)], 12000, 14.87, 3,
+    _up("golddust", "Gold Dust", "fortune", "bag", (-33, 3.6), [("goldblock", 1)], 41000, 253.74, 3,
         "Every click shakes loose gold: a share of what the damage it deals is worth, on blocks and monsters.",
         lambda l: f"{round(100 * dust_share(l))}% of damage dealt as gold"),
-    _up("surveyor", "Surveyor's Contract", "fortune", "scroll", (0, 1), [("value", 1)], 30, 23.60, 3,
+    _up("surveyor", "Surveyor's Contract", "fortune", "scroll", (0, 1), [("value", 1)], 100, 1413.28, 3,
         "Bigger bonuses for clearing layers, and for milestones.",
         lambda l: f"{round(100 * clear_share(l))}% clear bonus, x{milestone_mult(l):.1f} milestones"),
-    _up("treasure", "Treasure Map", "fortune", "map", (5, 2.0), [("surveyor", 1)], 41, 24.37, 3,
+    _up("treasure", "Treasure Map", "fortune", "map", (5, 2.0), [("surveyor", 1)], 140, 1359.17, 3,
         "Miners go for ore first, and ore sells for more.", lambda l: f"+{10 * l}% ore value"),
-    _up("chests", "Buried Treasure", "fortune", "chest", (3, 2.95), [("treasure", 1), ("prospector", 1)], 1100, 18.19, 3,
+    _up("chests", "Buried Treasure", "fortune", "chest", (3, 2.95), [("treasure", 1), ("prospector", 1)], 3700, 571.51, 3,
         "Some blocks in new layers hide a treasure chest that bursts open when broken.",
         lambda l: f"{l}% of blocks hide a chest"),
-    _up("vault", "Gold Vault", "fortune", "vault", (15, 3.45), [("chests", 1)], 46000, 12.75, 3,
+    _up("vault", "Gold Vault", "fortune", "vault", (15, 3.45), [("chests", 1)], 150000, 175.82, 3,
         "Earn interest on your banked gold every minute (capped by your income).",
         lambda l: f"{round(100 * vault_rate(l))}% interest / minute"),
-    _up("trophy", "Trophy Hunter", "fortune", "trophy", (31, 2.7), [("bounty", 1), ("smite", 1)], 31000, 13.78, 3,
+    _up("trophy", "Trophy Hunter", "fortune", "trophy", (31, 2.7), [("bounty", 1), ("smite", 1)], 100000, 191.72, 3,
         "Elite monsters are worth hunting: their bounties pay far more, and each one goes up in a burst of gold.",
         lambda l: f"elite bounties x{trophy_mult(l):.1f}"),
-    _up("spree", "Killing Spree", "fortune", "spree", (29, 3.8), [("trophy", 1), ("cleave", 1)], 87000, 11.74, 3,
+    _up("spree", "Killing Spree", "fortune", "spree", (29, 3.8), [("trophy", 1), ("cleave", 1)], 290000, 145.29, 3,
         f"Kills in quick succession (within {SPREE_WINDOW:.0f}s of each other) build a spree: every kill in it pays "
         f"a bigger bounty than the last, up to {SPREE_CAP} in a row.",
         lambda l: f"+{round(100 * spree_step(l))}% bounty per kill in a row"),
-    _up("midas", "Midas Touch", "fortune", "sun", (0, 4.2), [("goldrush", 1), ("golddust", 1)], 1_800_000, 6.84, 3, "Every source of gold pays more.", lambda l: f"x{midas_mult(l):.1f} all gold"),
+    _up("midas", "Midas Touch", "fortune", "sun", (0, 4.2), [("goldrush", 1), ("golddust", 1)], 6_000_000, 51.73, 3, "Every source of gold pays more.", lambda l: f"x{midas_mult(l):.1f} all gold"),
 
     # ----- Combat -------------------------------------------------------------
-    _up("slayer", "Monster Slayer", "combat", "sword", (0, 0), [], 12, 4.53, None,
+    _up("slayer", "Monster Slayer", "combat", "sword", (0, 0), [], 41, 5.21, None,
         "Your clicks hit monsters harder (separate from block damage).",
         lambda l: f"{fmt(monster_damage(l))} dmg / click on monsters"),
-    _up("executioner", "Executioner", "combat", "axe", (-27, 1), [("slayer", 1)], 22, 15.48, 8,
+    _up("executioner", "Executioner", "combat", "axe", (-27, 1), [("slayer", 1)], 74, 20.75, 8,
         "Every hit you land takes at least a share of a monster's health.",
         lambda l: f"min {enemy_hit_floor(l):.0%} of max hp / hit"),
-    _up("smite", "Critical Smite", "combat", "burst", (-28, 2), [("executioner", 1)], 220, 14.96, 5,
+    _up("smite", "Critical Smite", "combat", "burst", (-28, 2), [("executioner", 1)], 720, 60.63, 5,
         "Your hits on monsters can crit for triple damage.", lambda l: f"{5 * l}% smite chance"),
-    _up("cleave", "Cleave", "combat", "slash", (-28, 3), [("smite", 1)], 6400, 10.64, 3,
+    _up("cleave", "Cleave", "combat", "slash", (-28, 3), [("smite", 1)], 21000, 280.70, 3,
         "Hitting a monster also hits other monsters close by.", lambda l: f"{20 * l}% to monsters nearby"),
-    _up("defense", "Self Defense", "combat", "shield", (27, 1), [("slayer", 1)], 30, 19.50, 5,
+    _up("defense", "Self Defense", "combat", "shield", (27, 1), [("slayer", 1)], 100, 115.20, 5,
         "Grabbed miners fight back, striking their attacker once a second: it buys time until help arrives.",
         lambda l: "miners can't fight back" if l == 0 else f"{100 * miner_strike(l):.1f}% of attacker hp / strike"),
-    _up("hardhats", "Hard Hats", "combat", "helmet", (28, 2), [("defense", 1)], 92, 17.61, 5,
+    _up("hardhats", "Hard Hats", "combat", "helmet", (28, 2), [("defense", 1)], 310, 89.37, 5,
         "Miners survive longer when grabbed.", lambda l: f"{miner_max_hp(l):.1f} miner hp"),
-    _up("firstaid", "First Aid", "combat", "cross", (28, 3), [("hardhats", 1)], 860, 16.04, 4,
+    _up("firstaid", "First Aid", "combat", "cross", (28, 3), [("hardhats", 1)], 2900, 124.65, 4,
         "Miners heal faster once they've had a breather.",
         lambda l: f"heal {100 * miner_regen(l):.1f}% of health/s"),
-    _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (3, 3.35), [("holywater", 1)], 8400, 2.00, 1,
+    _up("spiritlantern", "Spirit Lantern", "combat", "spiritlamp", (3, 3.35), [("holywater", 1)], 28000, 2.00, 1,
         "Blue spirit-light on every helmet: ghosts can't fade out of reach.",
         lambda l: "no lanterns" if l == 0 else "ghosts can't fade"),
-    _up("traps", "Booby Traps", "combat", "spikes", (-9, 1), [("slayer", 1)], 15000, 14.84, 3,
+    _up("traps", "Booby Traps", "combat", "spikes", (-9, 1), [("slayer", 1)], 51000, 252.09, 3,
         "Spikes punch up into monsters as they climb out of the ground or drop in.",
         lambda l: f"{round(100 * trap_share(l))}% of max hp on arrival"),
-    _up("ballista", "Ballista", "combat", "ballista", (-10, 2), [("traps", 1)], 110000, 12.22, 3,
+    _up("ballista", "Ballista", "combat", "ballista", (-10, 2), [("traps", 1)], 360000, 141.31, 3,
         "A crossbow turret on the corner of the dig. Its bolts pierce: every monster in line takes the hit.",
         lambda l: "no ballista" if l == 0 else
         f"a bolt every {ballista_interval(l):.1f}s, {round(100 * ballista_share(l))}% of max hp"),
     # specialist counters for the regular monsters (bosses shrug them off), fanning out from the Ballista
-    _up("holywater", "Holy Water", "combat", "holywater", (9, 1.3), [("slayer", 1)], 490, 13.40, 3,
+    _up("holywater", "Holy Water", "combat", "holywater", (9, 1.3), [("slayer", 1)], 1600, 680.12, 3,
         "Blessed water on every pick and bolt: zombies and skeletons take more damage from everything.",
         lambda l: f"+{round(100 * holy_bonus(l))}% damage to the undead"),
-    _up("torches", "Torches", "combat", "torch", (-4, 2.5), [("holywater", 1)], 720, 17.09, 3,
+    _up("torches", "Torches", "combat", "torch", (-4, 2.5), [("holywater", 1)], 2400, 650.07, 3,
         "Torches ring the dig: spiders are singed as they drop in, and grip the crew more weakly.",
         lambda l: f"-{round(100 * torch_singe(l))}% hp on landing, -{round(100 * (1 - torch_grip(l)))}% drain"),
-    _up("garlic", "Garlic Garlands", "combat", "garlic", (11, 2.75), [("holywater", 1)], 5000, 10.77, 3,
+    _up("garlic", "Garlic Garlands", "combat", "garlic", (11, 2.75), [("holywater", 1)], 17000, 290.86, 3,
         "Garlic on every helmet: vampires drain and heal less from a bite, and bats take longer to turn into "
         "vampires.",
         lambda l: f"-{round(100 * garlic_ward(l))}% drain, bats turn x{garlic_delay(l):.1f} slower"),
-    _up("salt", "Rock Salt", "combat", "salt", (21, 3.4), [("holywater", 1)], 210000, 10.11, 3,
+    _up("salt", "Rock Salt", "combat", "salt", (21, 3.4), [("holywater", 1)], 700000, 90.53, 3,
         "Salt scattered on the dig: slimes often burst into just one slimeling, and slimelings shrivel away.",
         lambda l: f"{round(100 * salt_single(l))}% one slimeling, -{round(100 * salt_shrivel(l))}% hp / s"),
     # ...and their counters for the deep's monsters, one ring further out
-    _up("bells", "Tremor Bells", "combat", "bell", (-6, 3.8), [("torches", 1)], 1_300_000, 2.00, 1,
+    _up("bells", "Tremor Bells", "combat", "bell", (-6, 3.8), [("torches", 1)], 4_300_000, 2.00, 1,
         "Bells on stakes all round the dig ring out as a Burrower tunnels close: the crew stamp it out of the "
         "ground before it can burst up under anyone.",
         lambda l: "no bells" if l == 0 else "burrowers can't ambush"),
-    _up("poles", "Ten-Foot Poles", "combat", "pole", (13, 3.9), [("garlic", 1)], 15_000_000, 7.17, 3,
+    _up("poles", "Ten-Foot Poles", "combat", "pole", (13, 3.9), [("garlic", 1)], 51_000_000, 48.23, 3,
         "Miners prod every chest with a ten-foot pole before they dig into it: a Mimic that's found out springs "
         "without biting anyone, and gets a jab for its trouble.",
         lambda l: "no poles" if l == 0 else f"no bite, -{round(100 * pole_share(l))}% hp when found out"),
-    _up("acid", "Acid Edge", "combat", "acid", (22, 4.55), [("salt", 1)], 63_000_000, 2.00, 1,
+    _up("acid", "Acid Edge", "combat", "acid", (22, 4.55), [("salt", 1)], 210_000_000, 2.00, 1,
         "Every pick, blade and bolt dipped in acid: each hit eats into a Rock Golem's stone armour, and after a "
         "few it cracks - no slam needed.",
         lambda l: "no acid" if l == 0 else f"armour cracks after {ACID_HITS} hits"),
-    _up("flares", "Flares", "combat", "flare", (3, 4.5), [("spiritlantern", 1)], 2_800_000_000, 3.15, 3,
+    _up("flares", "Flares", "combat", "flare", (3, 4.5), [("spiritlantern", 1)], 9_400_000_000, 18.78, 3,
         "Magnesium flares light up the dark: crew in an Abyssal Shade's darkness are slowed and hurt far less, and the "
         "shades burn away in the glare.",
         lambda l: "no flares" if l == 0 else
@@ -306,11 +315,11 @@ UPGRADES = [
         "Down this deep, monsters die badly: each one bursts as it falls, blasting the rock beneath it. The bigger "
         "the monster, the bigger the blast - elites most of all.",
         lambda l: "they just die" if l == 0 else "blasts its own health into the rock below"),
-    _up("boiler", "Steam Boiler", "combat", "boiler", (-11, 3), [("ballista", 1)], 670000, 8.86, 3,
+    _up("boiler", "Steam Boiler", "combat", "boiler", (-11, 3), [("ballista", 1)], 2_200_000, 75.29, 3,
         "A steam boiler in the corner of the dig slowly builds up pressure. When it's full, click it: scalding "
         "steam rolls across the board and clears it of monsters (bosses stand firm), and the next wave holds back.",
         lambda l: "no boiler" if l == 0 else f"full of steam every {boiler_charge(l) / 60:g} min"),
-    _up("laststand", "Last Stand", "combat", "fist", (30, 4), [("firstaid", 1)], 490000, 8.87, 3, "Miners below 30% health fight back far harder.",
+    _up("laststand", "Last Stand", "combat", "fist", (30, 4), [("firstaid", 1)], 1_600_000, 72.37, 3, "Miners below 30% health fight back far harder.",
         lambda l: f"x{last_stand_mult(l):.1f} strike when desperate"),
 ]
 # Depth milestones: an upgrade can't be bought until you've dug this deep (as well as owning its
@@ -335,7 +344,7 @@ UNLOCK_DEPTH = {
     "laststand": 42,
     "holywater": 11, "torches": 14, "garlic": 21, "salt": 38,   # (specialist counters...)
     "bells": 47, "poles": 61, "acid": 71, "flares": 86, "cutdown": 66,   # (...and for the deep's monsters)
-    "volatile": 93,
+    "volatile": 93, "switch": 75,
     "trophy": 30, "spree": 35, "boiler": 44,
 }
 # Upgrades whose shown effect grows with the dig as well as their level: the World method giving the factor
@@ -345,7 +354,7 @@ EFFECT_SCALE = {"click": "glove_scale"}
 FIRST_LEVEL_PRICE = {"miners": 10}
 # How much steeper each level gets than the last, per upgrade (1 = a steady `growth`): fitted with the prices, so an
 # upgrade whose later levels come due deep, where gold piles up fast, can climb with it (see Pricing below).
-PRICE_RAMP = {"secondwind": 1.153, "guard": 1.177, "vein": 1.269, "cleave": 1.362, "garlic": 1.428, "poles": 2.769}
+PRICE_RAMP = {"teamwork": 1.173, "foreman": 1.467, "secondwind": 1.388, "salts": 1.274, "guard": 1.674, "demolition": 1.637, "medic": 1.617, "veterans": 2.093, "graveyardshift": 1.754, "power": 1.002, "crit": 1.187, "quake": 1.459, "vein": 1.703, "whetstone": 1.567, "masterwork": 1.570, "click": 1.013, "autotap": 1.326, "dynamite": 1.683, "phantom": 1.667, "slam": 1.521, "steady": 1.265, "value": 1.006, "double": 1.464, "goldrush": 2.153, "golddust": 1.404, "vault": 1.534, "trophy": 1.566, "spree": 1.610, "midas": 2.106, "slayer": 1.007, "smite": 1.154, "cleave": 1.452, "firstaid": 1.264, "traps": 1.274, "ballista": 1.567, "garlic": 1.558, "salt": 2.448, "poles": 1.452, "boiler": 1.715, "laststand": 2.029}
 # Upgrades for the Base Camp people: locked until you've hired at least one of them.
 NEEDS_CAMP = {"salts"}
 for _u in UPGRADES:
@@ -355,6 +364,30 @@ for _u in UPGRADES:
         _u["first"] = FIRST_LEVEL_PRICE[_u["key"]]
     _u["ramp"] = PRICE_RAMP.get(_u["key"], 1.0)
 UPGRADE_BY_KEY = {u["key"]: u for u in UPGRADES}
+
+# Ranks: the trees have few ranks, each worth more - at its last rank an upgrade does what it would at the level here
+# (each rank in between, its share of that). Prices, caps and requirements count ranks; effects count this level.
+EFFECT_OF_MAX = {"boots": 15, "teamwork": 10, "foreman": 5, "coffee": 5, "secondwind": 5, "driller": 5,
+                 "guard": 4, "demolition": 5, "medic": 5, "veterans": 4, "graveyardshift": 5, "speed": 25,
+                 "crit": 10, "quake": 5, "diamond": 10, "deepstrike": 5, "streak": 10, "vein": 5,
+                 "whetstone": 5, "masterwork": 5, "shockwave": 5, "autotap": 10, "dynamite": 6, "phantom": 5,
+                 "combo": 10, "goldblock": 5, "slam": 5, "golden": 10, "steady": 10, "prospector": 10,
+                 "double": 10, "goldrush": 5, "bounty": 10, "golddust": 5, "surveyor": 5, "treasure": 5,
+                 "chests": 5, "vault": 5, "trophy": 5, "spree": 5, "midas": 5, "executioner": 17, "smite": 10,
+                 "cleave": 5, "defense": 10, "hardhats": 8, "firstaid": 6, "traps": 5, "ballista": 5}
+
+
+def effect_level(key, rank):
+    """The level an upgrade's effect works at, for `rank` ranks of it (see EFFECT_OF_MAX)."""
+    top = EFFECT_OF_MAX.get(key)
+    if top is None or not rank:
+        return rank
+    return int(rank * top / UPGRADE_BY_KEY[key]["max"] + 0.5)
+
+
+for _u in UPGRADES:   # (what a rank does, as shown: the level its effect works at)
+    if _u["key"] in EFFECT_OF_MAX:
+        _u["effect"] = (lambda show, k: lambda rank, *scale: show(effect_level(k, rank), *scale))(_u["effect"], _u["key"])
 UPGRADES_BY_TAB = {tab: [u for u in UPGRADES if u["branch"] == tab] for tab in TABS}
 
 # Pricing: nothing you buy changes what anything else costs - it's a question of when to buy each upgrade, not
