@@ -15,7 +15,7 @@ HUD_PANELS = [TOP_PANEL, pygame.Rect(16, H - 167, 330, 151)]   # top-left and bo
 from ..achievements import ACHIEVEMENTS, TIERS, tier
 from ..artifacts import ARTIFACTS, REVEAL_POP_SECS
 from ..camp import COLLAPSE_FADE, COLLAPSE_SECS
-from ..enemies import ENEMY_START_DEPTH, max_enemies
+from ..enemies import ENEMY_START_DEPTH
 from ..effects import Floater
 from ..icons import draw_icon, draw_padlock
 from ..iso import origin_at
@@ -476,7 +476,7 @@ class PlayScene(Scene):
         elif w.depth >= ENEMY_START_DEPTH and w.collapse is None and w.lv("miners"):
             # (no waves once the shaft's coming down - nor before you've hired a miner for them to bother)
             secs = math.ceil(w.enemy_timer)
-            incoming = max_enemies(w.depth) - len(w.enemies)
+            incoming = w.enemy_cap() - len(w.enemies)
             wave = f"next wave in {secs}s" + (f" (+{incoming})" if incoming > 0 else " (at max)")
             if w.enemies:
                 grabbed = sum(1 for m in w.miners if m.state == "grabbed")

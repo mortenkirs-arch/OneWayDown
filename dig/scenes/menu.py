@@ -37,11 +37,11 @@ class MenuScene(Scene):
         self.has_saves = self.game.latest_slot() is not None
 
     def new_game(self):
-        """With no saves yet, straight in; otherwise pick the slot for it."""
+        """With no saves yet, straight to picking the mode; otherwise pick the slot for it first."""
         if self.has_saves:
             self.game.open_slots("new")
         else:
-            self.game.new_game(self.game.slots[0])
+            self.game.choose_mode(self.game.slots[0])
 
     def handle(self, event):
         for b in self.buttons.values():

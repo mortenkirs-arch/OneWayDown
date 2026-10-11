@@ -60,6 +60,9 @@ from .util import fmt
 
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 SECOND_WIND_SECS = 8.0
+CASUAL_MONSTERS = 0.5    # Casual mode: waves (and boss minions) bring this share of the monsters...
+CASUAL_BOSS_HP = 0.5     # ...bosses have this share of their health...
+CASUAL_BLOCK_GOLD = 3.0  # ...and broken blocks pay this many times as much, for the bounties you miss out on
 LAST_STAND_HP = 0.3     # miners below this share of their health get the Last Stand bonus
 PEP_TALK_RADIUS = 2.5    # tiles: miners this close to the foreman get the pep-talk boost
 PEP_TALK_BOOST = 1.15    # their swings are this much faster
@@ -235,7 +238,8 @@ class TargetDummy:
 
 
 class World:
-    def __init__(self):
+    def __init__(self, casual=False):
+        self.casual = casual               # Casual mode: fewer monsters, softer bosses, richer blocks
         self.gold = 0.0
         self.depth = 0                     # depth index of the current (top) layer
         self.levels = {u["key"]: 0 for u in UPGRADES}
@@ -595,7 +599,7 @@ class World:
 
     def spawn_wave(self):
         """Top the board up to the enemy cap for this depth. Returns how many spawned."""
-        count = max_enemies(self.depth) - len(self.enemies)
+        count = self.enemy_cap() - len(self.enemies)
         if count <= 0:
             return 0
         kinds = [choose_kind(self.depth) for _ in range(count)]
@@ -725,6 +729,11 @@ class World:
                                          (255, 190, 90), life=3.2, size=28))
         return GOLEM_ARMOUR
 
+    def enemy_cap(self):
+        """Enemies alive after each wave at this depth (Casual mode: about half as many, never fewer than one)."""
+        cap = max_enemies(self.depth)
+        return max(1, math.ceil(cap * CASUAL_MONSTERS)) if self.casual else cap
+
     def wave_interval(self):
         """Seconds between waves at this depth."""
         return spawn_interval(self.depth)
@@ -767,8 +776,8 @@ class World:
         if not kind or self.boss():
             return
         cell = (GRID // 2, GRID // 2)
-        self.enemies.append(Enemy(kind, self.depth, cell, self.column_height(*cell), delay=1.2,
-                                  hp_mult=self.art_mult("enemy_hp")))
+        hp_mult = self.art_mult("enemy_hp") * (CASUAL_BOSS_HP if self.casual else 1)
+        self.enemies.append(Enemy(kind, self.depth, cell, self.column_height(*cell), delay=1.2, hp_mult=hp_mult))
         self.boss_fight_start = self.clock
         spec = ENEMY_TYPES[kind]
         self.announcement = [f"{the(spec['name']).upper()} {spec['arrival'].upper()}!", 4.0]
@@ -784,7 +793,10 @@ class World:
         minion = boss.spec["minion"]
         alive = sum(1 for e in self.enemies if not e.boss)
         # deeper bosses call a few more (and keep a few more around)
-        count = min(round(minion["count"] * boss_minion_mult(self.depth)), boss_minion_cap(self.depth) - alive)
+        count, cap = round(minion["count"] * boss_minion_mult(self.depth)), boss_minion_cap(self.depth)
+        if self.casual:   # (half the minions, but always at least one)
+            count, cap = max(1, round(count * CASUAL_MONSTERS)), max(1, round(cap * CASUAL_MONSTERS))
+        count = min(count, cap - alive)
         if count <= 0:
             return
         cx, cy = self.cell_of(boss.x, boss.y)
@@ -2687,6 +2699,8 @@ class World:
             if by is None:   # your own splash (shockwave, slam, dynamite) broke it: the jackpot is still yours
                 self.golden_jackpot(cell, block)
             self.golden = None
+        if self.casual:
+            earned *= CASUAL_BLOCK_GOLD
         earned = self.earn(earned)
         self.total_blocks += 1
         if by:
@@ -4194,11 +4208,12 @@ class World:
                     clock=self.clock, grid=GRID, artifacts=self.artifacts, boss_done=self.boss_done,
                     expedition=self.expedition, camp=self.camp, lifetime=self.lifetime,
                     camp_ready=self.camp_ready or self.collapse is not None, visit_hire=self.visit_hire,
-                    camp_items=self.camp_items, achievements=self.achievements, feats=self.feats, run=self.run)
+                    camp_items=self.camp_items, achievements=self.achievements, feats=self.feats, run=self.run,
+                    casual=self.casual)
 
     @classmethod
     def from_dict(cls, d):
-        w = cls()
+        w = cls(casual=d.get("casual", False))
         w.gold = d["gold"]
         w.depth = d["depth"]
         w.expedition = d.get("expedition", 0)

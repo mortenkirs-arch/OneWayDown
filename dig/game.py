@@ -107,7 +107,7 @@ class Game:
         return max(saved, key=os.path.getmtime) if saved else None
 
     def open_slots(self, mode):
-        """The save slots screen: "load" a save, or pick one for a "new" game."""
+        """The save slots screen: "load" a save, pick one for a "new" game, or pick the new game's "mode"."""
         self.scenes["slots"].mode = mode
         self.switch("slots")
 
@@ -129,12 +129,18 @@ class Game:
         self.bg_key, self.bg_prev, self.bg_fade = biome_at(self.world.depth)["key"], None, 1.0
         self.switch("play")
 
-    def new_game(self, path=None):
-        """A fresh game in the save slot `path` (replacing what's there; default: the current one)."""
+    def choose_mode(self, path):
+        """Before a new game in the save slot `path`: pick Casual or Normal."""
+        self.scenes["slots"].pending = path
+        self.open_slots("mode")
+
+    def new_game(self, path=None, casual=False):
+        """A fresh game in the save slot `path` (replacing what's there; default: the current one), in Casual mode
+        (fewer monsters, softer bosses, richer blocks) or Normal."""
         self.save()
         if path:
             self.save_path = path
-        self.world = World()
+        self.world = World(casual=casual)
         self.save()
         self.bg_key, self.bg_prev, self.bg_fade = "topsoil", None, 1.0
         self.switch("play")

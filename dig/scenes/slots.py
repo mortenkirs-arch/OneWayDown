@@ -1,4 +1,5 @@
-"""The save slots: pick a save to load, or one to start a new game in (replacing what's there, after a second click)."""
+"""The save slots: pick a save to load, or one to start a new game in (replacing what's there, after a second click),
+then pick the new game's mode: Casual or Normal."""
 import json
 import os
 import time
@@ -6,12 +7,21 @@ import time
 import pygame
 
 from ..biomes import biome_at
-from ..config import GOLD, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
+from ..config import BAD, GOLD, GOOD, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
 from ..ui import Button, draw_gold, draw_text
 from ..util import fmt, shade
 from .base import Scene
 
 SLOT_W, SLOT_H, SLOT_GAP = 640, 104, 18
+MODE_H = 150   # (the Casual / Normal cards are taller: they say what each mode means)
+MODES = [   # (casual?, name, colour, lines of what it means)
+    (True, "Casual", GOOD, [("About half as many monsters, and bosses half as tough", TEXT),
+                            ("Blocks pay three times the gold", TEXT),
+                            ("A relaxed dig: a good place to start", MUTED)]),
+    (False, "Normal", BAD, [("The full horde, and bosses at full strength", TEXT),
+                            ("Warning: your crew are expected to die.", BAD),
+                            ("The fallen are gone for good: recruits replace them", MUTED)]),
+]
 
 
 def slot_summary(path):
@@ -21,7 +31,7 @@ def slot_summary(path):
         with open(path) as f:
             data = json.load(f)
         return dict(depth=data["depth"], gold=data["gold"], clock=data.get("clock", 0.0),
-                    saved=os.path.getmtime(path))
+                    casual=data.get("casual", False), saved=os.path.getmtime(path))
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -45,27 +55,39 @@ class SlotScene(Scene):
 
     def __init__(self, game):
         super().__init__(game)
-        self.mode = "load"       # "load" | "new"
+        self.mode = "load"       # "load" | "new" | "mode" (Casual or Normal, for a new game in `pending`)
         self.return_to = "menu"  # (so the menu music keeps playing)
         self.summaries = []
         self.confirm = None      # the slot a new game would replace, after one click
-        self.back_button = Button((W // 2 - 80, 0, 160, 50), "< Back", lambda: game.switch("menu"),
-                                  size=28, color=(70, 64, 90))
+        self.pending = None      # the slot the new game whose mode is being picked goes in
+        self.back_button = Button((W // 2 - 80, 0, 160, 50), "< Back", self.back, size=28, color=(70, 64, 90))
 
     def enter(self):
         self.summaries = [slot_summary(p) for p in self.game.slots]   # (read once, not every frame)
         self.confirm = None
 
+    def back(self):
+        """From picking a mode, back to the save slots (if there was a choice of them); otherwise the menu."""
+        if self.mode == "mode" and any(self.summaries):
+            self.mode = "new"
+            self.confirm = None
+        else:
+            self.game.switch("menu")
+
     def rects(self):
-        top = H // 2 - (len(self.game.slots) * (SLOT_H + SLOT_GAP)) // 2 + 20
-        return [pygame.Rect(W // 2 - SLOT_W // 2, top + i * (SLOT_H + SLOT_GAP), SLOT_W, SLOT_H)
-                for i in range(len(self.game.slots))]
+        count, height = (len(MODES), MODE_H) if self.mode == "mode" else (len(self.game.slots), SLOT_H)
+        top = H // 2 - (count * (height + SLOT_GAP)) // 2 + 20
+        return [pygame.Rect(W // 2 - SLOT_W // 2, top + i * (height + SLOT_GAP), SLOT_W, height)
+                for i in range(count)]
 
     def latest(self):
         saved = [(s["saved"], i) for i, s in enumerate(self.summaries) if s]
         return max(saved)[1] if saved else None
 
     def pick(self, i):
+        if self.mode == "mode":
+            self.game.new_game(self.pending, casual=MODES[i][0])
+            return
         path = self.game.slots[i]
         if self.mode == "load":
             if self.summaries[i]:
@@ -74,7 +96,7 @@ class SlotScene(Scene):
         if self.summaries[i] and self.confirm != i:   # an existing save: ask before replacing it
             self.confirm = i
             return
-        self.game.new_game(path)
+        self.pending, self.mode = path, "mode"
 
     def handle(self, event):
         if self.back_button.handle(event):
@@ -86,12 +108,15 @@ class SlotScene(Scene):
                     return
             self.confirm = None
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            self.game.switch("menu")
+            self.back()
 
     def draw(self, s):
         f = self.fonts
         mouse = pygame.mouse.get_pos()
         rects = self.rects()
+        if self.mode == "mode":
+            self.draw_modes(s, rects, mouse)
+            return
         title, hint = (("LOAD GAME", "Pick a save to carry on with") if self.mode == "load" else
                        ("NEW GAME", "Pick a save slot for the new game"))
         draw_text(s, f, title, 60, TEXT, (W // 2, rects[0].top - 86), "center")
@@ -105,8 +130,9 @@ class SlotScene(Scene):
             pygame.draw.rect(s, fill, rect, border_radius=12)
             pygame.draw.rect(s, GOLD if hover or replacing else PANEL_EDGE, rect, 2, border_radius=12)
             draw_text(s, f, f"Save {i + 1}", 34, TEXT if usable else MUTED, (rect.x + 24, rect.y + 18))
-            if i == latest:
-                draw_text(s, f, "latest", 22, GOLD, (rect.x + 26, rect.y + 56))
+            tags = (["latest"] if i == latest else []) + (["casual"] if info and info["casual"] else [])
+            for n, tag in enumerate(tags):
+                draw_text(s, f, tag, 22, GOLD if tag == "latest" else GOOD, (rect.x + 26 + n * 64, rect.y + 56))
             x = rect.x + 170
             if info is None:
                 draw_text(s, f, "Start a new game here" if self.mode == "new" else "Empty", 28,
@@ -121,5 +147,19 @@ class SlotScene(Scene):
             draw_gold(s, f, fmt(info["gold"]), 26, GOLD, (x, rect.y + 58))
             draw_text(s, f, f"{played(info['clock'])}  -  saved {ago(info['saved'])}", 22, MUTED,
                       (x + 170, rect.y + 62))
+        self.back_button.rect.top = rects[-1].bottom + 36
+        self.back_button.draw(s, f, mouse)
+
+    def draw_modes(self, s, rects, mouse):
+        f = self.fonts
+        draw_text(s, f, "CHOOSE A MODE", 60, TEXT, (W // 2, rects[0].top - 86), "center")
+        draw_text(s, f, "How hard should the deep fight back?", 26, MUTED, (W // 2, rects[0].top - 40), "center")
+        for rect, (_, name, color, lines) in zip(rects, MODES):
+            hover = rect.collidepoint(mouse)
+            pygame.draw.rect(s, shade(PANEL, 1.3 if hover else 1.0), rect, border_radius=12)
+            pygame.draw.rect(s, color if hover else PANEL_EDGE, rect, 2, border_radius=12)
+            draw_text(s, f, name, 38, color, (rect.x + 24, rect.centery), "midleft")
+            for n, (line, tone) in enumerate(lines):
+                draw_text(s, f, line, 24, tone, (rect.x + 170, rect.y + 30 + n * 34))
         self.back_button.rect.top = rects[-1].bottom + 36
         self.back_button.draw(s, f, mouse)
