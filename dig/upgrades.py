@@ -74,8 +74,9 @@ def pole_share(lv): return 0.15 * lv                  # Ten-Foot Poles: share of
 ACID_HITS = 4                                         # Acid Edge: hits that eat through a Rock Golem's armour
 def flare_ease(lv): return 0.3 * lv                   # Flares: share of a shade's slowdown the crew shake off...
 def flare_burn(lv): return 0.03 * lv                  # ...and share of its max hp a shade burns away per second
-SWITCH_MONSTERS = 0.4                                 # Dead Man's Switch: a fallen crew member's blast takes this share of
-SWITCH_BLOCKS = 0.5                                   # nearby monsters' max hp per rank, and this of the blocks' round them
+BUNKER_BELOW = 0.35                                   # Bunker Buster: share of the blast driven into the layer below
+SWITCH_MONSTERS = (0.4, 0.7, 1.0)                     # Dead Man's Switch, by rank: a fallen crew member's blast takes this
+SWITCH_BLOCKS = (0.35, 0.7, 1.0)                      # share of nearby monsters' max hp, and this of the blocks' round them
 SWITCH_RADIUS = 1.8                                   # (tiles)
 VOLATILE_BLAST = 1.0                                  # Volatile Remains: a dying monster's blast, in its max hp
                                                       # (monsters and rock grow alike past 90m, so it keeps its share)
@@ -139,7 +140,8 @@ UPGRADES = [
         620_000_000, 37.01, 3,
         "Every crew member carries a charge rigged to blow if they fall: when one dies, the blast tears into the "
         "monsters around them and breaks up the rock where they stood.",
-        lambda l: f"{round(100 * SWITCH_MONSTERS * l)}% of nearby monsters' hp, {round(100 * SWITCH_BLOCKS * l)}% of the "
+        lambda l: "no charges rigged" if l == 0 else
+        f"{round(100 * SWITCH_MONSTERS[l - 1])}% of nearby monsters' hp, {round(100 * SWITCH_BLOCKS[l - 1])}% of the "
                   f"blocks' round them"),
     _up("medic", "Hire Medic", "crew", "medkit", (-33, 3), [("guard", 1), ("firstaid", 1)], 91000, 187.01, 3,
         "A medic who rushes to whoever is hurt - anyone being grabbed first - and patches them up. Only one ever "
@@ -192,6 +194,12 @@ UPGRADES = [
         "The Auto-Tapper's ghostly hand learns to slam: every so often it charges up over the blocks and "
         "brings down a Charged Slam of its own, wherever it will hit the most.",
         lambda l: "no phantom slams" if l == 0 else f"a slam every {phantom_interval(l):.0f}s"),
+    _up("bunker", "Bunker Buster", "tools", "tnt", (31, 5.0), [("bigbombs", 1), ("masterwork", 1)],
+        27_000_000_000, 13.09, 3,
+        "Shaped charges: your dynamite tears into the monsters caught in it far harder, and drives its blast down "
+        "into the layer below.",
+        lambda l: "no shaped charges" if l == 0 else
+        f"x{1 + l} vs monsters, {round(100 * BUNKER_BELOW * l)}% of the blast carried into the layer below"),
     _up("bigbombs", "Bigger Bombs", "hands", "bigbomb", (-20, 4), [("dynamite", 1)], 4_300_000, 477.72, 2,
         "Dynamite blasts cover a wider area.", lambda l: f"{3 + 2 * l}x{3 + 2 * l} blast"),
     _up("combo", "Combo Clicks", "hands", "combo", (0, 1), [("click", 1)], 140, 106.52, 5,
@@ -344,7 +352,7 @@ UNLOCK_DEPTH = {
     "laststand": 42,
     "holywater": 11, "torches": 14, "garlic": 21, "salt": 38,   # (specialist counters...)
     "bells": 47, "poles": 61, "acid": 71, "flares": 86, "cutdown": 66,   # (...and for the deep's monsters)
-    "volatile": 93, "switch": 75,
+    "volatile": 93, "switch": 75, "bunker": 90,
     "trophy": 30, "spree": 35, "boiler": 44,
 }
 # Upgrades whose shown effect grows with the dig as well as their level: the World method giving the factor
@@ -357,8 +365,27 @@ FIRST_LEVEL_PRICE = {"miners": 10}
 PRICE_RAMP = {"teamwork": 1.173, "foreman": 1.467, "secondwind": 1.388, "salts": 1.274, "guard": 1.674, "demolition": 1.637, "medic": 1.617, "veterans": 2.093, "graveyardshift": 1.754, "power": 1.002, "crit": 1.187, "quake": 1.459, "vein": 1.703, "whetstone": 1.567, "masterwork": 1.570, "click": 1.013, "autotap": 1.326, "dynamite": 1.683, "phantom": 1.667, "slam": 1.521, "steady": 1.265, "value": 1.006, "double": 1.464, "goldrush": 2.153, "golddust": 1.404, "vault": 1.534, "trophy": 1.566, "spree": 1.610, "midas": 2.106, "slayer": 1.007, "smite": 1.154, "cleave": 1.452, "firstaid": 1.264, "traps": 1.274, "ballista": 1.567, "garlic": 1.558, "salt": 2.448, "poles": 1.452, "boiler": 1.715, "laststand": 2.029}
 # Upgrades for the Base Camp people: locked until you've hired at least one of them.
 NEEDS_CAMP = {"salts"}
+# Deep ranks: a few Tools and Hands upgrades go on past their tree's cap, for the late game - priced for the gold
+# coming in at the bottom of an expedition, and stronger than a tree rank.
+# key: ((price, the level its effect works at), ...) - one per extra rank, in order
+DEEP_RANKS = {
+    # Tools
+    "crit":       ((70_000_000_000, 13), (450_000_000_000, 16)),   # 50% > 65% > 80% crits
+    "diamond":    ((60_000_000_000, 16), (500_000_000_000, 24)),   # x3.5 > x5 > x7 vs ore
+    "deepstrike": ((50_000_000_000, 8), (350_000_000_000, 10)),   # 50% > 80% > 100% below
+    "masterwork": ((150_000_000_000, 7), (900_000_000_000, 9)),   # x7.6 > x17 > x38 miner dmg
+    # Hands
+    "combo":      ((60_000_000_000, 20), (450_000_000_000, 30)),   # x2 > x3 > x4 at a full combo
+    "autotap":    ((180_000_000_000, 15), (800_000_000_000, 20)),   # 10 > 15 > 20 taps a second
+    "steady":     ((90_000_000_000, 13), (550_000_000_000, 16)),   # 50% > 65% > 80% click crits
+    "slam":       ((60_000_000_000, 8), (400_000_000_000, 12)),   # 13x > 19x > 27x slams
+}
 for _u in UPGRADES:
     _u["depth"] = UNLOCK_DEPTH[_u["key"]]
+    _u["tree_max"] = _u["max"]   # (the tree's own cap: deep ranks come after it)
+    _u["deep"] = DEEP_RANKS.get(_u["key"], ())
+    if _u["deep"]:
+        _u["max"] += len(_u["deep"])
     _u["camp"] = _u["key"] in NEEDS_CAMP
     if _u["key"] in FIRST_LEVEL_PRICE:
         _u["first"] = FIRST_LEVEL_PRICE[_u["key"]]
@@ -378,11 +405,15 @@ EFFECT_OF_MAX = {"boots": 15, "teamwork": 10, "foreman": 5, "coffee": 5, "second
 
 
 def effect_level(key, rank):
-    """The level an upgrade's effect works at, for `rank` ranks of it (see EFFECT_OF_MAX)."""
+    """The level an upgrade's effect works at, for `rank` ranks of it (see EFFECT_OF_MAX, and DEEP_RANKS past the
+    tree's cap)."""
+    up = UPGRADE_BY_KEY[key]
+    if up["deep"] and rank > up["tree_max"]:
+        return up["deep"][min(rank, up["max"]) - up["tree_max"] - 1][1]
     top = EFFECT_OF_MAX.get(key)
     if top is None or not rank:
         return rank
-    return int(rank * top / UPGRADE_BY_KEY[key]["max"] + 0.5)
+    return int(rank * top / up["tree_max"] + 0.5)
 
 
 for _u in UPGRADES:   # (what a rank does, as shown: the level its effect works at)
@@ -401,6 +432,8 @@ UPGRADES_BY_TAB = {tab: [u for u in UPGRADES if u["branch"] == tab] for tab in T
 def upgrade_cost(up, levels):
     """Price of the next level of `up` (only its own level counts: see Pricing above)."""
     level = levels[up["key"]]
+    if up["deep"] and level >= up["tree_max"]:   # a deep rank: priced on its own
+        return up["deep"][min(level, up["max"] - 1) - up["tree_max"]][0]
     if "first" in up:   # e.g. your first miner: a cheap kick-off, then the usual curve from `base`
         if level == 0:
             return up["first"]

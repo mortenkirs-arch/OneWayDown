@@ -17,7 +17,7 @@ TABS = [("crew", "Active crew"), ("graveyard", "Graveyard")]
 ROLE_BADGES = {"foreman": ("FOREMAN", HI_VIS), "driller": ("DRILLER", (235, 160, 70)),
                "guard": ("GUARD", (120, 150, 220)), "demolitionist": ("DEMOLITION", (225, 80, 70)),
                "medic": ("MEDIC", (120, 220, 140)), "hero": ("HERO", (250, 205, 70)),
-               "blacksmith": ("BLACKSMITH", (240, 140, 70)), "archer": ("ARCHER", (160, 210, 120)),
+               "engineer": ("ENGINEER", (240, 140, 70)), "archer": ("ARCHER", (160, 210, 120)),
                "taxman": ("TAX", (110, 210, 120)), "claygolem": ("GOLEM", (200, 140, 240))}
 TAB_W, TAB_H, TAB_Y = 230, 46, 84
 LIST_TOP, LIST_BOTTOM = 196, H - 72
@@ -77,7 +77,7 @@ class CrewScene(Scene):
         if col:
             rows.sort(key=lambda r: self.value(r, col), reverse=desc)
         if self.tab == "crew":   # the foreman heads the list, then the specialists, then the miners
-            order = {"hero": 0, "blacksmith": 0, "archer": 0, "taxman": 0, "claygolem": 0,   # (camp people first)
+            order = {"hero": 0, "engineer": 0, "archer": 0, "taxman": 0, "claygolem": 0,   # (camp people first)
                      "foreman": 1, "medic": 2, "guard": 3, "demolitionist": 4, "driller": 5}
             rows.sort(key=lambda r: order.get(r["role"], 6))
         return rows
@@ -297,13 +297,14 @@ class CrewScene(Scene):
             color = ROLE_BADGES["demolitionist"][1]
         elif m.role == "driller":
             label, color = "Drilling", ROLE_BADGES["driller"][1]
-        elif m.role in ("hero", "blacksmith", "archer", "taxman", "claygolem"):
-            busy = {"hero": {"rescuing": "To the rescue!"}, "blacksmith": {"forging": "Reforging a pick",
-                                                                          "heading": "Off to reforge a pick"},
+        elif m.role in ("hero", "engineer", "archer", "taxman", "claygolem"):
+            busy = {"hero": {"rescuing": "To the rescue!"}, "engineer": {"forging": "Rigging a pick",
+                                                                          "heading": "Off to rig a pick"},
                     "archer": {"shooting": "Shooting"}, "taxman": {"visiting": f"Off to collect from {m.goal.name}" if m.task == "visiting" and m.goal else "Doing the rounds",
-                               "collecting": "Collecting taxes", "waiting": "Waiting for someone to tax"},
+                               "collecting": "Collecting taxes", "waiting": "Waiting for someone to tax",
+                               "auditing": "Taxing a monster"},
                     "claygolem": {"leaping": "Leaping in to slam!"}}[m.role]
-            idle = {"hero": "Digging", "blacksmith": "Looking for a dull pick", "archer": "Keeping watch",
+            idle = {"hero": "Digging", "engineer": "Looking for a pick to rig", "archer": "Keeping watch",
                     "taxman": "Doing the rounds", "claygolem": "Waiting on your clicks"}[m.role]
             label, color = busy.get(m.task, idle), ROLE_BADGES[m.role][1]
         elif m.role == "medic":

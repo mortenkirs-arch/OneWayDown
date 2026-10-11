@@ -17,7 +17,10 @@ from ..effects import Particle
 from ..icons import draw_icon, draw_padlock
 from ..iso import draw_cube, iso, origin_at, point_in_poly
 from ..miners import CAMP_LOOKS, Miner
-from ..sprites import draw_brazier, draw_clay_pit, draw_kiln, draw_ledger_desk, draw_miner, draw_pet_chest, draw_target_dummy
+from ..sprites import (draw_banner, draw_banner_fringe, draw_desk_wing, draw_glaze_pots, draw_heirloom_pick,
+                       draw_potters_wheel, draw_powder_keg, draw_brazier, draw_clay_pit, draw_collar_post, draw_divining_rod,
+                       draw_tax_strongbox, draw_kiln, draw_ledger_desk, draw_lightning_rod, draw_miner,
+                       draw_gear_addon, draw_pet_chest, draw_pocket_watch, draw_target_dummy, draw_toolkit)
 from ..ui import Button, draw_glow, draw_panel, draw_text, wrap_text
 from ..upgrades import BRANCHES
 from ..util import fmt, shade
@@ -40,6 +43,16 @@ STALAGMITES = [(2.8, 0.35, 1.0), (6.1, 0.4, 1.3), (0.35, 5.6, 0.9), (0.4, 7.1, 1
 GLOWS = {"teal": ((90, 230, 210), (36, 120, 118)), "violet": ((190, 130, 255), (92, 60, 142)),
          "amber": ((255, 190, 90), (140, 90, 40))}
 ITEM_SCALE = 1.6                            # the camp's items are drawn this much bigger than on the dig
+ITEM_SIZE = {"ledger": 0.72, "rounding": 0.72, "brazier": 0.55, "explosive": 0.55}   # (any drawn smaller than that)
+FITTED = {"gears": "toolkit", "rounding": "ledger", "pup": "chompers", "heirloom": "divining",   # items that are
+          "fringe": "banner", "explosive": "brazier", "glaze": "kiln", "wheel": "claypit"}               # an upgrade to another:
+                                            # drawn as part of it, once yours
+HANGOUT = {"combat": (7.0, 7.45)}           # where a tent's owner potters about, if not by its door (Wren: the bridge)
+PERCHED = {"rod", "watch"}                  # items up on the Tools Tent's ridge (at their `pos` along it), not the
+HANGING = {"watch"}                         # ground - the Pocket Watch hanging off it, at the end over the door
+RANGE_SHROOM = (3.6, 9.55)                  # the Target Dummy's range: the mushroom it clears away...
+RANGE_BALES = [(1.72, 9.12, 0), (1.72, 9.72, 0), (1.72, 9.42, 1), (3.55, 9.5, 0)]   # ...and its straw bales: (x, y,
+BALE_HALF, BALE_HIGH = (0.2, 0.28), 0.42    # stacked); the last, out front, a second target. A bale's size (tiles, blocks)
 TENT_HALF = (0.8, 0.62)                     # a tent's footprint (half its length and width, in tiles)...
 TENT_HIGH = 1.45                            # ...and the height of its ridge (in block heights)
 PLAIN = (238, 234, 224)                     # an unclaimed tent's bare canvas
@@ -51,13 +64,33 @@ STYLES = {   # a tent once its hire has moved in: canvas, trim, the emblem on it
     "combat":  dict(canvas=(182, 58, 52), trim=(240, 240, 235), icon="target"),
 }
 LORE = "The Void Maw's death-throes brought the shaft down - but the crew scrambled clear, into the cavern where you " \
-       "made camp. One thing to take per visit, for good: a hire for an empty tent, or something of theirs once it's theirs."
+       "made camp. One thing to take per visit."
 
 
 VIEW_LORE = "The cavern where you made camp, at the bottom of the shaft. Your people go down with every " \
             "expedition; the tents still empty can take on a hire the next time the shaft comes down."
 LOCKED_LORE = "Somewhere at the bottom of the shaft, past everything the deep can throw at you, there's a cavern big " \
               "enough to make camp in. Beat The Void Maw at 100m and you'll find it."
+
+
+def item_spot(key):
+    """Where an item is: (x, y, z) on the board, and its place in the drawing order (one up on a tent comes after
+    the tent)."""
+    x, y = ITEMS[key]["pos"]
+    if key in PERCHED:
+        cx, cy = TENTS[ITEMS[key]["tent"]]["pos"]
+        return x, y, 1.0 + TENT_HIGH, cx + cy + 0.45
+    return x, y, 1.0, x + y
+
+
+def item_feet(key):
+    """Where an item's picture is pinned, in its 80x80 art: its feet (or, hanging, the top of its chain)."""
+    return (40, 12) if key in HANGING else (40, 66)
+
+
+def hangout(tent):
+    """Where a tent's owner potters about: by its door, or (HANGOUT) somewhere of their own."""
+    return HANGOUT.get(tent) or door(tent)
 
 
 def door(tent):
@@ -132,6 +165,9 @@ class CampScene(Scene):
         self.hire_button = Button((p.x + 20, p.bottom - 70, p.w - 40, 52), "", self.choose, size=28,
                                   color=(60, 130, 80))
         self.go_button = Button((p.x, p.bottom + 14, p.w, 56), "", self.set_off, size=28, color=(70, 100, 160))
+        self.dev_button = Button((p.x - 92, 22, 72, 34), "Dev", self.toggle_dev, size=20, color=(70, 66, 84))
+        self.dev = False           # Dev: show every hire and item the camp can have (just to look at - nothing's taken)
+        self.dev_people = {}       # (the hires you haven't got, standing in for the Dev view)
         self.mode = "visit"        # visit: the shaft just came down (hire, then set off) | view: a look round from the
                                    # dig | locked: you've never made camp - a glimpse of what's waiting at 100m
 
@@ -149,16 +185,31 @@ class CampScene(Scene):
         self.particles = []
 
     def move_in(self, tent, hire, them=None):
-        """A tent's character, for the camp board (a copy of the crew member, or a fresh face)."""
+        """A tent's character moves in, for the camp board (a copy of the crew member, or a fresh face)."""
+        m = self.make_person(tent, hire, them)
+        self.people[tent] = m
+        return m
+
+    def make_person(self, tent, hire, them=None):
+        """A tent's character, standing at its door."""
         m = Miner(role=hire)
         m.apply_look(CAMP_LOOKS[hire])
         if them:
             m.apply_saved(them.to_dict())
-        m.x, m.y = door(tent)
+        m.x, m.y = hangout(tent)
         m.draw_z, m.hp, m.max_hp, m.anim = 1.0, 1.0, 1.0, 0.0
         m.seed = random.uniform(0, 10)
-        self.people[tent] = m
         return m
+
+    def toggle_dev(self):
+        """Dev: show every hire in their tent and every item on the board, or just what you've really got."""
+        self.dev = not self.dev
+        self.dev_people = {k: self.make_person(k, t["hire"]) for k, t in TENTS.items() if t["hire"]} if self.dev else {}
+        self.dev_button.color = (200, 120, 50) if self.dev else (70, 66, 84)
+
+    def shown_people(self):
+        """The characters on the board: the camp's people (and in the Dev view, everyone it could have)."""
+        return {**self.dev_people, **self.people} if self.dev else self.people
 
     # ----- actions --------------------------------------------------------------------------------------------
     def choosing(self):
@@ -180,7 +231,9 @@ class CampScene(Scene):
         w.take_camp_item(key)
         self.game.save()   # (yours for good: closing the game before setting off can't lose it)
         with origin_at(ORIGIN):
-            px, py = iso(*ITEMS[key]["pos"], 1.0)
+            px, py = iso(*item_spot(key)[:3])
+        if key in HANGING:
+            py += 50
         color = BRANCHES[ITEMS[key]["tent"]]["color"]
         for _ in range(40):   # a puff as it becomes real
             self.particles.append(Particle(px, py - 14, random.choice([GOLD, (255, 255, 255), color]), big=True))
@@ -214,6 +267,8 @@ class CampScene(Scene):
     def handle(self, event):
         if self.hire_button.handle(event) or self.go_button.handle(event):
             return
+        if self.mode != "locked" and self.dev_button.handle(event):
+            return
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pick = self.item_under(event.pos) or self.tent_under(event.pos)
             if pick:
@@ -227,24 +282,36 @@ class CampScene(Scene):
         """{item: faded?} - the camp's items on the board: yours, solid; while you're choosing, the ones you could
         take, faded (gone again once you've chosen)."""
         w = self.world
+        if self.dev:   # (everything, as if it were yours)
+            return {k: False for k in ITEMS}
         shown = {k: False for k in w.camp_items}
         if self.choosing():
             shown.update({k: True for k in open_items(w.camp, w.camp_items)})
         return shown
 
     def item_under(self, pos):
-        for key in self.shown_items():
+        shown = self.shown_items()
+        for key in sorted(shown, key=lambda k: not shown[k]):   # (one you could take first: it may be fitted to yours)
             with origin_at(ORIGIN):
-                x, y = iso(*ITEMS[key]["pos"], 1.0)
-            if abs(pos[0] - x) < 32 and y - 70 < pos[1] < y + 12:
+                x, y = iso(*item_spot(key)[:3])
+            top, bottom = (y - 4, y + 56) if key in HANGING else (y - 70, y + 12)
+            if abs(pos[0] - x) < 32 and top < pos[1] < bottom:
                 return key
         return None
+
+    def has_range(self):
+        """The Target Dummy's range is up (it's yours - or it's the Dev view)."""
+        return self.dev or "dummy" in self.world.camp_items
+
+    def shrooms(self):
+        """The cavern's mushrooms (less the one the dummy's range was built over)."""
+        return [m for m in SHROOMS if not (self.has_range() and m[:2] == RANGE_SHROOM)]
 
     def tent_under(self, pos):
         for tent, polys in self.tent_polys.items():
             if any(point_in_poly(pos, poly) for poly in polys):
                 return tent
-        for tent, m in self.people.items():   # (or the character standing outside it)
+        for tent, m in self.shown_people().items():   # (or the character standing outside it)
             with origin_at(ORIGIN):
                 x, y = iso(m.x, m.y, 1.0)
             if abs(pos[0] - x) < 14 and y - 44 < pos[1] < y + 4:
@@ -263,15 +330,15 @@ class CampScene(Scene):
                 self.particles.append(Particle(fx + random.uniform(-8, 8), fy - 14,
                                                random.choice([(255, 200, 90), (255, 140, 50), (255, 240, 180)])))
             if random.random() < dt * 6:   # glowing spores drifting off the mushrooms
-                x, y, size, glow = random.choice(SHROOMS)
+                x, y, size, glow = random.choice(self.shrooms())
                 px, py = iso(x, y, 1.0)
                 self.particles.append(Particle(px + random.uniform(-14, 14) * size, py - 30 * size, GLOWS[glow][0]))
-            if "tools" in self.people and random.random() < dt * 4:   # the forge's chimney smoking
+            if "tools" in self.shown_people() and random.random() < dt * 4:   # the forge's chimney smoking
                 cx, cy = TENTS["tools"]["pos"]
                 sx, sy = iso(cx - 0.3, cy - 0.2, 1.0 + TENT_HIGH + 0.45)
                 self.particles.append(Particle(sx, sy, random.choice([(120, 116, 120), (90, 88, 94)])))
-        for tent, m in self.people.items():   # pottering about outside their tent
-            hx, hy = door(tent)
+        for tent, m in self.shown_people().items():   # pottering about outside their tent
+            hx, hy = hangout(tent)
             k = m.seed
             nx, ny = hx + 0.35 * math.sin(t * 0.5 + k), hy + 0.45 * math.sin(t * 0.31 + k * 2)
             if (nx - m.x) - (ny - m.y) > 0.002:
@@ -280,10 +347,13 @@ class CampScene(Scene):
                 m.facing = -1
             m.x, m.y = nx, ny
             busy = math.sin(t * 0.8 + k) > 0.55   # every so often: at their trade
-            m.anim = (1.0 if (t * 4) % 1 < 0.5 else 0.2) if busy and m.role in ("blacksmith", "taxman") else 0.0
+            m.anim = (1.0 if (t * 4) % 1 < 0.5 else 0.2) if busy and m.role in ("engineer", "taxman") else 0.0
             if m.role == "archer":
                 m.anim = max(0.0, math.sin(t * 1.3 + k)) if busy else 0.0
-            m.task = "forging" if busy and m.role == "blacksmith" else "idle"
+            m.task = "forging" if busy and m.role == "engineer" else "idle"
+            if m.role == "claygolem":   # (out of the Kiln, and glazed, as on the dig)
+                m.fired = "kiln" in self.world.camp_items or self.dev
+                m.glazed = "glaze" in self.world.camp_items or self.dev
             if m.role == "claygolem":   # (practising its slam on the turf, fists up and down)
                 m.task, m.anim = ("leaping", (t * 0.7) % 1) if busy else ("idle", 0.0)
 
@@ -314,6 +384,7 @@ class CampScene(Scene):
             return
         self.draw_labels(s, hovered)
         self.draw_panel(s, mouse, t)
+        self.dev_button.draw(s, f, mouse)
 
     def draw_locked(self, s, t):
         """Never made camp: the cavern lies in shadow, the tents dark shapes, a padlock over it all - and the
@@ -399,18 +470,22 @@ class CampScene(Scene):
                     draw_cube(s, x, y, 1.0, shade((64, 60, 72), k), (84, 80, 94), seed=x * 31 + y)
         self.draw_stream(s, t)
         # everything standing on it, back to front
-        items = [(x + y, "shroom", (x, y, size, glow)) for x, y, size, glow in SHROOMS]
+        items = [(x + y, "shroom", (x, y, size, glow)) for x, y, size, glow in self.shrooms()]
+        if self.has_range():
+            items += [(x + y + 0.01 * up, "bale", (x, y, up, k == len(RANGE_BALES) - 1))
+                      for k, (x, y, up) in enumerate(RANGE_BALES)]
         items += [(x + y, "sprout", (x, y)) for x, y in SPROUTS]
         items += [(x + y, "stalagmite", (x, y, size)) for x, y, size in STALAGMITES]
         items.append((FIRE[0] + FIRE[1], "fire", None))
         for tent, spec in TENTS.items():
             cx, cy = spec["pos"]
             items.append((cx + cy + 0.4, "tent", tent))
-        for tent, m in self.people.items():
+        for tent, m in self.shown_people().items():
             items.append((m.x + m.y, "person", m))
         for key, faded in self.shown_items().items():
-            x, y = ITEMS[key]["pos"]
-            items.append((x + y, "item", (key, faded)))
+            if key in FITTED and not faded:   # (yours: it's part of what it was fitted to now)
+                continue
+            items.append((item_spot(key)[3] + (0.01 if key in FITTED else 0.0), "item", (key, faded)))
         items.sort(key=lambda it: it[0])
         self.tent_polys = {}
         for _, kind, data in items:
@@ -420,6 +495,8 @@ class CampScene(Scene):
                 self.draw_sprouts(s, *data, t)
             elif kind == "stalagmite":
                 self.draw_stalagmite(s, *data)
+            elif kind == "bale":
+                self.draw_bale(s, *data)
             elif kind == "fire":
                 if self.mode != "locked":   # (no fire lit till you make camp)
                     self.draw_fire(s, t)
@@ -430,37 +507,151 @@ class CampScene(Scene):
             else:
                 draw_miner(s, self.fonts, data, 0.0, t)
 
-    def item_art(self, s, key, x, y, t, faded):
-        """One of the camp's items, standing at (x, y) on screen (its feet)."""
-        if key == "chompers":   # dozing by the tent - and now and then, a big yawn
+    def fitted(self, key):
+        """The items fitted to this one (shown as part of it) that are yours - or, in the Dev view, all of them."""
+        return {other for other, base in FITTED.items() if base == key and (other in self.world.camp_items or self.dev)}
+
+    def draw_pup_ride(self, s, x, y, t, faded):
+        """The Mimic Pup, riding on Chompers' lid (Chompers' feet at x, y) - bounced up whenever its parent yawns,
+        and now and then hopping for the fun of it."""
+        yawn = 0.0 if faded else max(0.0, math.sin(t * 0.6)) ** 6   # (Chompers' yawn: see item_art)
+        lid = 14 + 8 * yawn + abs(math.sin(t * 3 + 5)) * 1.5
+        hop = 0.0 if faded else 10 * yawn + 6 * max(0.0, math.sin(t * 1.7)) ** 12
+        gape = 0.0 if faded else max(0.0, math.sin(t * 0.6 + 2.2)) ** 6
+        draw_pet_chest(s, x + 2, y - lid, t, gape, facing=1, lift=hop, size=0.62)
+
+    def item_art(self, s, key, x, y, t, faded, board=False):
+        """One of the camp's items, standing at (x, y) on screen (its feet). `board`: on the camp board, where an
+        item that's fitted to another is just its own parts (over the other)."""
+        if key == "chompers":   # dozing by the tent - and now and then, a big yawn (bouncing its pup)
             yawn = 0.0 if faded else max(0.0, math.sin(t * 0.6)) ** 6
-            draw_pet_chest(s, x, y, t, yawn)
+            draw_pet_chest(s, x, y, t, yawn, facing=-1, spiked="collar" in self.world.camp_items or self.dev)
+            if "pup" in self.fitted("chompers"):
+                self.draw_pup_ride(s, x, y, t, faded)
         elif key == "dummy":
             draw_target_dummy(s, x, y, t)
+        elif key == "pup":   # (riding on its parent)
+            if not board:
+                draw_pet_chest(s, x, y, t, 0.0, facing=-1, spiked="collar" in self.world.camp_items or self.dev)
+            self.draw_pup_ride(s, x, y, t, faded)
+        elif key == "collar":
+            draw_collar_post(s, x, y, t)
+        elif key == "taxes":
+            draw_tax_strongbox(s, x, y, t, lit=not faded)
+        elif key == "rounding":   # (fitted to the ledger desk)
+            if board:
+                draw_desk_wing(s, x, y, t, live=not faded)
+            else:
+                draw_ledger_desk(s, x, y, t, wing=True)
+        elif key == "divining":
+            draw_divining_rod(s, x, y, t, live=not faded, pick="heirloom" in self.fitted("divining"))
+        elif key == "banner":
+            draw_banner(s, x, y, t, fringe="fringe" in self.fitted("banner"))
+        elif key == "heirloom":   # (driven into the rod's stump)
+            if board:
+                draw_heirloom_pick(s, x, y, t)
+            else:
+                draw_divining_rod(s, x, y, t, pick=True)
+        elif key == "fringe":   # (sewn on the banner)
+            if board:
+                draw_banner_fringe(s, x, y, t)
+            else:
+                draw_banner(s, x, y, t, fringe=True)
         elif key == "brazier":
-            draw_brazier(s, x, y, t, lit=not faded)
+            draw_brazier(s, x, y, t, lit=not faded, explosive="explosive" in self.fitted("brazier"))
+        elif key == "explosive":   # (fitted to the brazier)
+            if board:
+                draw_powder_keg(s, x, y, t, lit=not faded)
+            else:
+                draw_brazier(s, x, y, t, explosive=True)
+        elif key == "rod":
+            draw_lightning_rod(s, x, y, t, live=not faded, perched=True)
+        elif key == "toolkit":
+            draw_toolkit(s, x, y, t, wound=not faded, geared="gears" in self.fitted("toolkit"))
+        elif key == "watch":
+            draw_pocket_watch(s, x, y, t, running=not faded, hanging=True)
+        elif key == "gears":
+            if board:   # (fitted to the toolkit: just the gears, over it)
+                draw_gear_addon(s, x, y, t, running=not faded)
+            else:
+                draw_toolkit(s, x, y, t, geared=True)
         elif key == "kiln":
             draw_kiln(s, x, y, t, lit=not faded)
+            if "glaze" in self.fitted("kiln"):
+                draw_glaze_pots(s, x, y, t)
         elif key == "claypit":
             draw_clay_pit(s, x, y, t, alive=not faded)
+            if "wheel" in self.fitted("claypit"):
+                draw_potters_wheel(s, x, y, t, live=not faded)
+        elif key == "glaze":   # (fitted to the kiln)
+            if not board:
+                draw_kiln(s, x, y, t)
+            draw_glaze_pots(s, x, y, t)
+        elif key == "wheel":   # (fitted to the clay pit)
+            if not board:
+                draw_clay_pit(s, x, y, t)
+            draw_potters_wheel(s, x, y, t, live=not faded)
         else:
-            draw_ledger_desk(s, x, y, t, lit=not faded)
+            draw_ledger_desk(s, x, y, t, lit=not faded, wing="rounding" in self.fitted("ledger"))
 
     def draw_item(self, s, key, faded, t, hovered, selected):
         """A camp item: yours, drawn as it is; one you could take, a faded ghost of it on a glowing ring."""
-        x, y = iso(*ITEMS[key]["pos"], 1.0)
+        x, y = iso(*item_spot(key)[:3])
         color = BRANCHES[ITEMS[key]["tent"]]["color"]
         if faded or selected:
-            ring = pygame.Rect(0, 0, 76, 28)
-            ring.center = (x, y)
+            ring = pygame.Rect(0, 0, 76 * ITEM_SIZE.get(key, 1.0), 28 * ITEM_SIZE.get(key, 1.0))
+            ring.center = (x, y + (34 if key in HANGING else 0))
             pulse = 0.5 + 0.5 * math.sin(t * 3)
             pygame.draw.ellipse(s, shade(color, 0.6 + 0.4 * pulse) if faded else color, ring, 2)
         art = pygame.Surface((80, 80), pygame.SRCALPHA)   # (drawn on its own, scaled up - and if it's not yours
-        self.item_art(art, key, 40, 66, t, faded)          # yet, faded right back)
-        art = pygame.transform.scale(art, (int(80 * ITEM_SCALE), int(80 * ITEM_SCALE)))
+        fx, fy = item_feet(key)                            # yet, faded right back)
+        self.item_art(art, key, fx, fy, t, faded, board=True)
+        k = ITEM_SCALE * ITEM_SIZE.get(key, 1.0)
+        art = pygame.transform.scale(art, (int(80 * k), int(80 * k)))
         if faded:
             art.set_alpha(190 if hovered or selected else int(95 + 30 * math.sin(t * 2.5)))
-        s.blit(art, (x - 40 * ITEM_SCALE, y - 66 * ITEM_SCALE))
+        s.blit(art, (x - fx * k, y - fy * k))
+        if key == "brazier" and not faded:   # (its firelight on the tent's door)
+            self.halo(s, (int(x), int(y - 28)), 34, (255, 150, 70), 60)
+
+    def draw_bale(self, s, x, y, up, target):
+        """A straw bale for the Target Dummy's range, tied with twine (`up`: stacked on another). The one out front
+        has a target painted on, facing down-right."""
+        hx, hy = BALE_HALF
+        z0 = 1.0 + up * BALE_HIGH
+        z1 = z0 + BALE_HIGH
+        x0, x1, y0, y1 = x - hx, x + hx, y - hy, y + hy
+        straw = (226, 194, 108)
+        faces = [([iso(x0, y1, z0), iso(x1, y1, z0), iso(x1, y1, z1), iso(x0, y1, z1)], 0.8),
+                 ([iso(x1, y0, z0), iso(x1, y1, z0), iso(x1, y1, z1), iso(x1, y0, z1)], 0.64),
+                 ([iso(x0, y0, z1), iso(x1, y0, z1), iso(x1, y1, z1), iso(x0, y1, z1)], 1.0)]
+        if not up:
+            pygame.draw.polygon(s, (30, 26, 34), [iso(x0 - 0.05, y0, 1.0), iso(x1 + 0.1, y0, 1.0),
+                                                  iso(x1 + 0.1, y1 + 0.1, 1.0), iso(x0 - 0.05, y1 + 0.1, 1.0)])
+        for poly, k in faces:
+            pygame.draw.polygon(s, shade(straw, k), poly)
+            pygame.draw.polygon(s, shade(straw, 0.5), poly, 1)
+        for k in range(5):   # loose straw on its faces
+            a, b = (k * 0.37) % 1, (k * 0.61 + 0.2) % 1
+            pygame.draw.line(s, shade(straw, 0.62), iso(x0 + (x1 - x0) * a, y1, z0 + BALE_HIGH * b),
+                             iso(x0 + (x1 - x0) * min(1, a + 0.3), y1, z0 + BALE_HIGH * b), 1)
+            pygame.draw.line(s, shade(straw, 0.5), iso(x1, y0 + (y1 - y0) * b, z0 + BALE_HIGH * a),
+                             iso(x1, y0 + (y1 - y0) * min(1, b + 0.25), z0 + BALE_HIGH * a), 1)
+        for q in (0.3, 0.7):   # twine round it
+            ty = y0 + (y1 - y0) * q
+            pygame.draw.line(s, (130, 92, 50), iso(x0, ty, z1), iso(x1, ty, z1), 1)
+            pygame.draw.line(s, (130, 92, 50), iso(x1, ty, z1), iso(x1, ty, z0), 1)
+        if target:   # rings painted on its end, facing the archers
+            cx, cy = iso(x1, y, (z0 + z1) / 2)
+            across = (iso(x1, y + 1, 0)[0] - iso(x1, y, 0)[0], iso(x1, y + 1, 0)[1] - iso(x1, y, 0)[1])
+            n = (across[0] ** 2 + across[1] ** 2) ** 0.5
+            ux, uy = across[0] / n, across[1] / n
+            for r, col in ((8, (240, 240, 235)), (6, (200, 50, 46)), (4, (240, 240, 235)), (2, (200, 50, 46))):
+                pts = [(cx + ux * r * math.cos(a), cy + uy * r * math.cos(a) - r * math.sin(a))
+                       for a in (k * math.tau / 16 for k in range(16))]
+                pygame.draw.polygon(s, col, pts)
+            pygame.draw.line(s, (150, 110, 60), (cx + 1, cy - 1), (cx - 9, cy - 7), 2)   # an arrow in it
+            pygame.draw.line(s, (240, 240, 235), (cx - 9, cy - 7), (cx - 12, cy - 9), 2)
 
     def draw_stream(self, s, t):
         """The underground stream: one smooth ribbon of dark water between wet banks, ripples running down it,
@@ -583,7 +774,7 @@ class CampScene(Scene):
         hx, hy = TENT_HALF
         x0, x1, y0, y1, z = cx - hx, cx + hx, cy - hy, cy + hy, 1.0
         top = z + TENT_HIGH
-        claimed = tent in self.people
+        claimed = tent in self.shown_people()
         style = STYLES[tent]
         canvas = style["canvas"] if claimed else ((58, 54, 66) if self.mode == "locked" else PLAIN)
         back = [iso(x0, y0, z), iso(x1, y0, z), iso(x1, cy, top), iso(x0, cy, top)]
@@ -666,7 +857,8 @@ class CampScene(Scene):
             for r, col in ((10, (240, 240, 235)), (7, (200, 50, 46)), (4, (240, 240, 235)), (2, (240, 200, 70))):
                 pygame.draw.circle(s, col, (bx, by - 20), r)
             pygame.draw.line(s, (150, 110, 60), (bx + 1, by - 21), (bx + 12, by - 27), 2)
-        elif tent == "fortune":   # a little desk, coins stacked on it
+        elif tent == "fortune" and "taxes" not in self.shown_items():   # a little desk, coins stacked on it (the
+                                                                         # strongbox stands there once it's yours)
             dx, dy = iso(x1 + 0.6, y1 + 0.15, z)
             pygame.draw.rect(s, (120, 84, 52), (dx - 12, dy - 12, 24, 6))
             for d in (-9, 9):
@@ -699,18 +891,26 @@ class CampScene(Scene):
         choosing = self.mode == "locked" or self.choosing()
         plates = []
         for tent, spec in TENTS.items():
-            if tent != hovered and (not choosing or tent in self.people):
+            if tent != hovered and (not choosing or tent in self.shown_people()):
                 continue
             cx, cy = spec["pos"]
-            plates.append((tent, spec["name"], BRANCHES[tent]["color"], (cx + 0.6, cy + 0.7)))
+            plates.append((tent, spec["name"], BRANCHES[tent]["color"], (cx + 0.6, cy + 0.7)))   # (board point)
         for key, faded in self.shown_items().items():   # (the items you could take, too)
             if key == hovered or (faded and choosing):
-                x, y = ITEMS[key]["pos"]
-                plates.append((key, ITEMS[key]["name"], BRANCHES[ITEMS[key]["tent"]]["color"], (x + 0.25, y + 0.25)))
+                x, y, z, _ = item_spot(key)
+                with origin_at(ORIGIN):   # (one up on a tent: by it, not on the ground under it)
+                    at = iso(x, y, z) if key in PERCHED else iso(x + 0.25, y + 0.25, z)
+                if key in HANGING:
+                    at = (at[0], at[1] + 52)
+                elif key in FITTED:   # (over what it's fitted to, so as not to cover the plates round it)
+                    at = (at[0] - 8, at[1] - 34 - 66 * ITEM_SCALE * ITEM_SIZE.get(key, 1.0))
+                plates.append((key, ITEMS[key]["name"], BRANCHES[ITEMS[key]["tent"]]["color"], at))
         for key, name, color, at in plates:
-            with origin_at(ORIGIN):
-                x, y = iso(*at, 1.0)
-            img = f[18].render(name, True, (255, 255, 255) if key in (hovered, self.selected) else TEXT)
+            if key in TENTS:
+                with origin_at(ORIGIN):
+                    at = iso(*at, 1.0)
+            x, y = at
+            img = f[20].render(name, True, (255, 255, 255) if key in (hovered, self.selected) else TEXT)   # (20px: the font frays smaller)
             box = img.get_rect(midtop=(x, y + 4)).inflate(12, 4)
             pygame.draw.rect(s, (20, 16, 28), box, border_radius=6)
             pygame.draw.rect(s, color, box, 1, border_radius=6)
@@ -767,9 +967,7 @@ class CampScene(Scene):
                 draw_text(s, f, line, 20, MUTED, (p.x + 20, y))
                 y += 21
             y += 8
-            for item in info["does"] + ["Knocked out, never killed"]:
-                draw_text(s, f, f"- {item}", 20, TEXT, (p.x + 24, y))
-                y += 22
+            y = self.draw_bullets(s, info["does"] + ["Knocked out, never killed"], p.x + 24, y, p.w - 44)
             if here:
                 btn.text, btn.enabled = f"{name} is with you", False
             elif self.mode == "view":
@@ -796,22 +994,24 @@ class CampScene(Scene):
         draw_text(s, f, f"{TENTS[tent]['name']}  -  {owner}'s", 18, color, (p.x + 24, p.y + 52))
         y = p.y + 84
         art = pygame.Surface((64, 60), pygame.SRCALPHA)   # (a big picture of it)
-        self.item_art(art, key, 32, 52, t, False)
+        self.item_art(art, key, 32, 8 if key in HANGING else 52, t, False)
         s.blit(pygame.transform.scale(art, (128, 120)), (p.x + 4, y - 14))
         ours = key in w.camp_items
-        status = ("Just taken!" if key == self.hired else "Yours") if ours else "Up for grabs"
+        could = key in open_items(w.camp, w.camp_items)   # (the Dev view shows things you can't have yet)
+        status = ("Just taken!" if key == self.hired else "Yours") if ours else "Up for grabs" if could else "Not yet"
         draw_text(s, f, status, 22, GOOD if ours else MUTED, (p.x + 140, y + 40))
         y += 120
         for line in wrap_text(f[20], item["blurb"], p.w - 40):
             draw_text(s, f, line, 20, MUTED, (p.x + 20, y))
             y += 21
         y += 8
-        for line in item["does"]:
-            draw_text(s, f, f"- {line}", 20, TEXT, (p.x + 24, y))
-            y += 22
+        y = self.draw_bullets(s, item["does"], p.x + 24, y, p.w - 44)
         btn = self.hire_button
         if ours:
             btn.text, btn.enabled = "Yours, for good", False
+        elif not could:
+            needs = ITEMS[item["requires"]]["name"] if item.get("requires") in ITEMS and TENTS[tent]["hire"] in w.camp                 else HIRES[TENTS[tent]["hire"]]["title"]
+            btn.text, btn.enabled = f"Needs the {needs}", False
         elif self.mode != "visit":
             btn.text, btn.enabled = "Take it at your next visit", False
         elif self.hired:
@@ -819,6 +1019,17 @@ class CampScene(Scene):
         else:
             btn.text, btn.enabled = f"Take the {item['name']}", True
             draw_glow(s, btn.rect, t)
+
+    def draw_bullets(self, s, lines, x, y, width):
+        """A list of "- " points, each wrapping onto more lines (indented under its text) when it's too long for
+        `width`. Returns the y below it."""
+        f = self.fonts
+        indent = f[20].size("- ")[0]
+        for item in lines:
+            for i, line in enumerate(wrap_text(f[20], item, width - indent)):
+                draw_text(s, f, line if i else f"- {line}", 20, TEXT, (x + (indent if i else 0), y))
+                y += 22
+        return y
 
     def draw_footer(self, s, mouse, t):
         """Under the panel: the lifetime record, and the button to set off (or go back to the dig)."""

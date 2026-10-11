@@ -18,7 +18,7 @@ ROLES = {
     "ghost":         dict(hp=1.0, speed=1.0, height=0),    # Graveyard Shift: a fallen miner, back to dig
     # the camp's hires (Base Camp): permanent, knocked out rather than killed
     "hero":          dict(hp=3.0, speed=1.15, height=3),   # digs like four, rescues the grabbed
-    "blacksmith":    dict(hp=1.6, speed=1.25, height=-3),  # goblin: reforges the diggers' picks
+    "engineer":      dict(hp=1.6, speed=1.25, height=-3),  # goblin: rigs the diggers' picks to blow
     "archer":        dict(hp=1.2, speed=1.1, height=2),    # shoots monsters from a distance
     "taxman":        dict(hp=1.0, speed=0.9, height=3),    # collects a share of the crew's earnings
     "claygolem":     dict(hp=2.5, speed=0.75, height=6),   # plods about slamming the ground
@@ -28,7 +28,7 @@ DIGGERS = ("miner", "driller", "ghost", "hero")
 CAMP_LOOKS = {
     "hero": dict(name="Rocco", skin=(224, 172, 125), hair=(150, 100, 50), style="short", facial="beard",
                  shirt=(60, 110, 200), height=3),
-    "blacksmith": dict(name="Grizzle", skin=(120, 170, 80), hair=(40, 34, 30), style="bald", facial=None,
+    "engineer": dict(name="Grizzle", skin=(120, 170, 80), hair=(40, 34, 30), style="bald", facial=None,
                        shirt=(110, 90, 70), height=-3),
     "archer": dict(name="Wren", skin=(241, 194, 155), hair=(90, 60, 30), style="ponytail", facial=None,
                    shirt=(70, 120, 60), height=2),

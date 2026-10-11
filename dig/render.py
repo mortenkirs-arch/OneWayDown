@@ -16,7 +16,7 @@ from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_PEEK_SECS, BRO_SURF
 from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bone, draw_mudling, draw_pet_chest, draw_target_dummy, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
+from .sprites import draw_banner, draw_bone, draw_lightning_rod, draw_mudling, draw_pet_chest, draw_target_dummy, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
 from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
                            SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
@@ -102,10 +102,16 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         items.append((BOILER_POS[0] + BOILER_POS[1] - 0.4, 2, "boiler", None))
     if w.chomper:
         items.append((w.chomper["x"] + w.chomper["y"] - 0.5, 2, "chompers", w.chomper))
+    if w.pup:   # (the Mimic Pup)
+        items.append((w.pup["x"] + w.pup["y"] - 0.5, 2, "chompers", w.pup))
     for d in w.dummies:   # (Wren's Target Dummies)
         items.append((d.x + d.y - 0.5, 2, "dummy", d))
     for mud in w.mudlings:   # (the Clay Pit's mudlings)
         items.append((mud.x + mud.y - 0.5, 2, "mudling", mud))
+    for rod in w.rods:   # (Grizzle's Lightning Rods)
+        items.append((rod.x + rod.y - 0.5, 2, "rod", rod))
+    if w.banner:   # (Rocco's Banner of the Deep)
+        items.append((w.banner[0] + w.banner[1] - 0.5, 2, "banner", w.banner))
     peeker = bro_peeker(w)
     if peeker:
         items.append((peeker.x + peeker.y - 0.5, 2, "enemy", peeker))
@@ -129,6 +135,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
                 draw_bones(surf, faces, x, y, w.depth + layer, dim)
             if layer == 0:
                 draw_damage(surf, b, x, y, z)
+                if w.glazed and w.is_glazed((x, y)):   # (Glazed Fists)
+                    draw_glaze(surf, faces, t, x, y)
                 if b.artifact:
                     draw_artifact_glint(surf, faces, t, x, y)
                 if w.golden and w.golden[0] == (x, y):
@@ -145,17 +153,25 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y) + ghost_lift(w, data), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
+        elif kind == "rod":
+            sx, sy = iso(data.x, data.y, w.column_height(*w.cell_of(data.x, data.y)) + r)
+            draw_lightning_rod(surf, sx, sy, t)
         elif kind == "mudling":
             sx, sy = iso(data.x, data.y, w.column_height(*w.cell_of(data.x, data.y)) + r)
-            draw_mudling(surf, sx, sy, t, data.anim, data.left)
+            draw_mudling(surf, sx, sy, t, data.anim, data.left, shaped="wheel" in w.camp_items)
         elif kind == "dummy":
             sx, sy = iso(data.x, data.y, w.column_height(*w.cell_of(data.x, data.y)) + r)
             draw_target_dummy(surf, sx, sy, t)
+        elif kind == "banner":
+            sx, sy = iso(data[0], data[1], w.column_height(*w.cell_of(*data)) + r)
+            draw_banner(surf, sx, sy, t, fringe="fringe" in w.camp_items)
         elif kind == "chompers":
             z = w.column_height(*w.cell_of(data["x"], data["y"])) + r
             sx, sy = iso(data["x"], data["y"], z)
             gape = 1.0 if w.clock - data["chomp_at"] < CHOMP_SHOW else (0.6 if data["hop"] else 0.0)
-            draw_pet_chest(surf, sx, sy, t, gape, data.get("facing", 1), lift=data["lift"] * 40)
+            pup = data is w.pup
+            draw_pet_chest(surf, sx, sy, t, gape, data.get("facing", 1), lift=data["lift"] * 40 * (0.7 if pup else 1),
+                           size=0.65 if pup else 1.0, spiked=not pup and "collar" in w.camp_items)
         elif kind == "whetstone":
             busy = any(m.task == "sharpening" for m in w.miners)
             draw_whetstone(surf, _anchor(w, WHETSTONE_POS), t, busy)
@@ -178,6 +194,8 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     draw_bro_mound(surf, w, t)
     draw_curses(surf, w, t)
     draw_boss_tricks(surf, w, t)
+    draw_arcs(surf, w, t)
+    draw_time_stop(surf, w, t)
     draw_void_inhale(surf, w, t)
     draw_stuns(surf, w, t)
     draw_bone_throws(surf, w, t)
@@ -888,6 +906,43 @@ def draw_hazards(surf, world, t):
     surf.blit(overlay, (0, 0))
 
 
+def draw_time_stop(surf, world, t):
+    """Pocket Watch: time stopped - the board washed cold blue, and a little clock over every frozen monster."""
+    if world.time_stop <= 0:
+        return
+    from .icons import draw_icon
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay.fill((120, 160, 255, int(40 * min(1.0, world.time_stop / 0.4))))
+    surf.blit(overlay, (0, 0))
+    for e in world.enemies:
+        if e.state != "emerging":
+            x, y = enemy_anchor(e, world.rise, t)
+            pygame.draw.circle(surf, (20, 24, 40), (int(x), int(y) - 34), 11)
+            draw_icon(surf, "clock", (int(x), int(y) - 34), 9, (210, 225, 255))
+
+
+def draw_arcs(surf, world, t):
+    """Lightning Rods' arcs: a jagged bolt from the ball on top of the rod to whatever it struck, flickering out."""
+    from .world import ARC_SECS
+    for rod, (x, y), age in world.arcs:
+        z = world.column_height(*world.cell_of(rod.x, rod.y)) + world.rise
+        sx, sy = iso(rod.x, rod.y, z)
+        sy -= 43
+        tx, ty = iso(x, y, world.column_height(*world.cell_of(x, y)) + world.rise)
+        ty -= 10
+        rng = random.Random(id(rod) + int(age * 40))
+        pts = [(sx, sy)]
+        for k in range(1, 6):   # a jagged path between them
+            q = k / 6
+            pts.append((sx + (tx - sx) * q + rng.uniform(-8, 8), sy + (ty - sy) * q + rng.uniform(-8, 8)))
+        pts.append((tx, ty))
+        fade = 1 - age / ARC_SECS
+        pygame.draw.lines(surf, (120, 180, 255), False, pts, 3)
+        pygame.draw.lines(surf, (230, 245, 255), False, pts, 1)
+        if fade > 0.5:
+            pygame.draw.circle(surf, (230, 245, 255), (int(tx), int(ty)), 4)
+
+
 def draw_boss_tricks(surf, world, t):
     """A strand of silk reeling a crew member in, The Void Maw's gaze, rib cages, and the entranced."""
     for m in world.miners:
@@ -1329,6 +1384,21 @@ def draw_smoke(surf, world):
         alpha = int(150 * s.life / s.max_life)
         pygame.draw.circle(puff, (s.shade, s.shade - 6, s.shade - 10, alpha), (r, r), r)
         surf.blit(puff, (s.x - r, s.y - r))
+
+
+def draw_glaze(surf, faces, t, x, y):
+    """A block Mitts has glazed: a sheen of deep blue glaze over it, a glint running across."""
+    top = faces["top"]
+    xs, ys = [p[0] for p in top], [p[1] for p in top]
+    box = pygame.Rect(min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+    sheen = pygame.Surface(box.size, pygame.SRCALPHA)
+    pygame.draw.polygon(sheen, (70, 130, 220, 90), [(px - box.x, py - box.y) for px, py in top])
+    surf.blit(sheen, box.topleft)
+    q = (t * 0.8 + (x * 7 + y * 3) * 0.13) % 1   # (a glint sliding over the glaze)
+    a, b = top[0], top[2]
+    gx, gy = a[0] + (b[0] - a[0]) * q, a[1] + (b[1] - a[1]) * q
+    pygame.draw.line(surf, (220, 235, 255), (gx - 6, gy), (gx + 6, gy), 1)
+    pygame.draw.polygon(surf, (150, 190, 240), top, 1)
 
 
 def draw_damage(surf, b, x, y, z):

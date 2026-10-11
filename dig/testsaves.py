@@ -70,7 +70,7 @@ def test_levels(depth):
         lv = round(top * progress(depth, up["depth"]))
         if depth >= up["depth"] + BUY_AFTER:
             lv = max(1, lv)
-        levels[up["key"]] = min(lv, up["max"]) if up["max"] else lv
+        levels[up["key"]] = min(lv, up["tree_max"]) if up["max"] else lv   # (no deep ranks)
     changed = True
     while changed:   # drop anything whose prerequisites ended up missing
         changed = False

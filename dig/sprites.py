@@ -10,6 +10,7 @@ from .enemies import (ENEMY_TYPES, FLY_ALTITUDE, PILE_SECS, TELEGRAPH_SECS, THRO
                       THROW_RELEASE, TRANSFORM_SECS)
 from .iso import current_origin, iso, origin_at
 from .miners import CRIT_ANIM_SECS, LOOK_FIELDS
+from .util import shade
 from .world_layout import MITTS_CLICKS
 
 HI_VIS = (255, 140, 30)
@@ -263,7 +264,7 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         _draw_jackhammer(surf, m, fx, fy - max(0, bob), grabbed, t)
     elif role == "demolitionist":
         _draw_charge_stick(surf, m, fx, fy - bob - lift, skin, grabbed, t)
-    elif role == "blacksmith":
+    elif role == "engineer":
         _draw_hammer(surf, m, fx, fy - bob - lift, grabbed, t)
     elif role == "archer":
         _draw_bow(surf, m, fx, fy - bob - lift, grabbed, t)
@@ -274,7 +275,7 @@ def draw_miner(surf, fonts, m, rise, t, pick_level=0, spirit=False):
         # (rests raised in front of the miner so it doesn't hide their face)
         hx, hy = fx + 7 * m.facing, fy - 20 - bob - lift
         head_col = (250, 205, 70) if role == "hero" else pick_head_color(pick_level)   # (the hero's: gold)
-        if getattr(m, "forged", 0) > 0:   # reforged by the Goblin Blacksmith: still glowing from the forge
+        if getattr(m, "forged", 0) > 0:   # rigged by the Goblin Engineer: glowing with the charge in it
             head_col = _lerp(head_col, (255, 130, 50), 0.55 + 0.25 * math.sin(t * 6 + m.x))
         if grabbed:
             ang = math.sin(t * 16) * 1.4
@@ -355,7 +356,7 @@ def _draw_outfit(surf, m, role, body, fx):
         pygame.draw.rect(surf, (200, 205, 216), plate, border_radius=3)
         pygame.draw.rect(surf, (240, 196, 60), plate, 1, border_radius=3)
         pygame.draw.line(surf, (60, 40, 30), (body.x, body.bottom - 8), (body.right - 1, body.bottom - 8), 2)
-    elif role == "blacksmith":   # a scorched leather apron on straps
+    elif role == "engineer":   # a scorched leather apron on straps
         apron = pygame.Rect(body.x + 2, body.y + 4, body.w - 4, body.h - 6)
         pygame.draw.rect(surf, (96, 66, 42), apron, border_radius=2)
         for d in (-1, 1):
@@ -507,7 +508,7 @@ def _hero_helmet(surf, m, head, t):
 
 
 def _goblin_cap(surf, m, head, t):
-    """The Goblin Blacksmith: big pointed ears, a leather cap and goggles pushed up on it."""
+    """The Goblin Engineer: big pointed ears, a leather cap and goggles pushed up on it."""
     hx, hy = head
     for d in (-1, 1):
         pygame.draw.polygon(surf, m.skin, [(hx + d * 6, hy - 3), (hx + d * 15, hy - 8), (hx + d * 6, hy + 2)])
@@ -577,12 +578,15 @@ def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
     pygame.draw.line(surf, dark, (head.x + 2, head.y + 4), (head.right - 2, head.y + 4), 2)   # a heavy brow
     for d in (-3, 3):
         pygame.draw.circle(surf, (255, 190, 90), (fx + d + m.facing, head.y + 7), 2)
+    glazed = getattr(m, "glazed", False)   # (Glazed Fists: fired a second time, in deep blue)
     for d in (-1, 1):   # the fists: down at its sides, or up overhead
         shoulder = (fx + d * 14, fy - 34)
         fist = (fx + d * (19 - 9 * up), fy - 14 - (46 * up) + (math.sin(t * 16) * 4 if grabbed else 0))
         pygame.draw.line(surf, dark, shoulder, fist, 8)
-        pygame.draw.circle(surf, dark, (int(fist[0]), int(fist[1])), 8)
-        pygame.draw.circle(surf, clay, (int(fist[0]), int(fist[1])), 7)
+        pygame.draw.circle(surf, (34, 62, 120) if glazed else dark, (int(fist[0]), int(fist[1])), 8)
+        pygame.draw.circle(surf, (66, 120, 200) if glazed else clay, (int(fist[0]), int(fist[1])), 7)
+        if glazed:   # (a shine on the glaze)
+            pygame.draw.circle(surf, (190, 220, 255), (int(fist[0]) - 2, int(fist[1]) - 3), 2)
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 58, m.hp / m.max_hp, GOOD, 30)
     if not leaping and getattr(m, "clicks", None) is not None:   # a pip per click of yours towards his next leap
@@ -613,11 +617,11 @@ def _golem_brow(surf, m, head, t):
         pygame.draw.circle(surf, (255, 190, 90), (hx + d, hy - 1), 2)
 
 
-HEADGEAR = {"claygolem": _golem_brow, "hero": _hero_helmet, "blacksmith": _goblin_cap, "archer": _archer_hood, "taxman": _top_hat}
+HEADGEAR = {"claygolem": _golem_brow, "hero": _hero_helmet, "engineer": _goblin_cap, "archer": _archer_hood, "taxman": _top_hat}
 
 
 def _draw_hammer(surf, m, fx, base, grabbed, t):
-    """The goblin's smithing hammer (and, hard at work, the little anvil set down beside them)."""
+    """The goblin's hammer (and, hard at work rigging a pick, the little anvil set down beside them)."""
     f = m.facing
     if getattr(m, "task", "") == "forging":
         ax, ay = fx + 12 * f, base + 26 + (-3 if m.height < 0 else 0)
@@ -1522,48 +1526,182 @@ WOOD, WOOD_DARK, CHEST_GOLD = (140, 90, 50), (88, 54, 30), (230, 180, 60)
 STONE_COL, STONE_EDGE, MOSS = (128, 126, 138), (78, 76, 90), (96, 130, 80)
 
 
-def draw_pet_chest(surf, fx, fy, t, gape=0.0, facing=1, lift=0.0):
+def _ip(fx, fy, x, y, z):
+    """A point on an isometric prop standing at (fx, fy): `x` px along the board's down-right axis, `y` along its
+    down-left one, `z` up."""
+    return (fx + x - y, fy + (x + y) * 0.5 - z)
+
+
+def _iso_box(surf, fx, fy, x0, x1, y0, y1, z0, z1, color, edge=None):
+    """A box on the isometric board: its top and the two sides that face the viewer (lit like the dig's blocks).
+    Returns the faces: top, left (facing down-left) and right (facing down-right)."""
+    def p(x, y, z):
+        return _ip(fx, fy, x, y, z)
+    faces = dict(top=[p(x0, y0, z1), p(x1, y0, z1), p(x1, y1, z1), p(x0, y1, z1)],
+                 left=[p(x0, y1, z0), p(x1, y1, z0), p(x1, y1, z1), p(x0, y1, z1)],
+                 right=[p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1), p(x1, y0, z1)])
+    edge = edge or shade(color, 0.45)
+    for name, f in (("left", 0.72), ("right", 0.55), ("top", 1.0)):
+        pygame.draw.polygon(surf, shade(color, f), faces[name])
+        pygame.draw.polygon(surf, edge, faces[name], 1)
+    return faces
+
+
+def _iso_ring(fx, fy, c, r, plane="ground", n=20, a0=0.0, rs=None):
+    """Points round a circle of radius `r` about `c` (x, y, z), lying on the ground ("ground"), or standing up facing
+    down-right ("x") or down-left ("y"). `rs`: a radius for each point instead (gear teeth)."""
+    cx, cy, cz = c
+    pts = []
+    for k in range(n):
+        a = a0 + k * math.tau / n
+        rr = rs[k] if rs else r
+        u, v = math.cos(a) * rr, math.sin(a) * rr
+        x, y, z = (cx + u, cy + v, cz) if plane == "ground" else (cx, cy - u, cz + v) if plane == "x" else \
+            (cx + u, cy, cz + v)
+        pts.append(_ip(fx, fy, x, y, z))
+    return pts
+
+
+def _iso_shadow(surf, fx, fy, r):
+    """A round shadow on the ground, `r` px across in board terms."""
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - r * 1.41, fy - r * 0.71, r * 2.83, r * 1.41))
+
+
+def _iso_gear(surf, fx, fy, c, r, plane, spin, color):
+    """A brass cog standing up on the board, turned `spin` radians."""
+    teeth = [r + 2.2 if (k // 2) % 2 == 0 else r for k in range(32)]
+    pygame.draw.polygon(surf, shade(color, 0.7), _iso_ring(fx, fy, c, r, plane, 32, spin, teeth))
+    pygame.draw.polygon(surf, color, _iso_ring(fx, fy, c, r - 1, plane, 20, spin))
+    pygame.draw.polygon(surf, shade(color, 0.6), _iso_ring(fx, fy, c, r - 1, plane, 20, spin), 1)
+    for k in range(3):   # spokes
+        a = spin + k * math.tau / 3
+        tip = _iso_ring(fx, fy, c, r * 0.7, plane, 1, a)[0]
+        pygame.draw.line(surf, shade(color, 0.7), _iso_ring(fx, fy, c, 0, plane, 1)[0], tip, 1)
+    pygame.draw.polygon(surf, shade(color, 0.55), _iso_ring(fx, fy, c, max(1.5, r * 0.28), plane, 10))
+
+
+def draw_pet_chest(surf, fx, fy, t, gape=0.0, facing=1, lift=0.0, size=1.0, spiked=False):
     """Chompers, the camp's Friendly Mimic: a treasure chest on stubby legs with a gold collar, big friendly eyes peeping
-    out of the seam - lid shut (`gape` 0) or flung open (1) with a tongue lolling out. `lift`: px off the ground."""
+    out of the seam - lid shut (`gape` 0) or flung open (1) with a tongue lolling out. `lift`: px off the ground.
+    Its front faces down-right (`facing` 1) or down-left (-1). `size`: smaller for the Mimic Pup; `spiked`: the
+    Spiked Collar on."""
     fx, fy = int(fx), int(fy)
-    sw = 24 - lift * 0.2
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 4, sw, 8))
-    base = int(fy - lift - abs(math.sin(t * 3)) * 1.5)
-    for d in (-6, 6):   # stubby legs
-        pygame.draw.line(surf, WOOD_DARK, (fx + d, base - 2), (fx + d + (math.sin(t * 10 + d) * 2 if lift else 0), base + 2), 3)
-    box = pygame.Rect(fx - 11, base - 12, 22, 11)
-    pygame.draw.rect(surf, WOOD, box, border_radius=2)
-    pygame.draw.rect(surf, WOOD_DARK, box, 1, border_radius=2)
-    for bx in (box.x + 4, box.right - 5):   # iron-bound with gold
-        pygame.draw.line(surf, CHEST_GOLD, (bx, box.y), (bx, box.bottom - 1), 2)
-    pygame.draw.line(surf, (250, 215, 90), (box.x, box.bottom - 3), (box.right - 1, box.bottom - 3), 2)   # its collar
-    pygame.draw.circle(surf, (250, 215, 90), (fx, box.bottom - 1), 2)   # (and tag)
-    open_by = 9 * gape
+    sw = (24 - lift * 0.2) * size
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 4 * size, sw, 8 * size))
+    base = fy - lift - abs(math.sin(t * 3 + size * 5)) * 1.5
+    hw, hd, hb, open_by, lid_h = 8.0 * size, 5.5 * size, 9.0 * size, 8 * gape * size, 5 * size
+
+    def front(u, z):   # a point on the chest's front: `u` across it (left to right on screen), `z` up
+        return _ip(fx, base, hd, -u, z) if facing >= 0 else _ip(fx, base, u, hd, z)
+    ext = (-hd, hd, -hw, hw) if facing >= 0 else (-hw, hw, -hd, hd)
+    for d in (-0.6, 0.6):   # stubby legs
+        x, y = front(d * hw, 0)
+        kick = math.sin(t * 10 + d * 9) * 2 if lift else 0
+        pygame.draw.line(surf, WOOD_DARK, (x, y - 2), (x + kick, y + 2), 3)
+    box = _iso_box(surf, fx, base, *ext, 0, hb, WOOD, WOOD_DARK)
+    if gape > 0.05:   # (open: dark inside, and the gap under the lid all the way round)
+        pygame.draw.polygon(surf, (70, 20, 28), box["top"])
+        for side in ("left", "right"):
+            lo = box[side][3], box[side][2]
+            pygame.draw.polygon(surf, (110, 30, 40), [lo[0], lo[1], (lo[1][0], lo[1][1] - open_by),
+                                                      (lo[0][0], lo[0][1] - open_by)])
+    for d in (-0.55, 0.55):   # iron-bound with gold
+        pygame.draw.line(surf, CHEST_GOLD, front(d * hw, 0.5), front(d * hw, hb), 2)
+    collar_z = 2.5 * size
+    if spiked:   # the Spiked Collar: black leather, studded
+        pygame.draw.line(surf, (40, 30, 34), front(-hw, collar_z), front(hw, collar_z), 3)
+        nx, ny = (1, 0.5) if facing >= 0 else (-1, 0.5)
+        for k in range(5):
+            sx, sy = front(-hw * 0.8 + k * hw * 0.4, collar_z)
+            pygame.draw.polygon(surf, (210, 210, 220), [(sx - 1.5, sy - 1), (sx + 1.5, sy - 1), (sx + nx * 3, sy + ny * 3 + 1)])
+    else:
+        pygame.draw.line(surf, (250, 215, 90), front(-hw, collar_z), front(hw, collar_z), 2)   # its collar...
+    tag = front(0, 1.5 * size)
+    pygame.draw.circle(surf, (250, 215, 90), (int(tag[0]), int(tag[1])), 2)   # ...and tag
     if gape > 0.05:   # mouth open: a friendly row of blunt teeth and a tongue lolling out
-        pygame.draw.polygon(surf, (110, 30, 40), [(box.x + 1, box.y + 1), (box.right - 1, box.y + 1),
-                                                  (box.right - 1, box.y - open_by), (box.x + 1, box.y - open_by)])
+        lo, hi = -0.92, 0.92
+        pygame.draw.polygon(surf, (110, 30, 40), [front(lo * hw, hb), front(hi * hw, hb),
+                                                  front(hi * hw, hb + open_by), front(lo * hw, hb + open_by)])
         for k in range(3):
-            pygame.draw.rect(surf, (245, 240, 225), (box.x + 4 + k * 6, box.y - 2, 4, 3), border_radius=1)
-        tongue = [(fx, box.y - 1), (fx + 6 * facing, box.y + 4 + math.sin(t * 9) * 1.5), (fx + 9 * facing, box.y + 1)]
+            u = (k - 1) * 0.55 * hw
+            tw, th = 1.8 * size, 2.5 * size
+            pygame.draw.polygon(surf, (245, 240, 225), [front(u - tw, hb), front(u + tw, hb), front(u + tw, hb + th),
+                                                        front(u - tw, hb + th)])
+        nx, ny = (1, 0.5) if facing >= 0 else (-1, 0.5)   # (out of the chest, towards the viewer)
+        root = front(0, hb + 0.5)
+        tongue = [root, (root[0] + nx * 5, root[1] + ny * 5 + 4 + math.sin(t * 9) * 1.5),
+                  (root[0] + nx * 8, root[1] + ny * 8 + 2)]
         pygame.draw.lines(surf, (230, 90, 110), False, tongue, 3)
-    lid = pygame.Rect(fx - 11, int(box.y - 7 - open_by), 22, 7)
-    pygame.draw.rect(surf, WOOD, lid, border_top_left_radius=5, border_top_right_radius=5)
-    pygame.draw.rect(surf, WOOD_DARK, lid, 1, border_top_left_radius=5, border_top_right_radius=5)
+    lx0, lx1, ly0, ly1 = ext
+    lid = _iso_box(surf, fx, base, lx0 - 0.5, lx1 + 0.5, ly0 - 0.5, ly1 + 0.5, hb + open_by, hb + open_by + lid_h, WOOD,
+                   WOOD_DARK)
+    pygame.draw.line(surf, CHEST_GOLD, *(lid["top"][2:4] if facing < 0 else lid["top"][1:3]), 1)   # the lid's rim
+    for d in (-0.55, 0.55):
+        pygame.draw.line(surf, CHEST_GOLD, front(d * hw, hb + open_by), front(d * hw, hb + open_by + lid_h), 2)
     blink = (t * 0.7 + fx * 0.01) % 3.0 < 0.12
-    for d in (-4, 4):   # big friendly eyes, peeping out from under the lid
-        ey = lid.bottom + 2
+    for d in (-0.45, 0.45):   # big friendly eyes, peeping out from under the lid
+        ex, ey = (int(v) for v in front(d * hw, hb + open_by - 2.5 * size))
         if blink:
-            pygame.draw.line(surf, (30, 20, 20), (fx + d - 2, ey), (fx + d + 2, ey), 1)
+            pygame.draw.line(surf, (30, 20, 20), (ex - 2, ey), (ex + 2, ey), 1)
         else:
-            pygame.draw.circle(surf, (250, 250, 240), (fx + d, ey), 3)
-            pygame.draw.circle(surf, (30, 20, 20), (fx + d + facing, ey), 1)
-    if gape <= 0.05:
-        pygame.draw.rect(surf, CHEST_GOLD, (fx - 2, box.y - 1, 4, 3))   # the clasp
+            pygame.draw.circle(surf, (250, 250, 240), (ex, ey), max(2, round(3 * size)))
+            pygame.draw.circle(surf, (30, 20, 20), (ex + (1 if facing >= 0 else -1), ey), 1)
+    if gape <= 0.05:   # the clasp
+        cx, cy = front(0, hb - 0.5)
+        pygame.draw.rect(surf, CHEST_GOLD, (int(cx) - 2, int(cy) - 1, 4, 3))
 
 
-def draw_mudling(surf, fx, fy, t, anim=0.0, left=10.0):
+def draw_collar_post(surf, fx, fy, t):
+    """The Spiked Collar at camp: a short post with Chompers' studded collar hung on it, and its food bowl - a bone
+    in it - beside."""
+    fx, fy = int(fx), int(fy)
+    _iso_shadow(surf, fx, fy, 10)
+    bx, by = _ip(fx, fy, -3, 8, 0)   # the bowl
+    pygame.draw.ellipse(surf, (150, 40, 40), (bx - 9, by - 5, 18, 9))
+    pygame.draw.ellipse(surf, (200, 70, 60), (bx - 8, by - 7, 16, 7))
+    pygame.draw.ellipse(surf, (90, 24, 24), (bx - 6, by - 6, 12, 4))
+    pygame.draw.line(surf, (236, 230, 210), (bx - 4, by - 6), (bx + 3, by - 8), 2)   # (a bone)
+    for ex, ey in ((bx - 4, by - 6), (bx + 3, by - 8)):
+        pygame.draw.circle(surf, (236, 230, 210), (ex, ey), 2)
+    _iso_box(surf, fx, fy, -2, 2, -2, 2, 0, 26, (120, 84, 50))   # the post...
+    pygame.draw.circle(surf, (190, 190, 200), (int(fx + 1), int(fy - 24)), 1)   # ...and its nail
+    ring = _iso_ring(fx, fy, (3, 0, 16), 7, "x", 20)   # the collar, hung on it, facing down-right
+    pygame.draw.polygon(surf, (40, 30, 34), ring, 3)
+    for k in range(0, 20, 3):   # studs
+        sx, sy = ring[k]
+        pygame.draw.circle(surf, (215, 215, 225), (int(sx), int(sy)), 2)
+    tag = ring[15]
+    pygame.draw.circle(surf, (250, 215, 90), (int(tag[0]), int(tag[1]) + 3), 2)
+
+
+def draw_tax_strongbox(surf, fx, fy, t, lit=True):
+    """Death and Taxes: an iron strongbox with a coin slot and a padlock, a borrowed scythe leaning on it - and
+    (once it's yours) a coin now and then dropping in."""
+    fx, fy = int(fx), int(fy)
+    _iso_shadow(surf, fx, fy, 12)
+    blade = [_ip(fx, fy, -4, -9, 44), _ip(fx, fy, 7, -16, 40), _ip(fx, fy, 12, -18, 34), _ip(fx, fy, 6, -14, 39)]
+    pygame.draw.line(surf, (96, 70, 44), _ip(fx, fy, 6, -10, 0), _ip(fx, fy, -4, -9, 46), 2)   # the scythe's snath...
+    pygame.draw.polygon(surf, (190, 196, 206), blade)                                         # ...and blade
+    pygame.draw.lines(surf, (120, 124, 134), False, blade[:3], 1)
+    box = _iso_box(surf, fx, fy, -9, 9, -6, 6, 0, 12, (78, 78, 90), (40, 40, 48))   # the strongbox
+    for face in ("left", "right"):   # gold rivets at its corners
+        for p in box[face]:
+            pygame.draw.circle(surf, (210, 170, 70), (int(p[0]), int(p[1])), 1)
+    pygame.draw.line(surf, (24, 24, 30), _ip(fx, fy, -3, 0, 12), _ip(fx, fy, 3, 0, 12), 2)   # the coin slot
+    lx, ly = _ip(fx, fy, 0, 6, 6)   # the padlock on its front
+    pygame.draw.arc(surf, (200, 170, 70), (lx - 3, ly - 6, 6, 6), 0, math.pi, 1)
+    pygame.draw.rect(surf, (210, 170, 70), (lx - 3, ly - 3, 6, 5), border_radius=1)
+    if lit:
+        q = (t * 0.6) % 1
+        if q < 0.5:   # a coin dropping in
+            cx, cy = _ip(fx, fy, 0, 0, 12 + 14 * (1 - q * 2))
+            pygame.draw.ellipse(surf, (250, 210, 80), (cx - 2, cy - 3, 4, 6))
+
+
+def draw_mudling(surf, fx, fy, t, anim=0.0, left=10.0, shaped=False):
     """A Clay Pit mudling: a knee-high blob of wet clay with coal-dot eyes and stubby arms, swinging at the rock -
-    slumping as it starts to crumble."""
+    slumping as it starts to crumble. `shaped`: thrown on the Potter's Wheel - a proper clay soldier, helmet and
+    all."""
     fx, fy = int(fx), int(fy)
     slump = max(0.0, 1 - left / 1.5)   # (its last second and a half: sagging back into mud)
     h = int(16 * (1 - 0.6 * slump))
@@ -1578,42 +1716,341 @@ def draw_mudling(surf, fx, fy, t, anim=0.0, left=10.0):
     swing = anim * 6
     for d in (-1, 1):   # stubby arms - up, then down on the rock
         pygame.draw.line(surf, (132, 80, 50), (fx + d * 6, body.y + h // 2), (fx + d * 9, body.y + h // 2 - 4 + swing), 3)
+    if shaped and slump < 0.5:   # a clay soldier: a pot helmet with a rim, and a belt
+        helm = pygame.Rect(fx - 6, body.y - 3, 12, 7)
+        pygame.draw.ellipse(surf, (150, 88, 56), helm)
+        pygame.draw.line(surf, (110, 62, 38), (helm.x - 1, helm.bottom - 2), (helm.right, helm.bottom - 2), 2)
+        pygame.draw.circle(surf, (200, 140, 96), (fx, helm.y + 1), 1)
+        pygame.draw.line(surf, (120, 70, 44), (body.x + 2, body.y + h * 2 // 3), (body.right - 2, body.y + h * 2 // 3), 1)
+
+
+def draw_banner(surf, fx, fy, t, fringe=False):
+    """Rocco's Banner of the Deep: a deep blue standard with gold trim and a pick on it, hung from a crossbar on a
+    tall pole planted in a heap of stones, rippling (`fringe`: with the Gold Fringe sewn on)."""
+    fx, fy = int(fx), int(fy)
+    _iso_shadow(surf, fx, fy, 6)
+    for x, y, r in ((-3, 2, 3.5), (3, -2, 3.5), (2, 3, 3), (-2, -3, 3)):   # the stones it's wedged in
+        sx, sy = _ip(fx, fy, x, y, 1)
+        pygame.draw.ellipse(surf, (96, 92, 100), (sx - r, sy - r * 0.7, r * 2, r * 1.4))
+        pygame.draw.ellipse(surf, (130, 126, 136), (sx - r + 1, sy - r * 0.7, r * 2 - 2, r * 0.8))
+    top, hem = 46, 20
+    pygame.draw.line(surf, (110, 80, 50), (fx, fy - 2), (fx, fy - top - 4), 3)   # the pole...
+    pygame.draw.circle(surf, (250, 205, 70), (fx, fy - top - 6), 3)            # ...its gold finial...
+    pygame.draw.line(surf, (110, 80, 50), _ip(fx, fy, 0, 8, top), _ip(fx, fy, 0, -8, top), 2)   # ...and crossbar
+
+    def cloth(y, z):   # a point on the banner (facing down-right), rippling more the further down it hangs
+        sx, sy = _ip(fx, fy, 0, y, z)
+        return sx + math.sin(t * 3 + y * 0.45) * 1.6 * (top - z) / (top - hem), sy
+
+    edge = [cloth(y, top - 1) for y in (7, 3.5, 0, -3.5, -7)]
+    tails = [cloth(-7, hem), cloth(-3.5, hem + 1), cloth(0, hem + 5), cloth(3.5, hem + 1), cloth(7, hem)]   # (swallowtail)
+    pts = edge + tails
+    pygame.draw.polygon(surf, (52, 88, 170), pts)
+    pygame.draw.polygon(surf, (250, 205, 70), pts, 1)
+    mid = cloth(0, (top + hem) / 2 + 2)
+    pygame.draw.circle(surf, (36, 62, 128), (int(mid[0]), int(mid[1])), 5)
+    pygame.draw.line(surf, (250, 205, 70), (mid[0] - 3, mid[1] + 3), (mid[0] + 3, mid[1] - 3), 2)   # a pick on it
+    pygame.draw.line(surf, (250, 205, 70), (mid[0] - 1, mid[1] - 4), (mid[0] + 5, mid[1] - 1), 2)
+    if fringe:
+        draw_banner_fringe(surf, fx, fy, t)
+
+
+def draw_banner_fringe(surf, fx, fy, t):
+    """The Gold Fringe, on Rocco's banner (drawn over it, at its feet): gold tassels along its swallowtail, and a
+    little gold pennant flying from the top of the pole."""
+    fx, fy = int(fx), int(fy)
+    top, hem = 46, 20
+
+    def cloth(y, z):   # (the banner's own ripple: see draw_banner)
+        sx, sy = _ip(fx, fy, 0, y, z)
+        return sx + math.sin(t * 3 + y * 0.45) * 1.6 * (top - z) / (top - hem), sy
+    tails = [(-7, hem), (-3.5, hem + 1), (0, hem + 5), (3.5, hem + 1), (7, hem)]
+    for (y0, z0), (y1, z1) in zip(tails, tails[1:]):   # tassels all along the hem
+        for k in range(3):
+            q = k / 3
+            x, y = cloth(y0 + (y1 - y0) * q, z0 + (z1 - z0) * q)
+            sway = math.sin(t * 4 + k + y0) * 0.8
+            pygame.draw.line(surf, (250, 205, 70), (x, y), (x + sway, y + 4), 1)
+    pygame.draw.line(surf, (250, 205, 70), cloth(7, top - 1), cloth(-7, top - 1), 2)   # (a gold band across the top)
+    wave = math.sin(t * 5) * 2   # the pennant, flying from the pole's top
+    pole = (fx, fy - top - 10)
+    pygame.draw.line(surf, (110, 80, 50), (fx, fy - top - 4), pole, 2)
+    pygame.draw.polygon(surf, (250, 205, 70), [pole, (pole[0] + 12, pole[1] + 3 + wave), (pole[0], pole[1] + 6)])
+    pygame.draw.circle(surf, (255, 235, 150), (fx, fy - top - 11), 2)
+
+
+def draw_divining_rod(surf, fx, fy, t, live=True, pick=False):
+    """Rocco's Divining Rod: a forked hazel twig standing in an old tree stump, twitching now and then - and, once
+    it's yours, glinting at something buried. `pick`: the Heirloom Pickaxe driven into the stump beside it."""
+    fx, fy = int(fx), int(fy)
+    _iso_shadow(surf, fx, fy, 9)
+    R, h = 7.5, 8
+    rx, ry = R * 1.41, R * 0.71
+    bark, cut = (96, 66, 42), (176, 136, 90)
+    pygame.draw.ellipse(surf, shade(bark, 0.8), (fx - rx, fy - ry, rx * 2, ry * 2))   # the stump
+    pygame.draw.rect(surf, bark, (fx - rx, fy - h, rx, h))
+    pygame.draw.rect(surf, shade(bark, 0.75), (fx, fy - h, rx, h))
+    pygame.draw.ellipse(surf, cut, (fx - rx, fy - h - ry, rx * 2, ry * 2))
+    pygame.draw.ellipse(surf, shade(cut, 0.8), (fx - rx * 0.55, fy - h - ry * 0.55, rx * 1.1, ry * 1.1), 1)   # rings
+    twitch = math.sin(t * 9) * 2.5 if live and math.sin(t * 1.3) > 0.6 else math.sin(t * 1.5) * 0.6
+    base = (fx, fy - h - 1)
+    fork = (fx + twitch * 0.3, fy - h - 15)
+    pygame.draw.line(surf, (150, 110, 60), base, fork, 3)   # the stem...
+    for side in (-1, 1):   # ...and its two arms
+        tip = (fork[0] + side * 8 + twitch, fork[1] - 13)
+        pygame.draw.line(surf, (150, 110, 60), fork, tip, 2)
+        pygame.draw.line(surf, (190, 150, 90), (fork[0] + side, fork[1] - 1), (tip[0], tip[1] + 1), 1)
+    if live:   # glints of something old, somewhere close
+        for k in range(3):
+            q = (t * 0.7 + k / 3) % 1
+            gx, gy = fx + math.cos(k * 2.1 + t * 0.5) * 13, fy - h - 30 + q * 18
+            size = 2.5 * math.sin(q * math.pi)
+            pygame.draw.line(surf, (255, 240, 170), (gx - size, gy), (gx + size, gy), 1)
+            pygame.draw.line(surf, (255, 240, 170), (gx, gy - size), (gx, gy + size), 1)
+    if pick:
+        draw_heirloom_pick(surf, fx, fy, t)
+
+
+def draw_heirloom_pick(surf, fx, fy, t):
+    """The Heirloom Pickaxe, driven into the Divining Rod's stump (drawn over it, at the stump's feet): a handle worn
+    black, leaning back, and a gold head bitten into the wood, glinting now and then."""
+    fx, fy = int(fx), int(fy)
+    h = 8
+    head = (fx + 5, fy - h - 1)
+    grip = (fx - 9, fy - h - 24)
+    pygame.draw.line(surf, (54, 40, 32), head, grip, 3)   # the handle...
+    pygame.draw.line(surf, (96, 72, 52), (head[0] - 1, head[1] - 2), (grip[0] + 1, grip[1] + 1), 1)
+    blade = [(head[0] - 8, head[1] - 4), (head[0] - 2, head[1] - 4), (head[0] + 6, head[1] + 1),
+             (head[0] + 3, head[1] + 2), (head[0] - 2, head[1] - 1)]
+    pygame.draw.polygon(surf, (236, 186, 60), blade)   # ...and its gold head, half buried
+    pygame.draw.polygon(surf, (160, 110, 30), blade, 1)
+    pygame.draw.line(surf, (255, 236, 150), (head[0] - 6, head[1] - 4), (head[0] - 1, head[1] - 4), 1)
+    if (t * 0.5) % 1 < 0.12:   # (a glint)
+        gx, gy = head[0] - 4, head[1] - 5
+        pygame.draw.line(surf, (255, 250, 220), (gx - 3, gy), (gx + 3, gy), 1)
+        pygame.draw.line(surf, (255, 250, 220), (gx, gy - 3), (gx, gy + 3), 1)
+
+
+def draw_lightning_rod(surf, fx, fy, t, live=True, perched=False):
+    """Grizzle's Lightning Rod: a copper spike on a little tripod, a coil of wire round it and a glowing ball on top
+    (crackling while it's live). `perched`: up on something (a tent's ridge), with no shadow on the ground."""
+    fx, fy = int(fx), int(fy)
+    if not perched:
+        _iso_shadow(surf, fx, fy, 8)
+    apex = _ip(fx, fy, 0, 0, 12)
+    feet = sorted((math.radians(a) for a in (45, 165, 285)), key=lambda a: math.cos(a) + math.sin(a))
+    back = [a for a in feet if math.cos(a) + math.sin(a) < 0]
+    for a in back:   # the tripod's back legs...
+        pygame.draw.line(surf, (70, 64, 70), _ip(fx, fy, 8 * math.cos(a), 8 * math.sin(a), 0), apex, 2)
+    pygame.draw.line(surf, (120, 80, 50), (fx, fy - 4), (fx, fy - 40), 3)   # the copper spike
+    pygame.draw.line(surf, (220, 150, 90), (fx - 1, fy - 4), (fx - 1, fy - 40), 1)
+    for a in feet:   # ...and the one in front of the spike
+        if a not in back:
+            pygame.draw.line(surf, (70, 64, 70), _ip(fx, fy, 8 * math.cos(a), 8 * math.sin(a), 0), apex, 2)
+    for k in range(4):   # the coil, wound round it
+        pygame.draw.polygon(surf, (200, 130, 70), _iso_ring(fx, fy, (0, 0, 22 + k * 4), 3.6, n=12), 1)
+    glow = 0.6 + 0.4 * math.sin(t * 13) if live else 0.2
+    pygame.draw.circle(surf, (120, 170, 220), (fx, fy - 43), 5)
+    pygame.draw.circle(surf, (int(170 + 80 * glow), int(210 + 40 * glow), 255), (fx, fy - 43), 3)
+    if live and (t * 7) % 1 < 0.4:   # a little crackle round the ball
+        a = t * 11
+        pygame.draw.line(surf, (220, 240, 255), (fx + math.cos(a) * 6, fy - 43 + math.sin(a) * 6),
+                         (fx + math.cos(a + 1) * 10, fy - 43 + math.sin(a + 1) * 9), 1)
+
+
+def draw_toolkit(surf, fx, fy, t, wound=True, geared=False):
+    """The Clockwork Toolkit: a brass-cornered toolbox, lid propped open on spanners and a whirring gear (`geared`:
+    with the Clockwork Gears fitted to it)."""
+    fx, fy = int(fx), int(fy)
+    _iso_shadow(surf, fx, fy, 13)
+    x0, x1, y0, y1, h = -11, 11, -6, 6, 10
+    lid = [_ip(fx, fy, x0, y0, h), _ip(fx, fy, x1, y0, h), _ip(fx, fy, x1, y0 - 4, h + 11),
+           _ip(fx, fy, x0, y0 - 4, h + 11)]   # propped open, leaning back
+    pygame.draw.polygon(surf, (130, 74, 50), lid)
+    pygame.draw.polygon(surf, (70, 36, 24), lid, 1)
+    box = _iso_box(surf, fx, fy, x0, x1, y0, y1, 0, h, (110, 60, 40), (70, 36, 24))
+    inside = [_ip(fx, fy, x0 + 1.5, y0 + 1.5, h), _ip(fx, fy, x1 - 1.5, y0 + 1.5, h), _ip(fx, fy, x1 - 1.5, y1 - 1.5, h),
+              _ip(fx, fy, x0 + 1.5, y1 - 1.5, h)]
+    pygame.draw.polygon(surf, (52, 28, 20), inside)   # (it's open)
+    for xa, xb in ((x0, x0 + 3), (x1 - 3, x1)):   # brass corners
+        pygame.draw.polygon(surf, (210, 170, 70), [_ip(fx, fy, xa, y1, 0), _ip(fx, fy, xb, y1, 0), _ip(fx, fy, xb, y1, h),
+                                                   _ip(fx, fy, xa, y1, h)])
+    pygame.draw.polygon(surf, (180, 140, 56), box["right"], 2)
+    pygame.draw.line(surf, (170, 170, 180), _ip(fx, fy, -6, -1, h - 2), _ip(fx, fy, -8, 1, h + 11), 3)   # a spanner
+    _iso_gear(surf, fx, fy, (3, 0, h + 7), 5.5, "y", t * 3 if wound else 0, (200, 180, 120))   # a gear, turning
+    if geared:
+        draw_gear_addon(surf, fx, fy, t, wound)
+
+
+def draw_gear_addon(surf, fx, fy, t, running=True):
+    """The Clockwork Gears, fitted to the Clockwork Toolkit (drawn over it, at its feet): a train of brass cogs up
+    its end, another meshing with the gear on top, and a big wind-up key in its side, turning."""
+    fx, fy = int(fx), int(fy)
+    spin = t * 3 if running else 0.0
+    brass, dark = (226, 186, 84), (150, 110, 40)
+    pygame.draw.line(surf, dark, _ip(fx, fy, 11.5, -3, 3), _ip(fx, fy, 11.5, 3, 14), 2)   # (their bracket)
+    _iso_gear(surf, fx, fy, (11.5, -2.5, 5), 4.5, "x", -spin * 1.2, brass)   # cogs up its end...
+    _iso_gear(surf, fx, fy, (11.5, 3, 12), 3.5, "x", spin * 1.6, brass)
+    _iso_gear(surf, fx, fy, (-4, 0, 21), 4, "y", -spin * 1.4, brass)       # ...one meshing with the gear on top
+    root, tip = _ip(fx, fy, -5, 6, 5), _ip(fx, fy, -5, 11, 5)   # the wind-up key, sticking out of its side...
+    pygame.draw.line(surf, dark, root, tip, 2)
+    turn = abs(math.cos(t * 2)) if running else 1.0   # (...turning)
+    for side in (-1, 1):
+        cx, cy = tip[0] + side * 3.5 * turn, tip[1] - 1
+        pygame.draw.ellipse(surf, brass, (cx - 3 * turn - 1, cy - 3, 6 * turn + 2, 6))
+        pygame.draw.ellipse(surf, dark, (cx - 3 * turn - 1, cy - 3, 6 * turn + 2, 6), 1)
+
+
+def draw_pocket_watch(surf, fx, fy, t, running=True, hanging=False):
+    """The Pocket Watch: a big brass watch, hands turning - hung by its chain from a little wooden stand, or
+    (`hanging`) from whatever's at (fx, fy), swaying gently below it."""
+    fx, fy = int(fx), int(fy)
+    if hanging:   # dangling: its chain from (fx, fy), the face turned down-right
+        sway = math.sin(t * 1.6) * 2.5
+        end = (fx + sway, fy + 9)
+        pygame.draw.line(surf, (200, 170, 70), (fx, fy), end, 1)
+        pygame.draw.circle(surf, (200, 170, 70), (int(end[0]), int(end[1])), 2)
+        _watch_face(surf, end[0] + sway * 0.4, end[1] + 11, (0, 0, 0), "x", t, running)
+        return
+    _iso_shadow(surf, fx, fy, 10)
+    _iso_box(surf, fx, fy, -9, 9, -5, 5, 0, 3, (110, 76, 46))   # the stand's foot...
+    post_lo, post_hi, arm = _ip(fx, fy, -6, 0, 3), _ip(fx, fy, -6, 0, 38), _ip(fx, fy, 6, 0, 38)
+    pygame.draw.line(surf, (96, 66, 40), post_lo, post_hi, 3)   # ...its post and arm
+    pygame.draw.line(surf, (96, 66, 40), post_hi, arm, 3)
+    pygame.draw.line(surf, (200, 170, 70), _ip(fx, fy, 4, 0, 37), _ip(fx, fy, 4, 0, 31), 1)   # the chain
+    crown = _ip(fx, fy, 4, 0, 30.5)
+    pygame.draw.circle(surf, (200, 170, 70), (int(crown[0]), int(crown[1])), 2)
+    _watch_face(surf, fx, fy, (4, 0, 20), "y", t, running)
+
+
+def _watch_face(surf, fx, fy, face, plane, t, running):
+    """The Pocket Watch itself, standing up on `plane` at `face`: brass case, cream face, the hours and its hands."""
+    back = (face[0] - 2, face[1], face[2]) if plane == "x" else (face[0], face[1] - 2, face[2])
+    pygame.draw.polygon(surf, (150, 110, 40), _iso_ring(fx, fy, back, 10, plane, 24))   # its back...
+    pygame.draw.polygon(surf, (230, 190, 80), _iso_ring(fx, fy, face, 10, plane, 24))   # ...case...
+    pygame.draw.polygon(surf, (150, 110, 40), _iso_ring(fx, fy, face, 10, plane, 24), 1)
+    pygame.draw.polygon(surf, (245, 240, 225), _iso_ring(fx, fy, face, 7.5, plane, 24))   # ...and face
+    for k in range(12):   # the hours
+        a = k * math.tau / 12
+        pygame.draw.line(surf, (150, 130, 110), _iso_ring(fx, fy, face, 6.5, plane, 1, a)[0],
+                         _iso_ring(fx, fy, face, 7.3, plane, 1, a)[0], 1)
+    turn = t if running else 0.0
+    centre = _ip(fx, fy, *face)
+    for a, length, w in ((turn * 2, 5.5, 1), (turn * 0.2, 3.5, 2)):   # the hands
+        tip = _iso_ring(fx, fy, face, length, plane, 1, math.pi / 2 - a)[0]
+        pygame.draw.line(surf, (40, 30, 30), centre, tip, w)
 
 
 def draw_kiln(surf, fx, fy, t, lit=True):
-    """The Hands Tent's kiln: a squat brick dome with a stubby chimney and a mouth glowing with the fire inside."""
+    """The Hands Tent's kiln: a squat round brick kiln with a domed top, a stubby chimney and a mouth glowing with the
+    fire inside."""
     fx, fy = int(fx), int(fy)
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 18, fy - 5, 36, 10))
-    dome = pygame.Rect(fx - 16, fy - 30, 32, 32)
-    pygame.draw.ellipse(surf, (110, 54, 40), dome)
-    pygame.draw.rect(surf, (110, 54, 40), (fx - 16, fy - 14, 32, 14))
-    for row in range(4):   # brick courses
-        y = fy - 6 - row * 6
-        pygame.draw.line(surf, (80, 38, 28), (fx - 15 + row * 2, y), (fx + 15 - row * 2, y), 1)
-    pygame.draw.rect(surf, (90, 44, 32), (fx + 6, fy - 38, 6, 12))   # the chimney
-    mouth = pygame.Rect(fx - 7, fy - 13, 14, 12)
-    pygame.draw.ellipse(surf, (40, 20, 16), mouth)
+    brick, dark = (110, 54, 40), (80, 38, 28)
+    R, body_h, dome_h = 14, 16, 10
+    rx, ry = R * 1.41, R * 0.71
+    _iso_shadow(surf, fx, fy, R + 3)
+
+    def level(z):   # the kiln's round outline at height z
+        return pygame.Rect(fx - rx, fy - z - ry, rx * 2, ry * 2)
+    pygame.draw.ellipse(surf, shade(brick, 0.7), level(0))
+    pygame.draw.rect(surf, shade(brick, 0.85), (fx - rx, fy - body_h, rx * 2, body_h))
+    for side, f in ((-1, 0.95), (1, 0.7)):   # (lit from the left)
+        pygame.draw.rect(surf, shade(brick, f), (fx if side > 0 else fx - rx, fy - body_h, rx, body_h))
+    pygame.draw.ellipse(surf, shade(brick, 0.85), level(0).inflate(-2, -2))
+    for z in (4, 8, 12):   # brick courses, round the front
+        pygame.draw.arc(surf, dark, level(z), math.pi, math.tau, 1)
+    _iso_box(surf, fx, fy, 3, 8, -10, -5, body_h, body_h + dome_h + 7, (90, 44, 32))   # the chimney, at the back
+    top = level(body_h)
+    arc = [(fx + rx * math.cos(a), fy - body_h - (ry + dome_h) * math.sin(a)) for a in
+           (k * math.pi / 16 for k in range(17))]   # the dome, over the top...
+    ledge = [(fx - rx * math.cos(a), fy - body_h + ry * math.sin(a)) for a in (k * math.pi / 16 for k in range(17))]
+    pygame.draw.polygon(surf, brick, arc + ledge)
+    pygame.draw.polygon(surf, shade(brick, 1.15), [(fx - rx * 0.7 * math.cos(a), fy - body_h - (ry + dome_h) * 0.85 *
+                                                    math.sin(a)) for a in (k * math.pi / 16 for k in range(4, 13))])
+    pygame.draw.arc(surf, dark, top, math.pi, math.tau, 2)   # ...on a ledge
+    pygame.draw.arc(surf, dark, level(body_h + 6).inflate(-6, -3), math.pi * 1.05, math.pi * 1.95, 1)
+    face = math.radians(60)   # the mouth's facing: towards you, and a little to the left
+
+    def arch(half, sill, spring, rise):   # an arched opening on the kiln's wall
+        nx, ny, tx, ty = math.cos(face) * R, math.sin(face) * R, -math.sin(face), math.cos(face)
+        pts = [(-half, sill), (-half, spring)] + [(half * math.cos(a), spring + rise * math.sin(a))
+                                                  for a in (k * math.pi / 8 for k in range(9))][::-1] + [(half, spring), (half, sill)]
+        return [_ip(fx, fy, nx + tx * u, ny + ty * u, z) for u, z in pts]
+    mouth = arch(6, 0, 8, 5)
+    pygame.draw.polygon(surf, (40, 20, 16), mouth)
+    pygame.draw.polygon(surf, dark, mouth, 2)
     if lit:
         glow = 0.6 + 0.4 * math.sin(t * 5)
-        pygame.draw.ellipse(surf, (255, int(140 + 60 * glow), 60), mouth.inflate(-4, -4))
-        if (t * 1.3) % 1 < 0.6:
-            pygame.draw.circle(surf, (120, 116, 120), (fx + 9 + int((t * 8) % 4), fy - 42 - int((t * 20) % 8)), 3)
+        inner = arch(4, 1, 7, 3.5)
+        pygame.draw.polygon(surf, (255, int(140 + 60 * glow), 60), inner)
+        if (t * 1.3) % 1 < 0.6:   # smoke
+            cx, cy = _ip(fx, fy, 5.5, -7.5, body_h + dome_h + 9)
+            pygame.draw.circle(surf, (120, 116, 120), (int(cx + (t * 8) % 4), int(cy - (t * 20) % 8)), 3)
+
+
+def draw_glaze_pots(surf, fx, fy, t):
+    """Glazed Fists, fitted to the Kiln (drawn over it, at its feet): three pots of glaze by its left side - deep blue,
+    green and white - drips down their sides, a brush in one."""
+    fx, fy = int(fx), int(fy)
+    for x, y, col in ((-15, 7, (230, 230, 220)), (-13, 13, (70, 150, 110)), (-8, 17, (60, 110, 200))):   # back to front
+        px, py = _ip(fx, fy, x, y, 0)
+        rx, ry, h = 4.5, 2.2, 7
+        pygame.draw.ellipse(surf, (16, 12, 20), (px - rx - 1, py - ry, rx * 2 + 2, ry * 2 + 1))
+        pygame.draw.rect(surf, (150, 100, 70), (px - rx, py - h, rx, h))
+        pygame.draw.rect(surf, (120, 78, 54), (px, py - h, rx, h))
+        pygame.draw.ellipse(surf, (120, 78, 54), (px - rx, py - ry, rx * 2, ry * 2))
+        pygame.draw.ellipse(surf, col, (px - rx, py - h - ry, rx * 2, ry * 2))   # the glaze in it...
+        pygame.draw.line(surf, col, (px - 2, py - h), (px - 2, py - h + 4), 2)    # ...and a drip down its side
+    bx, by = _ip(fx, fy, -8, 17, 7)
+    pygame.draw.line(surf, (150, 110, 70), (bx + 1, by - 1), (bx + 5, by - 9), 2)   # a brush
+    pygame.draw.line(surf, (60, 110, 200), (bx + 5, by - 9), (bx + 6, by - 11), 2)
+
+
+def draw_potters_wheel(surf, fx, fy, t, live=True):
+    """The Potter's Wheel, fitted to the Clay Pit (drawn over it, at the pit's middle): a kick-wheel on a little
+    stand at its edge, a half-thrown clay soldier spinning on it."""
+    fx, fy = int(fx), int(fy)
+    wx, wy = _ip(fx, fy, -6, 19, 0)   # (at the pit's front-left edge)
+    _iso_shadow(surf, wx, wy, 7)
+    _iso_box(surf, wx, wy, -5, 5, -5, 5, 0, 7, (120, 84, 52))   # the stand
+    top = wy - 8
+    pygame.draw.ellipse(surf, (90, 70, 60), (wx - 9, top - 4, 18, 9))   # the wheel...
+    pygame.draw.ellipse(surf, (150, 140, 130), (wx - 8, top - 4, 16, 7))
+    spin = t * 6 if live else 0.0
+    for k in range(3):   # (its spokes, going round)
+        a = spin + k * math.tau / 3
+        pygame.draw.line(surf, (110, 100, 96), (wx, top - 1), (wx + math.cos(a) * 7, top - 1 + math.sin(a) * 3), 1)
+    body = pygame.Rect(wx - 4, top - 13, 8, 12)   # ...and the clay soldier on it, half made
+    pygame.draw.ellipse(surf, (186, 116, 74), body)
+    pygame.draw.ellipse(surf, (150, 88, 56), (wx - 4, top - 15, 8, 5))   # (its helmet)
+    stripe = body.x + 1 + int((spin * 2) % 6)   # (a ridge where Mitts' thumb went, turning)
+    pygame.draw.line(surf, (214, 150, 104), (stripe, body.y + 3), (stripe, body.bottom - 2), 1)
 
 
 def draw_clay_pit(surf, fx, fy, t, alive=True):
-    """The Hands Tent's clay pit: a pool of wet river clay, bubbling - and (once it's yours) a mudling peeping out."""
+    """The Hands Tent's clay pit: a pool of wet river clay ringed with stones, bubbling - and (once it's yours) a
+    mudling peeping out."""
     fx, fy = int(fx), int(fy)
-    pit = pygame.Rect(fx - 20, fy - 8, 40, 14)
-    pygame.draw.ellipse(surf, (90, 56, 36), pit.inflate(4, 4))
-    pygame.draw.ellipse(surf, (150, 96, 62), pit)
+    R = 15
+    pygame.draw.ellipse(surf, (90, 56, 36), (fx - R * 1.41 - 2, fy - R * 0.71 - 1, R * 2.83 + 4, R * 1.41 + 2))
+    pygame.draw.ellipse(surf, (150, 96, 62), (fx - R * 1.41 + 3, fy - R * 0.71 + 2, R * 2.83 - 6, R * 1.41 - 3))
+    pygame.draw.ellipse(surf, (170, 112, 74), (fx - 10, fy - 5, 12, 4))   # (wet shine)
+    stones = sorted(((math.cos(k * math.tau / 11) * R, math.sin(k * math.tau / 11) * R) for k in range(11)),
+                    key=lambda p: p[0] + p[1])
+    for k, (x, y) in enumerate(stones):   # the stones round its rim, back to front
+        sx, sy = _ip(fx, fy, x, y, 0)
+        size = 5 + (k * 7) % 3
+        pygame.draw.ellipse(surf, (96, 92, 100), (sx - size / 2, sy - size / 2 - 1, size, size * 0.7))
+        pygame.draw.ellipse(surf, (130, 126, 136), (sx - size / 2 + 1, sy - size / 2 - 1, size - 2, size * 0.4))
     for k in range(3):   # bubbles
         q = (t * 0.8 + k * 0.33) % 1
-        bx = fx - 10 + k * 10
-        pygame.draw.circle(surf, (190, 130, 90), (bx, fy - 2 - int(q * 3)), max(1, int(3 * (1 - q))), 1)
+        bx, by = _ip(fx, fy, -7 + k * 5, 3 - k * 4, 0)
+        pygame.draw.circle(surf, (190, 130, 90), (int(bx), int(by - q * 3)), max(1, int(3 * (1 - q))), 1)
     if alive:
         peek = max(0.0, math.sin(t * 0.9)) ** 2
         if peek > 0.05:
-            draw_mudling(surf, fx + 8, fy - 1, t, 0.0, 10.0 * peek)
+            mx, my = _ip(fx, fy, 5, 3, 0)
+            draw_mudling(surf, mx, my, t, 0.0, 10.0 * peek)
 
 
 def draw_target_dummy(surf, fx, fy, t):
@@ -1621,72 +2058,154 @@ def draw_target_dummy(surf, fx, fy, t):
     target painted on its chest (and a fuse poking out of the stuffing)."""
     fx, fy = int(fx), int(fy)
     sway = math.sin(t * 2 + fx * 0.05) * 1.5
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 10, fy - 3, 20, 7))
-    pygame.draw.line(surf, (96, 66, 40), (fx, fy), (fx + sway, fy - 40), 3)   # the post
-    pygame.draw.line(surf, (96, 66, 40), (fx - 13 + sway, fy - 30), (fx + 13 + sway, fy - 30), 3)   # arms
+    _iso_shadow(surf, fx, fy, 9)
+    _iso_box(surf, fx, fy, -10, 10, -2, 2, 0, 3, (110, 76, 46))   # its foot: two planks, crossed
+    _iso_box(surf, fx, fy, -2, 2, -10, 10, 0, 3, (110, 76, 46))
+    pygame.draw.line(surf, (96, 66, 40), (fx, fy - 3), (fx + sway, fy - 40), 3)   # the post
+
+    def up(x, y, z):   # (the top sways)
+        px, py = _ip(fx, fy, x, y, z)
+        return px + sway * z / 40, py
+    pygame.draw.line(surf, (96, 66, 40), up(0, -12, 30), up(0, 12, 30), 3)   # arms, along the crossbar
     body = pygame.Rect(0, 0, 18, 22)
     body.midbottom = (fx + sway, fy - 14)
     pygame.draw.ellipse(surf, (110, 86, 50), body.inflate(2, 2))
     pygame.draw.ellipse(surf, (214, 182, 112), body)
-    for r, col in ((7, (210, 50, 50)), (5, (245, 240, 230)), (3, (210, 50, 50))):
-        pygame.draw.circle(surf, col, (int(fx + sway), body.centery), r)
+    for r, col in ((7, (210, 50, 50)), (5, (245, 240, 230)), (3, (210, 50, 50))):   # the target, facing down-right
+        pts = _iso_ring(fx, fy, (6, 0, 24), r, "x", 18)
+        pygame.draw.polygon(surf, col, [(x + sway * 24 / 40, y) for x, y in pts])
     head = (int(fx + sway), fy - 41)
     pygame.draw.circle(surf, (110, 86, 50), head, 7)
     pygame.draw.circle(surf, (200, 172, 120), head, 6)
-    pygame.draw.line(surf, (110, 86, 50), (head[0] - 3, head[1] - 1), (head[0] - 1, head[1] + 1), 1)   # stitched eyes
-    pygame.draw.line(surf, (110, 86, 50), (head[0] + 1, head[1] - 1), (head[0] + 3, head[1] + 1), 1)
+    for ex in (-1, 4):   # stitched eyes, looking down-right with the target
+        pygame.draw.line(surf, (110, 86, 50), (head[0] + ex - 1, head[1]), (head[0] + ex + 1, head[1] + 2), 1)
     for k in range(3):   # straw poking out
-        pygame.draw.line(surf, (230, 200, 120), (body.right - 2, body.y + 6 + k * 4), (body.right + 3, body.y + 4 + k * 5), 1)
-    spark = (fx + sway - 9, body.y + 2)   # the fuse
-    pygame.draw.line(surf, (40, 30, 30), (fx + sway - 5, body.y + 5), spark, 1)
+        pygame.draw.line(surf, (230, 200, 120), (body.x + 2, body.y + 6 + k * 4), (body.x - 3, body.y + 4 + k * 5), 1)
+    spark = (fx + sway - 8, body.y + 1)   # the fuse
+    pygame.draw.line(surf, (40, 30, 30), (fx + sway - 4, body.y + 5), spark, 1)
     if (t * 6) % 1 < 0.5:
         pygame.draw.circle(surf, (255, 210, 90), spark, 2)
 
 
-def draw_brazier(surf, fx, fy, t, lit=True):
+def draw_brazier(surf, fx, fy, t, lit=True, explosive=False):
     """The Combat Tent's brazier: an iron bowl on three legs, a bundle of pitch-soaked arrows leaning on it, and
-    (once it's yours) a fire burning in it."""
+    (once it's yours) a fire burning in it. `explosive`: with the Explosive Arrows' powder keg and bomb tips."""
     fx, fy = int(fx), int(fy)
-    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 14, fy - 4, 28, 9))
-    for d in (-9, 0, 9):   # legs
-        pygame.draw.line(surf, (50, 46, 50), (fx + d, fy), (fx + d * 0.6, fy - 16), 3)
-    bowl = pygame.Rect(fx - 13, fy - 24, 26, 12)
-    pygame.draw.ellipse(surf, (70, 64, 70), bowl)
-    pygame.draw.ellipse(surf, (40, 36, 42), bowl, 2)
-    for k in range(4):   # the arrows leaning against it
-        x = fx + 10 + k * 2
-        pygame.draw.line(surf, (150, 110, 70), (x, fy), (x + 6, fy - 30), 2)
-        pygame.draw.polygon(surf, (60, 50, 50), [(x + 5, fy - 32), (x + 8, fy - 31), (x + 7, fy - 28)])
+    _iso_shadow(surf, fx, fy, 11)
+    for k in range(4):   # the arrows, leaning on it from behind - a bundle, fanned out at the top
+        x0, y0 = _ip(fx, fy, 7 + k, -12 + k, 0)
+        x1, y1 = _ip(fx, fy, k * 4, -11 + k * 2.5, 31 - k)
+        pygame.draw.line(surf, (150, 110, 70), (x0, y0), (x1, y1), 2)
+        pygame.draw.polygon(surf, (60, 50, 50), [(x1 - 2, y1 - 1), (x1 + 2, y1 - 1), (x1, y1 - 5)])
+    legs = sorted((math.radians(a) for a in (45, 165, 285)), key=lambda a: math.cos(a) + math.sin(a))
+    for a in legs:   # three legs, splayed
+        pygame.draw.line(surf, (50, 46, 50), _ip(fx, fy, 9 * math.cos(a), 9 * math.sin(a), 0),
+                         _ip(fx, fy, 5 * math.cos(a), 5 * math.sin(a), 15), 3)
+    R, rim = 10, 22
+    rx, ry = R * 1.41, R * 0.71
+    cy = fy - rim
+    pygame.draw.ellipse(surf, (54, 50, 56), (fx - rx * 0.6, cy - 4, rx * 1.2, ry + 8))   # the bowl's belly...
+    pygame.draw.ellipse(surf, (70, 64, 70), (fx - rx, cy - ry, rx * 2, ry * 2))           # ...its rim...
+    pygame.draw.ellipse(surf, (40, 36, 42), (fx - rx, cy - ry, rx * 2, ry * 2), 2)
+    inner = pygame.Rect(fx - rx + 3, cy - ry + 2, rx * 2 - 6, ry * 2 - 4)
+    pygame.draw.ellipse(surf, (60, 30, 24) if lit else (34, 30, 34), inner)                # ...and the coals in it
     if lit:
+        for k in range(5):
+            ex, ey = _ip(fx, fy, math.cos(k * 1.3) * 5, math.sin(k * 1.3) * 5, rim)
+            pygame.draw.circle(surf, (255, 120 + 30 * (k % 3), 40), (int(ex), int(ey)), 2)
         for k, (col, h) in enumerate((((255, 120, 40), 18), ((255, 190, 70), 12), ((255, 245, 190), 6))):
             flick = math.sin(t * (9 + k * 3)) * 2
-            pygame.draw.polygon(surf, col, [(fx - 9 + k * 3, fy - 22), (fx + flick, fy - 22 - h), (fx + 9 - k * 3, fy - 22)])
+            pygame.draw.polygon(surf, col, [(fx - 9 + k * 3, cy), (fx + flick, cy - h), (fx + 9 - k * 3, cy)])
+    if explosive:
+        draw_powder_keg(surf, fx, fy, t, lit)
 
 
-def draw_ledger_desk(surf, bx, by, t, lit=True):
-    """The Crooked Ledger on its writing desk at camp: a fat book open on a slanted top, a quill in the inkpot, and
-    (once it's yours) a candle burning low beside it."""
+def draw_powder_keg(surf, fx, fy, t, lit=True):
+    """Explosive Arrows, fitted to the Fire Arrows' brazier (drawn over it, at its feet): a clay bulb of black powder
+    tied behind each arrowhead in the bundle, and a little powder keg beside it, its fuse fizzing."""
+    fx, fy = int(fx), int(fy)
+    for k in range(4):   # bomb tips on the arrows
+        x1, y1 = _ip(fx, fy, k * 4, -11 + k * 2.5, 31 - k)
+        pygame.draw.circle(surf, (40, 36, 40), (int(x1), int(y1 + 1)), 3)
+        pygame.draw.circle(surf, (110, 100, 100), (int(x1 - 1), int(y1)), 1)
+    kx, ky = _ip(fx, fy, -9, 10, 0)   # the keg
+    rx, ry, h = 6.5, 3.2, 10
+    pygame.draw.ellipse(surf, (16, 12, 20), (kx - rx - 1, ky - ry, rx * 2 + 2, ry * 2 + 1))
+    pygame.draw.ellipse(surf, (74, 48, 30), (kx - rx, ky - ry, rx * 2, ry * 2))
+    pygame.draw.rect(surf, (104, 68, 40), (kx - rx, ky - h, rx, h))
+    pygame.draw.rect(surf, (80, 52, 32), (kx, ky - h, rx, h))
+    for z in (2, h - 2):   # iron hoops
+        pygame.draw.arc(surf, (60, 60, 66), (kx - rx, ky - z - ry, rx * 2, ry * 2), math.pi, math.tau, 2)
+    pygame.draw.ellipse(surf, (130, 92, 56), (kx - rx, ky - h - ry, rx * 2, ry * 2))
+    pygame.draw.ellipse(surf, (90, 60, 36), (kx - rx + 2, ky - h - ry + 1, rx * 2 - 4, ry * 2 - 2), 1)
+    fuse = [(kx + 1, ky - h - 1), (kx + 3, ky - h - 5), (kx + 1, ky - h - 8)]
+    pygame.draw.lines(surf, (40, 30, 30), False, fuse, 1)
+    if lit and (t * 6) % 1 < 0.55:   # (fizzing)
+        pygame.draw.circle(surf, (255, 210, 90), fuse[-1], 2)
+        pygame.draw.circle(surf, (255, 250, 210), fuse[-1], 1)
+
+
+def draw_ledger_desk(surf, bx, by, t, lit=True, wing=False):
+    """The Crooked Ledger on its writing desk at camp: a fat book lying open on the desk, a quill in the inkpot, and
+    (once it's yours) a candle burning low beside it. `wing`: Rounding Errors' extra leg of the desk, making an L,
+    with a little abacus on it."""
     bx, by = int(bx), int(by)
-    pygame.draw.ellipse(surf, (16, 12, 20), (bx - 18, by - 4, 36, 9))
-    for d in (-12, 12):   # legs
-        pygame.draw.line(surf, WOOD_DARK, (bx + d, by), (bx + d * 0.8, by - 18), 3)
-    top = [(bx - 17, by - 18), (bx + 17, by - 18), (bx + 14, by - 26), (bx - 14, by - 26)]
-    pygame.draw.polygon(surf, WOOD, top)
-    pygame.draw.polygon(surf, WOOD_DARK, top, 1)
+
+    def _q(x, y, z):   # (the desk stands turned a quarter: its length runs down-left)
+        return _ip(bx, by, y, x, z)
+    _iso_shadow(surf, bx, by, 14)
+    top = 17
+    for x, y in ((-11, -5), (11, -5), (-11, 5), (11, 5)):   # legs
+        pygame.draw.line(surf, WOOD_DARK, _q(x, y, 0), _q(x, y, top), 3)
+    _iso_box(surf, bx, by, -7, 7, -13, 13, top, top + 3, WOOD, WOOD_DARK)   # the desk top
+    z = top + 3
     for side in (-1, 1):   # the open book: two pages, lines of figures, a red ribbon down the middle
-        page = [(bx, by - 21), (bx + side * 12, by - 22), (bx + side * 11, by - 30), (bx, by - 28)]
+        page = [_q(0, -5, z + 1.5), _q(side * 9, -5, z + 0.5), _q(side * 9, 5, z + 0.5),
+                _q(0, 5, z + 1.5)]
         pygame.draw.polygon(surf, (236, 226, 196), page)
         pygame.draw.polygon(surf, (150, 130, 100), page, 1)
         for k in range(3):
-            y = by - 27 + k * 2
-            pygame.draw.line(surf, (120, 110, 100), (bx + side * 2, y), (bx + side * 9, y - 1), 1)
-    pygame.draw.line(surf, (200, 40, 50), (bx, by - 28), (bx + 1, by - 19), 2)
-    pygame.draw.rect(surf, (30, 30, 40), (bx + 9, by - 30, 5, 4), border_radius=1)   # the inkpot...
-    pygame.draw.line(surf, (240, 240, 230), (bx + 11, by - 30), (bx + 17, by - 42), 2)   # ...and its quill
+            y = -3 + k * 3
+            pygame.draw.line(surf, (176, 160, 136), _q(side * 2, y, z + 1.3), _q(side * 7.5, y, z + 0.7), 1)
+    pygame.draw.line(surf, (200, 40, 50), _q(0, -5, z + 1.5), _q(0, 5, z + 1.5), 2)
+    pygame.draw.line(surf, (200, 40, 50), _q(0, 5, z + 1.5), _q(0.5, 8, z - 3), 2)
+    _iso_box(surf, bx, by, -6, -3, 9, 12, z, z + 3, (40, 40, 52))   # the inkpot...
+    pygame.draw.line(surf, (240, 240, 230), _q(10.5, -4.5, z + 3), _q(14, -8, z + 15), 2)   # ...quill
     if lit:   # a candle burning low
-        pygame.draw.rect(surf, (236, 230, 210), (bx - 15, by - 33, 4, 8))
+        cx, cy = _q(-10, -4, z)
+        pygame.draw.rect(surf, (236, 230, 210), (cx - 2, cy - 8, 4, 8))
+        pygame.draw.ellipse(surf, (250, 246, 232), (cx - 2, cy - 9, 4, 2))
         flick = math.sin(t * 11) * 1.2
-        pygame.draw.polygon(surf, (255, 200, 90), [(bx - 15, by - 33), (bx - 13 + flick, by - 40), (bx - 11, by - 33)])
+        pygame.draw.polygon(surf, (255, 200, 90), [(cx - 2, cy - 8), (cx + flick, cy - 15), (cx + 2, cy - 8)])
+    if wing:
+        draw_desk_wing(surf, bx, by, t, lit)
+
+
+def draw_desk_wing(surf, bx, by, t, live=True):
+    """Rounding Errors, at camp: a second leg of the ledger desk (drawn over it, at its feet) running off its back
+    end to make an L - and on it, Mr. Pennyworth's little abacus, one bead that won't stop sliding."""
+    bx, by = int(bx), int(by)
+    top = 17
+    for x, y in ((20, -12), (20, -5), (9, -5)):   # its legs
+        pygame.draw.line(surf, WOOD_DARK, _ip(bx, by, x, y, 0), _ip(bx, by, x, y, top), 3)
+    _iso_box(surf, bx, by, 7, 21, -13, -4, top, top + 3, WOOD, WOOD_DARK)
+    z = top + 3
+    wood = (130, 86, 50)
+    for x in (9, 19):   # the abacus: its frame...
+        pygame.draw.line(surf, wood, _ip(bx, by, x, -9, z), _ip(bx, by, x, -9, z + 11), 2)
+    for zz in (z + 1, z + 11):
+        pygame.draw.line(surf, wood, _ip(bx, by, 9, -9, zz), _ip(bx, by, 19, -9, zz), 2)
+    colours = [(200, 60, 50), (240, 200, 80), (80, 150, 220)]
+    for row, zz in enumerate((z + 3.5, z + 6, z + 8.5)):   # ...its rods and beads
+        pygame.draw.line(surf, (170, 160, 150), _ip(bx, by, 9.5, -9, zz), _ip(bx, by, 18.5, -9, zz), 1)
+        beads = [10.5, 12] if row != 1 else [10.5]
+        if row == 1:   # (the one that sticks - and slides)
+            beads.append(14.5 + (2.5 * math.sin(t * 2) if live else 0))
+        else:
+            beads.append(17.5)
+        for x in beads:
+            px, py = _ip(bx, by, x, -9, zz)
+            pygame.draw.ellipse(surf, colours[row], (px - 2, py - 1.5, 4, 3))
 
 
 def _draw_mimic(surf, e, rise, t, hovered, dy=0):

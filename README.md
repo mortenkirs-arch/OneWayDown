@@ -238,3 +238,18 @@ To add a screen, subclass `dig.scenes.base.Scene` and register it in `Game.scene
 To add an upgrade, append an entry to `UPGRADES` in `dig/upgrades.py` (its `branch` picks
 the sector of the star map, `pos` its angle and ring there) and read its
 level via `world.lv("key")` wherever it takes effect.
+
+## License
+
+Copyright (C) 2026 Morten
+
+The Only Way Is Down is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version.
+
+It is distributed in the hope that it will be fun, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+The full terms are in [COPYING](COPYING). If you distribute a modified version of the game, or anything
+built from its code, it has to be under this same license, with its source code.

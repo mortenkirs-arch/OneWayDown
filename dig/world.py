@@ -33,7 +33,12 @@ from .enemies import (ELITE_HP, boss_minion_cap, boss_minion_mult,
                       VOID_INHALE_SECS, VOID_POOL_DRAIN, VOID_POOL_EVERY,
                       VOID_POOL_SECS, VOID_POOLS)
 from .iso import iso
-from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_EVERY, FEMUR_SECS, MITTS_CLICKS, ROCK_SECS,
+from .world_layout import (BALLISTA_POS, BANNER_BOOST, BANNER_RADIUS, BANNER_REPLANT, BOILER_POS, BOLT_SECS, CHEST_FX_SECS,
+                           FRINGE_POWER, FRINGE_RADIUS, FRINGE_VALUE, HEIRLOOM_DEEP, HEIRLOOM_EVERY,
+                           BLAST_ARROW_BLOCKS, BLAST_ARROW_RADIUS, GLAZE_BONUS, GLAZE_SECS, WHEEL_LIFE, WHEEL_MAX,
+                           CHOMP_EVERY, COLLAR_BITE, COLLAR_EVERY, COLLAR_SWALLOW, DIVINING_CHANCE, FEMUR_SECS,
+                           MITTS_CLICKS, PUP_EVERY, PUP_PAYOUT, ROCK_SECS, ROUNDING_OFF, TAXES_HURT, TAXES_REACH,
+                           TAXES_SHARE,
                            SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .miners import (CAMP_LOOKS, CRIT_ANIM_SECS, MAX_LEVEL, ROLES, Miner, base_name, level_mult, new_stats, numbered_name,
                      xp_to_next)
@@ -42,7 +47,7 @@ from .upgrades import (BRANCHES, UPGRADES, ballista_interval, ballista_share, ch
                        combo_step, dust_share, golden_interval, golden_payout, milestone_mult, slam_mult, streak_bonus,
                        PHANTOM_CHARGE, PHANTOM_WINDUP, phantom_interval,
                        trap_share, vault_rate, vein_share, whetstone_boost,
-                       ACID_HITS, CUTDOWN_AT, SWITCH_BLOCKS, SWITCH_MONSTERS, SWITCH_RADIUS, VOLATILE_BLAST, flare_burn, flare_ease, pole_share,
+                       ACID_HITS, BUNKER_BELOW, CUTDOWN_AT, SWITCH_BLOCKS, SWITCH_MONSTERS, SWITCH_RADIUS, VOLATILE_BLAST, flare_burn, flare_ease, pole_share,
                        garlic_delay, garlic_ward, holy_bonus, salt_shrivel, salt_single, torch_grip, torch_singe,
                        SPREE_CAP, SPREE_WINDOW, spree_step, trophy_mult, boiler_charge,
                        bounty_mult, click_damage, depth_reached, dynamite_interval,
@@ -68,7 +73,7 @@ HERO_POWER = 4.0             # the Hero Miner digs as hard as this many miners..
 HERO_STRIKE = 0.25           # ...and each rescue blow takes this share of a monster's max health (a heavy blow)...
 HERO_SWING = 0.6             # ...this often...
 HERO_RESCUE_RANGE = 2.5      # ...for anyone grabbed this close (further off, they keep digging)
-FORGE_WORK = 1.6             # Goblin Blacksmith: seconds hammering a pick...
+FORGE_WORK = 1.6             # Goblin Engineer: seconds rigging a pick...
 FORGE_SECS = 40.0            # ...which then stays explosive this long: every hit also blasts...
 FORGE_BLAST = 0.15           # ...the 8 blocks round it for this share of the hit (times the goblin's level bonus)...
 FORGE_BELOW = 0.10           # ...and cracks the 3x3 underneath for this share (never breaking them, like Deep Strike)
@@ -100,6 +105,13 @@ TRANCE_SECS = 6.0            # Vampire Lord's Mesmerise: a click snaps them out 
 FLOP_WINDUP = 1.6            # Slime King's Belly Flop: the wind-up before he lands on the marked spot
 RAISE_COUNT, RAISE_MAX = 2, 6   # Archlich's Raise the Fallen: skeletons raised at a time, and at most on the board
 GAZE_SECS, GAZE_HURT = 2.5, 0.5   # The Void Maw's Gaze: time to strike the eye, and the share of health it sears
+ROD_EVERY, ROD_SECS = 25.0, 20.0   # Lightning Rod: Grizzle plants one this often; it crackles away this long...
+ROD_ARC, ROD_RANGE = 0.5, 2.2       # ...throwing an arc this often, at a block or monster this close...
+ROD_BLOCK, ROD_MONSTER = 0.12, 0.15  # ...cracking off this share of a block, or of a monster's health
+ARC_SECS = 0.25                      # (an arc's flicker on screen)
+WOUND_UP = 0.4                       # Clockwork Toolkit: rigged picks swing this much faster
+WATCH_EVERY, WATCH_STOP = 30.0, 3.0  # Pocket Watch: this often, time stops for the monsters this long
+GEARS_TICK = 1.25                    # Clockwork Gears: every timed thing comes round this many times as often
 KILN_SHOVE, KILN_RADIUS = 1.2, 2.0   # Kiln: Mitts' landings shove monsters this far, from this close
 MUDLING_SECS, MUDLING_MAX = 10.0, 2      # Clay Pit: a mudling digs this long, and at most this many at once...
 MUDLING_SWING, MUDLING_POWER = 0.8, 2.0  # ...striking this often, for this many of a crew member's strikes...
@@ -177,6 +189,7 @@ PIERCE_WIDTH = 0.6           # ...skewering every monster within this many tiles
 COMBAT_TIP_CLICKS = 100      # the first boss suggests Combat upgrades if your clicks would take more than this
 COMBAT_TIP_ORDER = ["slayer", "executioner", "smite", "cleave", "defense", "hardhats"]   # ...these first (vs a boss)
                              # many to bring it down
+RENAMED_ROLES = {"blacksmith": "engineer"}   # (the Goblin Blacksmith became the Goblin Engineer)
 SAVE_VERSION = 2         # bump when the save format changes meaning (see from_dict migrations)
    # cap on coins in the air at once (late game breaks blocks very fast)
 
@@ -202,9 +215,17 @@ def is_ore(block):
 class Mudling:
     """A Clay Pit mudling: a knee-high lump of clay Mitts' slam threw up, digging until it crumbles."""
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, secs=MUDLING_SECS):
         self.x, self.y, self.facing = x, y, 1
-        self.left, self.swing, self.anim, self.target = MUDLING_SECS, MUDLING_SWING, 0.0, None
+        self.left, self.swing, self.anim, self.target = secs, MUDLING_SWING, 0.0, None
+
+
+class LightningRod:
+    """Grizzle's Lightning Rod: a copper spike planted in the rock, arcing at whatever's near it until it burns out."""
+
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.left, self.arc = ROD_SECS, ROD_ARC
 
 
 class TargetDummy:
@@ -267,6 +288,7 @@ class World:
         self.achieve_timer = 0.0           # (the checks run about once a second)
         self.boss_fight_start = 0.0        # game clock when the boss on the board rose (Untouchable)
         self.chomper = None                # Chompers, the camp's tame Mimic, on the dig: {x, y, timer, hop, chomp_at}
+        self.pup = None                    # ...and its Mimic Pup, trotting after it (the same)
         self.ledger_lost = False           # the Crooked Ledger just lost an upgrade's receipt (for the upgrades screen)
         self.boss_return = 0.0             # seconds until The Void Maw rises again, after it retreated
         self.lifetime = dict(blocks=0, gold=0.0, monsters=0, bosses=0, expeditions=0, deepest=0)
@@ -310,11 +332,31 @@ class World:
         self.webs = {}                                          # Broodmother: {cell: seconds left} slowing the crew
         self.hazards = []                                       # bosses' marked spots: [x, y, kind, left, boss]
         self.dummies = []                                       # Wren's Target Dummies standing on the board
+        self.banner = None                                      # [x, y]: where Rocco's planted the Banner of the Deep
+        self.glazed = {}                                        # cell -> (depth, until): blocks Mitts has glazed
+        self.dowsed = 0                                         # (the last depth his Divining Rod twitched at)
         self.mudlings = []                                      # Clay Pit mudlings digging away
+        self.rods = []                                          # Grizzle's Lightning Rods, crackling away
+        self.time_stop = 0.0                                    # Pocket Watch: seconds the monsters stay frozen...
+        self.watch_timer = 0.0                                  # ...and since it last went off
+        self.arcs = []                                          # [rod, (x, y) struck, age]: arcs on screen
         self.cues = []                                          # sound effects to play this frame (see Game.update)
         self.grab_sound_at = -1e9                               # when the last "crew grabbed" alert sounded
 
     # ----- stats ----------------------------------------------------------
+    def pocket_watch(self, dt):
+        """Pocket Watch: every WATCH_EVERY seconds, time stops for the monsters for WATCH_STOP."""
+        self.watch_timer += dt
+        if self.watch_timer < WATCH_EVERY or not self.enemies:
+            return
+        self.watch_timer, self.time_stop = 0.0, WATCH_STOP
+        self.cues.append(("hit", 0.6))
+        self.floaters.append(Floater("TIME STOPS!", W / 2, 220, (200, 220, 255), life=WATCH_STOP, size=40))
+
+    def tick(self):
+        """Clockwork Gears: how much sooner every timed thing comes round (1 without them)."""
+        return GEARS_TICK if "gears" in self.camp_items else 1.0
+
     def lv(self, key):
         """An upgrade's level, as its effect works at (its ranks, each worth more on the trees: effect_level)."""
         return effect_level(key, self.levels[key])
@@ -1766,7 +1808,8 @@ class World:
         if depth < ARTIFACT_MIN_DEPTH or not layer or not self.undiscovered():
             return
         first = depth == FIRST_ARTIFACT_BY and not self.artifacts
-        if not first and random.random() >= ARTIFACT_CHANCE:
+        chance = DIVINING_CHANCE if "divining" in self.camp_items else ARTIFACT_CHANCE   # (Rocco's Divining Rod)
+        if not first and random.random() >= chance:
             return
         layer[random.choice(list(layer))].artifact = True
 
@@ -2023,10 +2066,10 @@ class World:
         self.shake, self.shake_power = max(self.shake, 0.25), 5
         for e in list(self.enemies):
             if e.targetable and math.hypot(e.x - miner.x, e.y - miner.y) <= SWITCH_RADIUS:
-                self.hit_enemy(e, e.max_hp * SWITCH_MONSTERS * rank * e.pct_scale, floor=False, ring=(255, 150, 60),
+                self.hit_enemy(e, e.max_hp * SWITCH_MONSTERS[rank - 1] * e.pct_scale, floor=False, ring=(255, 150, 60),
                                heavy=True)
         cx, cy = self.cell_of(miner.x, miner.y)
-        depth, share = self.depth, SWITCH_BLOCKS * rank
+        depth, share = self.depth, SWITCH_BLOCKS[rank - 1]
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 block = self.current.get((cx + dx, cy + dy))
@@ -2230,7 +2273,8 @@ class World:
         return self.available(up) and not is_maxed(up, self.levels) and self.gold >= self.cost(up)
 
     def cost(self, up):
-        return math.ceil(self.base_cost(up) * self.art_mult("cost"))
+        off = 1 - ROUNDING_OFF if "rounding" in self.camp_items else 1.0   # (Rounding Errors: always in your favour)
+        return math.ceil(self.base_cost(up) * self.art_mult("cost") * off)
 
     def base_cost(self, up):
         return upgrade_cost(up, self.levels)
@@ -2296,6 +2340,8 @@ class World:
             dmg *= GHOST_POWER
         elif miner and miner.role == "hero":   # the Hero Miner: a legend with a pick
             dmg *= HERO_POWER
+        if miner and "fringe" in self.camp_items and self.under_banner(miner):   # (the Gold Fringe)
+            dmg *= 1 + FRINGE_POWER
         if is_ore(block):
             dmg *= ore_damage_mult(self.lv("diamond"))
         crit = random.random() < 0.05 * self.lv("crit") + self.art_add("crit")
@@ -2307,7 +2353,11 @@ class World:
             below.hp = max(below.max_hp * 0.05, below.hp - dmg * 0.1 * self.lv("deepstrike"))
         if not self.damage(cell, dmg, by=miner):
             return
-        if miner and getattr(miner, "forged", 0) > 0:   # an explosive pick from the Goblin Blacksmith
+        if miner and miner.role == "hero" and "heirloom" in self.camp_items:   # the Heirloom Pickaxe
+            miner.blows = getattr(miner, "blows", 0) + 1
+            if miner.blows % HEIRLOOM_EVERY == 0 and not self.heirloom_split(cell, dmg, miner):
+                return
+        if miner and getattr(miner, "forged", 0) > 0:   # an explosive pick from the Goblin Engineer
             if not self.forge_blast(cell, dmg, miner):
                 return
         if crit and self.lv("quake"):
@@ -2337,11 +2387,17 @@ class World:
                                                big=True))
         return True
 
+    def is_glazed(self, cell):
+        """Glazed Fists: is this block still glazed from one of Mitts' slams?"""
+        mark = self.glazed.get(cell)
+        return bool(mark) and mark[0] == self.depth and mark[1] > self.clock
+
     def pick_bonus(self, miner, cell, weight):
-        """Hot Streak (hits in a row on one block) and a freshly sharpened pick (Whetstone).
-        `weight` = how much one hit counts towards the streak (a drill's rattle is a fraction)."""
+        """Hot Streak (hits in a row on one block), a freshly sharpened pick (Whetstone) and a block Mitts has
+        glazed (Glazed Fists). `weight` = how much one hit counts towards the streak (a drill's rattle is a fraction)."""
         if not miner:
             return 1.0
+        glaze = 1 + GLAZE_BONUS if self.glazed and self.is_glazed(cell) else 1.0
         if miner.streak_cell != cell:
             miner.streak_cell, miner.streak = cell, 0.0
         bonus = 1 + streak_bonus(self.lv("streak")) * miner.streak
@@ -2352,7 +2408,7 @@ class World:
                 self.particles.append(Particle(px, py - 4, random.choice([(255, 150, 40), (255, 210, 80)])))
         if miner.sharp > 0:
             bonus *= 1 + whetstone_boost(self.lv("whetstone"))
-        return bonus
+        return bonus * glaze
 
     def crit_effects(self, cell, miner):
         """The look of a critical strike: the miner's overhead slam, an impact starburst, and with Seismic Strikes
@@ -2536,7 +2592,7 @@ class World:
     def update_phantom(self, dt):
         """Phantom Slam: the ghostly hand picks a block, hangs over it charging, then slams it."""
         self.phantom_timer += dt
-        interval = phantom_interval(self.lv("phantom"))
+        interval = phantom_interval(self.lv("phantom")) / self.tick()
         if self.phantom_timer < interval - PHANTOM_WINDUP:
             return
         if self.phantom is None or self.phantom[0] not in self.current:   # (its block broke: find another)
@@ -2585,8 +2641,9 @@ class World:
             if e.targetable and max(abs(e.x - (cx + 0.5)), abs(e.y - (cy + 0.5))) <= radius + 0.6:
                 if charge:
                     self.hit_enemy(e, e.max_hp * 0.25 * e.pct_scale, floor=False, by=bomb.owner, heavy=True)
-                else:
-                    self.hit_enemy(e, self.monster_hit_damage() * 3, heavy=True)
+                else:   # (Bunker Buster: shaped charges, far deadlier - Executioner's minimum and all)
+                    self.hit_enemy(e, self.enemy_hit_damage(e, self.monster_hit_damage() * 3) * (1 + self.lv("bunker")),
+                                   floor=False, heavy=True)
         depth = self.depth
         if charge:   # a planted charge levels every block in the 3x3 around it
             for dx in (-1, 0, 1):
@@ -2599,6 +2656,13 @@ class World:
                         blast = block.hp + 1e-9 if self.depth <= DEEP_ROCK_FROM else block.max_hp * crack_share(self.depth)
                         self.damage((cx + dx, cy + dy), blast, sparks=2, by=bomb.owner)
             return
+        if self.lv("bunker"):   # Bunker Buster: the blast goes on down into the next layer (cracking, never breaking)
+            below = dmg * BUNKER_BELOW * self.lv("bunker")
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    block = self.next.get((cx + dx, cy + dy))
+                    if block:
+                        block.hp = max(block.max_hp * 0.05, block.hp - below)
         for dx in range(-radius, radius + 1):
             for dy in range(-radius, radius + 1):
                 if self.depth != depth:
@@ -2611,6 +2675,8 @@ class World:
         earned = block.value * value_mult(self.lv("value"))
         if is_ore(block):
             earned *= 1 + 0.1 * self.lv("treasure")
+        if by and "fringe" in self.camp_items and self.under_banner(by):   # (dug under the Gold Fringe)
+            earned *= 1 + FRINGE_VALUE
         px, py = self.cell_screen(cell)
         if random.random() < 0.04 * self.lv("double"):
             earned *= 2
@@ -2746,6 +2812,7 @@ class World:
             return None
         claimed = {m.target for m in self.miners + self.ghosts if m is not miner and m.target}
         seek_ore = self.lv("treasure") > 0
+        dowsing = miner.role == "hero" and "divining" in self.camp_items   # (Rocco's Divining Rod: artifacts first)
         best, best_d = None, 1e9
         for cell, block in self.current.items():
             d = (cell[0] + 0.5 - miner.x) ** 2 + (cell[1] + 0.5 - miner.y) ** 2
@@ -2753,11 +2820,17 @@ class World:
                 d += 6
             if seek_ore and is_ore(block) and cell not in claimed:   # Treasure Map: unclaimed ore first
                 d -= 1000
+            if dowsing and block.artifact:
+                d -= 5000
             if self.golden and self.golden[0] == cell:   # leave the golden block for the player
                 d += 5000
             d += random.random() * 0.3
             if d < best_d:
                 best, best_d = cell, d
+        if dowsing and best and self.current[best].artifact and self.dowsed != self.depth:
+            self.dowsed = self.depth   # (once a layer: the rod's found something)
+            px, py = self.entity_screen(miner, 50)
+            self.floaters.append(Floater("The rod twitches!", px, py, GOLD, life=1.6, size=22))
         return best
 
     # ----- foreman --------------------------------------------------------
@@ -2909,13 +2982,58 @@ class World:
         self.visit_hire = hire
         self.sync_miners()
 
+    def under_banner(self, m):
+        """Is this crew member within reach of Rocco's banner (further with the Gold Fringe)?"""
+        if not self.banner:
+            return False
+        reach = FRINGE_RADIUS if "fringe" in self.camp_items else BANNER_RADIUS
+        return math.hypot(m.x - self.banner[0], m.y - self.banner[1]) <= reach
+
+    def heirloom_split(self, cell, dmg, hero):
+        """The Heirloom Pickaxe: Rocco's blow splits the rock - the blocks in line beyond the one he hit, the way he's
+        facing (whichever way there's more rock), take it too. False if the layer changed (stop chaining)."""
+        ways = [(1, 0), (0, -1)] if hero.facing >= 0 else [(-1, 0), (0, 1)]
+        def line(step):
+            return [(cell[0] + step[0] * k, cell[1] + step[1] * k) for k in range(1, HEIRLOOM_DEEP + 1)]
+        step = max(ways, key=lambda w: sum(c in self.current for c in line(w)))
+        depth = self.depth
+        px, py = self.cell_screen(cell)
+        self.cues.append(("smash", 0.25))
+        self.floaters.append(Floater("SPLIT!", px, py - 40, GOLD, life=0.9, size=22))
+        for c in line(step):
+            if c in self.current:
+                cx, cy = self.cell_screen(c)
+                for _ in range(6):   # a gold crack running through the rock
+                    self.particles.append(Particle(cx, cy, random.choice([GOLD, (255, 240, 170)])))
+                self.damage(c, dmg, sparks=4, by=hero)
+                if self.depth != depth:
+                    return False
+        return True
+
+    def plant_banner(self):
+        """The Banner of the Deep: Rocco plants it beside the block he's digging, and moves it on once he's digging
+        well away from it. Returns where it stands (None without it)."""
+        if "banner" not in self.camp_items:
+            self.banner = None
+            return None
+        hero = next((m for m in self.miners if m.role == "hero" and m.state == "working"), None)
+        if hero and hero.target and hero.task != "rescuing":
+            tx, ty = hero.target[0] + 0.5, hero.target[1] + 0.5
+            there = math.hypot(tx - hero.x, ty - hero.y) < 0.6   # (once he's got to it)
+            if there and (self.banner is None or math.hypot(tx - self.banner[0], ty - self.banner[1]) > BANNER_REPLANT):
+                self.banner = [hero.x, hero.y]
+                px, py = self.entity_screen(hero, 30)
+                for _ in range(8):   # (a puff of dust as it goes in)
+                    self.particles.append(Particle(px, py, random.choice([(150, 130, 110), (90, 170, 240)])))
+        return self.banner
+
     def update_hero(self, hero, dt, speed):
         """The Hero Miner drops their pick to rescue anyone close by a monster has hold of. True while on a rescue."""
         grabbing = [e for e in self.enemies if e.targetable and e.state == "attacking" and not e.boss
                     and math.hypot(e.x - hero.x, e.y - hero.y) <= HERO_RESCUE_RANGE]
         if not grabbing:
             if hero.task == "rescuing":
-                hero.task, hero.target = "idle", None
+                hero.task, hero.target, hero.goal = "idle", None, None
             return False
         foe = min(grabbing, key=lambda e: math.hypot(e.x - hero.x, e.y - hero.y))
         hero.task, hero.goal = "rescuing", foe
@@ -2930,8 +3048,16 @@ class World:
                 self.hit_enemy(foe, foe.max_hp * share * foe.pct_scale, floor=False, ring=GOLD, by=hero, heavy=True)
         return True
 
-    def update_blacksmith(self, smith, dt, speed):
-        """The Goblin Blacksmith: trots to whichever digger's pick has gone longest unforged, and reforges it on
+    def update_engineer(self, smith, dt, speed):
+        if "rod" in self.camp_items:   # (the camp's Lightning Rod: one planted now and then)
+            smith.rod_timer = getattr(smith, "rod_timer", ROD_EVERY * 0.4) - dt
+            if smith.rod_timer <= 0 and not self.rods:
+                smith.rod_timer = ROD_EVERY / self.tick()
+                self.plant_rod(smith)
+        self.rig_picks(smith, dt, speed)
+
+    def rig_picks(self, smith, dt, speed):
+        """The Goblin Engineer: trots to whichever digger's pick has gone longest unrigged, and rigs it on
         the spot - a couple of seconds of hammering, then every blow it lands explodes for FORGE_SECS."""
         if smith.task == "forging" and smith.goal in self.miners and smith.goal.state == "working":
             smith.task_timer -= dt
@@ -2975,11 +3101,12 @@ class World:
             return
         golem.anim, golem.hop = 0.0, 0.0
         golem.fired = "kiln" in self.camp_items   # (how he looks)
+        golem.glazed = "glaze" in self.camp_items
         golem.clicks = getattr(golem, "clicks", 0)   # (so his click meter shows from the start)
         golem.idle = getattr(golem, "idle", 0.0) + dt
         if golem.clicks >= MITTS_CLICKS and getattr(golem, "leap_to", None) is not None:
             golem.clicks, golem.goal, golem.leap_to = 0, golem.leap_to, None
-        elif golem.idle >= MITTS_IDLE and self.current:   # no clicks from you for a while: off he goes anyway
+        elif golem.idle >= MITTS_IDLE / self.tick() and self.current:   # no clicks from you for a while: off he goes anyway
             golem.goal = self.phantom_target()
         else:   # (waiting on your clicks: a plod about meanwhile)
             self.stroll(golem, dt, speed)
@@ -3007,6 +3134,45 @@ class World:
         if v is not None and v.attacker is enemy:
             v.state, v.attacker = "working", None
         enemy.release()
+
+    def plant_rod(self, smith):
+        """Grizzle hammers a Lightning Rod into the rock beside him."""
+        x = min(GRID - 0.4, max(0.4, smith.x + 0.4 * smith.facing))
+        y = min(GRID - 0.4, max(0.4, smith.y + 0.2))
+        self.rods.append(LightningRod(x, y))
+        px, py = self.entity_screen(smith, 40)
+        self.floaters.append(Floater("Stand back!", px, py - 10, (170, 220, 255), life=1.2, size=22))
+
+    def update_rods(self, dt):
+        """Lightning Rods: every ROD_ARC seconds an arc jumps to a block or monster within ROD_RANGE (monsters half the
+        time, when there are any) - until the rod burns out."""
+        for rod in self.rods:
+            rod.left -= dt
+            rod.arc -= dt
+            if rod.arc > 0:
+                continue
+            rod.arc = ROD_ARC
+            near = lambda x, y: math.hypot(x - rod.x, y - rod.y) <= ROD_RANGE
+            foes = [e for e in self.enemies if e.targetable and near(e.x, e.y)]
+            cells = [c for c in self.current if near(c[0] + 0.5, c[1] + 0.5)]
+            if foes and (not cells or random.random() < 0.5):
+                e = random.choice(foes)
+                self.arcs.append([rod, (e.x, e.y), 0.0])
+                self.hit_enemy(e, e.max_hp * ROD_MONSTER * e.pct_scale, floor=False, ring=(170, 220, 255))
+            elif cells:
+                c = random.choice(cells)
+                self.arcs.append([rod, (c[0] + 0.5, c[1] + 0.5), 0.0])
+                if not self.damage(c, self.current[c].max_hp * ROD_BLOCK, sparks=4):
+                    break
+            self.cues.append(("hit", 0.25))
+        for rod in [r for r in self.rods if r.left <= 0]:   # burnt out: a last fizzle
+            px, py = iso(rod.x, rod.y, self.column_height(*self.cell_of(rod.x, rod.y)) + self.rise)
+            for _ in range(8):
+                self.particles.append(Particle(px, py - 30, random.choice([(170, 220, 255), (255, 255, 255)])))
+        self.rods = [r for r in self.rods if r.left > 0]
+        for arc in self.arcs:
+            arc[2] += dt
+        self.arcs = [a for a in self.arcs if a[2] < ARC_SECS and a[0] in self.rods]
 
     def kiln_shove(self, cell):
         """Kiln: a fired golem lands hard - ordinary monsters close by are shoved back, losing any grip they had."""
@@ -3052,8 +3218,14 @@ class World:
         take the blow.)"""
         if "kiln" in self.camp_items:
             self.kiln_shove(cell)
-        if "claypit" in self.camp_items and len(self.mudlings) < MUDLING_MAX:
-            self.mudlings.append(Mudling(cell[0] + 0.5 + random.uniform(-0.3, 0.3), cell[1] + 0.5 + random.uniform(-0.3, 0.3)))
+        wheel = "wheel" in self.camp_items   # (the Potter's Wheel: proper clay soldiers)
+        if "claypit" in self.camp_items and len(self.mudlings) < (WHEEL_MAX if wheel else MUDLING_MAX):
+            self.mudlings.append(Mudling(cell[0] + 0.5 + random.uniform(-0.3, 0.3), cell[1] + 0.5 + random.uniform(-0.3, 0.3),
+                                         MUDLING_SECS * (WHEEL_LIFE if wheel else 1.0)))
+        if "glaze" in self.camp_items:   # Glazed Fists: the nine blocks round where he lands
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    self.glazed[(cell[0] + dx, cell[1] + dy)] = (self.depth, self.clock + GLAZE_SECS)
         power = slam_mult(self.lv("slam")) * level_mult(golem.level)
         dmg = self.click_hit_damage() * power
         for e in list(self.enemies):
@@ -3089,7 +3261,7 @@ class World:
         if "dummy" in self.camp_items:
             archer.dummy_timer = getattr(archer, "dummy_timer", DUMMY_EVERY * 0.5) - dt
             if archer.dummy_timer <= 0 and not self.dummies:
-                archer.dummy_timer = DUMMY_EVERY
+                archer.dummy_timer = DUMMY_EVERY / self.tick()
                 self.plant_dummy(archer)
         targets = [e for e in self.enemies if e.targetable]
         if targets:
@@ -3100,9 +3272,9 @@ class World:
                 return
             archer.facing = 1 if (foe.x - archer.x) - (foe.y - archer.y) >= 0 else -1
             archer.swing -= dt
-            archer.anim = min(1.0, 1 - archer.swing / ARCHER_DRAW)   # (drawing the bow back)
+            archer.anim = min(1.0, 1 - archer.swing / (ARCHER_DRAW / self.tick()))   # (drawing the bow back)
             if archer.swing <= 0:
-                archer.swing, archer.anim = ARCHER_DRAW, 0.0
+                archer.swing, archer.anim = ARCHER_DRAW / self.tick(), 0.0
                 self.arrows.append([self.entity_screen(archer, 24), foe, 0.0, archer])
             return
         archer.anim = 0.0
@@ -3129,6 +3301,26 @@ class World:
         for e in list(self.enemies):
             if e is not foe and e.targetable and math.hypot(e.x - foe.x, e.y - foe.y) <= FIRE_RADIUS:
                 self.hit_enemy(e, dmg * FIRE_SPLASH, floor=False, ring=(255, 140, 50), by=archer)
+
+    def blast_arrow(self, foe, dmg, archer):
+        """Explosive Arrows: a fire arrow blows up where it lands - every monster round its target takes the full hit
+        (a blast heavy enough to crack armour), and the 3x3 of blocks round it is blasted too."""
+        px, py = enemy_anchor(foe, self.rise, time.time())
+        self.explosions.append([px, py - 6, 0.0, 44])
+        self.cues.append(("boom", 0.3))
+        for _ in range(14):
+            self.particles.append(Particle(px, py, random.choice([(255, 200, 80), (255, 120, 40), (90, 80, 80)]),
+                                           big=True))
+        for e in list(self.enemies):
+            if e is not foe and e.targetable and math.hypot(e.x - foe.x, e.y - foe.y) <= BLAST_ARROW_RADIUS:
+                self.hit_enemy(e, dmg, floor=False, ring=(255, 140, 50), by=archer, heavy=True)
+        cx, cy = self.cell_of(foe.x, foe.y)
+        rock = self.click_hit_damage() * BLAST_ARROW_BLOCKS * level_mult(archer.level)
+        depth = self.depth
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (cx + dx, cy + dy) in self.current and self.depth == depth:
+                    self.damage((cx + dx, cy + dy), rock, sparks=3)
 
     def plant_dummy(self, archer):
         """Wren drives a Target Dummy into the ground beside her."""
@@ -3183,7 +3375,9 @@ class World:
                 self.give_xp(archer, min(1.0, dmg / foe.max_hp) * XP_PER_MONSTER * GUARD_XP_SHARE)
                 fire = "brazier" in self.camp_items and self.fire_arrow(archer)
                 self.hit_enemy(foe, dmg, floor=False, ring=(255, 140, 50) if fire else (180, 220, 140), by=archer)
-                if fire:
+                if fire and "explosive" in self.camp_items:
+                    self.blast_arrow(foe, dmg, archer)
+                elif fire:
                     self.fire_burst(foe, dmg, archer)
         self.arrows = [a for a in self.arrows if a[2] < ARROW_SECS]
 
@@ -3198,6 +3392,8 @@ class World:
                 tax.task, tax.anim = "idle", 0.0
             return
         tax.anim = 0.0
+        if "taxes" in self.camp_items and self.tax_monsters(tax, dt, speed):   # (Death and Taxes: them first)
+            return
         crew = [m for m in self.miners if m is not tax and m.state == "working"]
         if not crew:
             self.stroll(tax, dt, speed)
@@ -3221,6 +3417,35 @@ class World:
             tax.last_payer = payer
             self.collect_tax(tax, payer)
             tax.task, tax.task_timer = "collecting", TAX_PAUSE
+
+    def tax_monsters(self, tax, dt, speed):
+        """Death and Taxes: Mr. Pennyworth calls on any monster close by that hasn't paid yet - it hands over a share
+        of its bounty, and loses a share of its health in sheer indignation. True while he's about it."""
+        mark = getattr(tax, "mark", None)
+        if mark not in self.enemies or not mark.targetable:
+            due = [e for e in self.enemies if e.targetable and not e.boss and not getattr(e, "taxed", False)
+                   and math.hypot(e.x - tax.x, e.y - tax.y) <= TAXES_REACH]
+            mark = tax.mark = min(due, key=lambda e: math.hypot(e.x - tax.x, e.y - tax.y)) if due else None
+        if mark is None:
+            if tax.task == "auditing":
+                tax.task = "idle"
+            return False
+        tax.task = "auditing"
+        if self.walk_to(tax, mark.x + 0.3, mark.y - 0.3, speed, dt, stop=0.3):
+            tax.facing = 1 if (mark.x - tax.x) - (mark.y - tax.y) >= 0 else -1
+            mark.taxed, tax.mark = True, None
+            paid = self.earn(self.bounty_worth(mark) * TAXES_SHARE)
+            px, py = enemy_anchor(mark, self.rise, time.time())
+            tx, ty = self.entity_screen(tax, 50)
+            for k in range(6):   # its coins hopping over to his ledger
+                q = k / 5
+                self.particles.append(Particle(px + (tx - px) * q, py + (ty - py) * q - math.sin(q * math.pi) * 14,
+                                               GOLD))
+            self.floaters.append(Floater(f"Taxed! +{fmt(paid)}", tx, ty - 10, GOLD, life=1.3, size=22, coin=True))
+            self.hit_enemy(mark, mark.max_hp * TAXES_HURT * mark.pct_scale, floor=False, ring=GOLD)
+            self.give_xp(tax, XP_PER_BLOCK * 0.5)
+            tax.task, tax.task_timer = "collecting", TAX_PAUSE
+        return True
 
     def tax_due(self, tax):
         """What one crew member pays the Tax Collector: a few of this layer's average blocks, at what blocks pay
@@ -3321,7 +3546,7 @@ class World:
                 demo.goal = (min(GRID - 0.5, max(0.5, demo.x + math.cos(away) * 2.5)),
                              min(GRID - 0.5, max(0.5, demo.y + math.sin(away) * 2.5)))
                 demo.task = "taking cover"
-                demo.task_timer = demo_interval(self.lv("demolition")) / level_mult(demo.level)
+                demo.task_timer = demo_interval(self.lv("demolition")) / level_mult(demo.level) / self.tick()
         elif demo.task == "taking cover":   # (the wait for the next charge starts as soon as this one is set)
             demo.task_timer -= dt
             if self.walk_to(demo, *demo.goal, speed * 1.3, dt):
@@ -3337,8 +3562,8 @@ class World:
         """A digger with no blocks left while a boss holds the layer: dart from spot to spot, keeping clear
         of its slams, and every couple of seconds stop to throw a rock at it."""
         m.anim = max(0.0, m.anim - dt * 4)
-        if m.task != "skirmish":
-            m.task, m.task_timer = "skirmish", random.uniform(*ROCK_EVERY)
+        if m.task != "skirmish":   # (a fresh spot to make for: whatever they were after before, it isn't one)
+            m.task, m.task_timer, m.goal = "skirmish", random.uniform(*ROCK_EVERY), None
         from_boss = lambda x, y: math.hypot(x - boss.x, y - boss.y)
         spots = lambda: [(random.uniform(0.5, GRID - 0.5), random.uniform(0.5, GRID - 0.5)) for _ in range(12)]
         if m.goal is None or from_boss(*m.goal) < SKIRMISH_KEEP_AWAY:   # somewhere new, clear of the boss
@@ -3359,33 +3584,88 @@ class World:
                 self.give_xp(m, XP_PER_ROCK)
 
     def update_chompers(self, dt):
-        """Chompers waits a while, then hops over to the richest block in the layer and gobbles it whole."""
+        """Chompers (and, with the Mimic Pup, its little one) on the dig."""
         if self.chomper is None:
             self.chomper = dict(x=0.5, y=0.5, timer=CHOMP_EVERY * 0.5, hop=None, chomp_at=-1e9, lift=0.0)
-        c = self.chomper
+        self.update_mimic(self.chomper, dt, CHOMP_EVERY, CHOMP_PAYOUT)
+        if "pup" not in self.camp_items:
+            self.pup = None
+            return
+        if self.pup is None:
+            self.pup = dict(x=self.chomper["x"], y=self.chomper["y"], timer=PUP_EVERY * 0.5, hop=None, chomp_at=-1e9,
+                            lift=0.0)
+        self.update_mimic(self.pup, dt, PUP_EVERY, PUP_PAYOUT, follow=self.chomper)
+
+    def update_mimic(self, c, dt, every, payout, follow=None):
+        """A camp Mimic waits a while, then hops over to the richest block in the layer and gobbles it whole. With
+        the Spiked Collar, Chompers also bounds over to bite any monster that grabs someone. `follow`: the Mimic
+        this one trots after (the pup, its parent)."""
         if c["hop"]:
-            start, cell, age = c["hop"]
+            start, goal, age, job = c["hop"]
             age += dt
             q = min(1.0, age / CHOMP_HOP)
-            c["x"] = start[0] + (cell[0] + 0.5 - start[0]) * q
-            c["y"] = start[1] + (cell[1] + 0.5 - start[1]) * q
-            c["lift"], c["hop"] = math.sin(q * math.pi), [start, cell, age]
+            c["x"] = start[0] + (goal[0] - start[0]) * q
+            c["y"] = start[1] + (goal[1] - start[1]) * q
+            c["lift"], c["hop"] = math.sin(q * math.pi), [start, goal, age, job]
             if q >= 1:
                 c["hop"], c["lift"] = None, 0.0
-                self.chomp(cell)
+                if job[0] == "bite":
+                    self.collar_bite(c, job[1])
+                else:
+                    self.chomp(c, job[1], payout)
             return
         c["timer"] -= dt
-        self.chomper_waddle(c, dt)
+        c["bite_cd"] = max(0.0, c.get("bite_cd", 0.0) - dt)
+        if follow is None and "collar" in self.camp_items and c["bite_cd"] <= 0:
+            foe = self.collar_target(c)
+            if foe:   # (Spiked Collar: nobody grabs its people)
+                c["hop"], c["bite_cd"] = [(c["x"], c["y"]), (foe.x, foe.y), 0.0, ("bite", foe)], COLLAR_EVERY
+                c["facing"] = 1 if (foe.x - c["x"]) - (foe.y - c["y"]) >= 0 else -1
+                return
+        self.chomper_waddle(c, dt, follow)
         if c["timer"] <= 0 and self.current:
-            cell = max(self.current, key=lambda k: (self.current[k].value, random.random()))   # (expensive tastes)
-            c["hop"], c["timer"] = [(c["x"], c["y"]), cell, 0.0], CHOMP_EVERY
+            wanted = {m["hop"][3][1] for m in (self.chomper, self.pup) if m and m is not c and m["hop"]
+                      and m["hop"][3][0] == "block"}
+            cells = [k for k in self.current if k not in wanted] or list(self.current)
+            cell = max(cells, key=lambda k: (self.current[k].value, random.random()))   # (expensive tastes)
+            c["hop"], c["timer"] = [(c["x"], c["y"]), (cell[0] + 0.5, cell[1] + 0.5), 0.0, ("block", cell)], \
+                every / self.tick()
             c["facing"] = 1 if (cell[0] + 0.5 - c["x"]) - (cell[1] + 0.5 - c["y"]) >= 0 else -1
 
-    def chomper_waddle(self, c, dt):
-        """Chompers between gobbles: shuffling about a few tiles at a time on its stubby legs, little hops as it goes,
-        stopping now and then to sit."""
+    def collar_target(self, c):
+        """Spiked Collar: the monster with hold of someone nearest Chompers (bosses are too big to bite)."""
+        grabbers = [e for e in self.enemies if e.state == "attacking" and e.victim is not None and not e.boss
+                    and e.targetable]
+        return min(grabbers, key=lambda e: math.hypot(e.x - c["x"], e.y - c["y"])) if grabbers else None
+
+    def collar_bite(self, c, foe):
+        """Chompers lands on a monster that's grabbed one of its people: a little one goes down whole (twice the
+        bounty); anything bigger is knocked loose with a nasty bite."""
+        if foe not in self.enemies or not foe.targetable:   # (gone already: it'll try again soon)
+            c["bite_cd"] = 1.0
+            return
+        c["chomp_at"] = self.clock
+        px, py = enemy_anchor(foe, self.rise, time.time())
+        self.cues.append(("smash", 0.3))
+        if foe.kind in COLLAR_SWALLOW and not foe.elite:
+            extra = self.bounty_worth(foe)
+            self.break_grip(foe)
+            self.kill_enemy(foe)
+            gained = self.earn(extra)
+            self.floaters.append(Floater(f"GULP! +{fmt(gained)}", px, py - 50, GOLD, life=1.6, size=26, coin=True))
+            return
+        self.break_grip(foe)
+        self.floaters.append(Floater("CHOMP!", px, py - 50, (255, 150, 120), life=1.2, size=26))
+        self.hit_enemy(foe, foe.max_hp * COLLAR_BITE * foe.pct_scale, floor=False, ring=GOLD, heavy=True)
+
+    def chomper_waddle(self, c, dt, follow=None):
+        """A camp Mimic between gobbles: shuffling about a few tiles at a time on its stubby legs, little hops as it
+        goes, stopping now and then to sit (the pup: never far behind its parent)."""
         c["waddle_timer"] = c.get("waddle_timer", 0.0) - dt
-        if c["waddle_timer"] <= 0:
+        if follow and math.hypot(follow["x"] - c["x"], follow["y"] - c["y"]) > 1.2:   # (catching up)
+            c["waddle_to"] = (min(GRID - 0.5, max(0.5, follow["x"] + 0.5)), min(GRID - 0.5, max(0.5, follow["y"] + 0.4)))
+            c["waddle_timer"] = 0.5
+        elif c["waddle_timer"] <= 0:
             c["waddle_timer"] = random.uniform(*STROLL_EVERY)
             c["waddle_to"] = None if random.random() < STROLL_PAUSE else                 (min(GRID - 0.5, max(0.5, c["x"] + random.uniform(-2, 2))),
                  min(GRID - 0.5, max(0.5, c["y"] + random.uniform(-2, 2))))
@@ -3404,16 +3684,16 @@ class World:
         c["facing"] = 1 if dx - dy >= 0 else -1
         c["lift"] = abs(math.sin(self.clock * 9)) * 0.15   # (little hops)
 
-    def chomp(self, cell):
-        """Chompers lands on its block and gobbles it whole: it breaks (paying as usual), and Chompers coughs up
-        the rest of CHOMP_PAYOUT times its worth."""
+    def chomp(self, c, cell, payout):
+        """A camp Mimic lands on its block and gobbles it whole: it breaks (paying as usual), and the Mimic coughs up
+        the rest of `payout` times its worth."""
         block = self.current.get(cell)
         if block is None:   # (someone else got there first: it sulks, then tries again soon)
-            self.chomper["timer"] = 2.0
+            c["timer"] = 2.0
             return
-        self.chomper["chomp_at"] = self.clock
+        c["chomp_at"] = self.clock
         self.feats["chomps"] += 1
-        bonus = block.value * value_mult(self.lv("value")) * (CHOMP_PAYOUT - 1)
+        bonus = block.value * value_mult(self.lv("value")) * (payout - 1)
         px, py = self.cell_screen(cell)
         self.cues.append(("smash", 0.35))
         self.damage(cell, block.hp + 1e-9, sparks=12)
@@ -3471,7 +3751,7 @@ class World:
         elif self.lv("goldblock") and self.current:
             self.golden_timer -= dt
             if self.golden_timer <= 0:
-                self.golden_timer = golden_interval(self.lv("goldblock"))
+                self.golden_timer = golden_interval(self.lv("goldblock")) / self.tick()
                 cell = random.choice(list(self.current))
                 self.golden = [cell, GOLDEN_SECS]
                 px, py = self.cell_screen(cell)
@@ -3500,6 +3780,8 @@ class World:
                 self.whet_timer = WHET_GAP
         if self.mudlings:   # (the Clay Pit's mudlings)
             self.update_mudlings(dt)
+        if self.rods or self.arcs:   # (Grizzle's Lightning Rods)
+            self.update_rods(dt)
         # Chompers, the camp's tame Mimic
         if "chompers" in self.camp_items:
             self.update_chompers(dt)
@@ -3519,7 +3801,7 @@ class World:
                 sx, sy = self.ballista_screen()
                 self.ballista_aim = math.atan2(ty - sy, tx - sx)
                 if self.ballista_timer <= 0:
-                    self.ballista_timer = ballista_interval(self.lv("ballista"))
+                    self.ballista_timer = ballista_interval(self.lv("ballista")) / self.tick()
                     self.bolts.append([(sx, sy), target, 0.0])
         for throw in self.bone_throws:
             throw[2] += dt
@@ -3693,7 +3975,7 @@ class World:
         self.second_wind = max(0.0, self.second_wind - dt)
         if self.lv("coffee"):
             self.coffee_timer += dt
-            if self.coffee_timer >= coffee_interval(self.lv("coffee")):
+            if self.coffee_timer >= coffee_interval(self.lv("coffee")) / self.tick():
                 self.coffee_timer = 0.0
                 self.coffee_break()
         speed = walk_speed(self.lv("boots")) * self.art_mult("walk")
@@ -3703,6 +3985,7 @@ class World:
         boss_here = boss if boss and boss.state == "working" else None
         holdout = None if self.current else self.boss_target()   # layer cleared, boss still standing
         shades = [e for e in self.enemies if e.spec.get("aura") and e.targetable]   # (Abyssal Shades)
+        self.plant_banner()   # (Rocco's banner: who's under it, see under_banner)
         for m in self.miners + self.ghosts:   # (ghosts dig with the rest)
             if m.state == "down":
                 m.respawn -= dt
@@ -3742,7 +4025,7 @@ class World:
                 continue
             if not m.digs:   # specialists with their own jobs
                 {"foreman": self.update_foreman, "guard": self.update_guard, "medic": self.update_medic,
-                 "demolitionist": self.update_demolitionist, "blacksmith": self.update_blacksmith,
+                 "demolitionist": self.update_demolitionist, "engineer": self.update_engineer,
                  "archer": self.update_archer, "taxman": self.update_taxman, "claygolem": self.update_clay_golem,
                  }[m.role](m, dt, mspeed * ROLES[m.role]["speed"])
                 m.draw_z += (self.column_height(*self.cell_of(m.x, m.y)) - m.draw_z) * min(1.0, dt * 10)
@@ -3763,6 +4046,10 @@ class World:
                 my_swing = swing / (1 + (PEP_TALK_BOOST - 1) * level_mult(boss_here.level))
             if m.coffee > 0:   # Coffee Break
                 my_swing /= 1 + COFFEE_BOOST
+            if getattr(m, "forged", 0) > 0 and "toolkit" in self.camp_items:   # (rigged and wound up)
+                my_swing /= 1 + WOUND_UP
+            if self.under_banner(m):   # under Rocco's banner
+                my_swing /= 1 + BANNER_BOOST
             drag = self.flare_drag(m, shades) if shades or self.void_pools else 1.0
             m.shaded = drag > 1.0
             my_swing *= drag   # an Abyssal Shade's darkness: every swing drags
@@ -3805,7 +4092,11 @@ class World:
         if self.reveals:
             self.reveals[0][1] += dt
         self.update_upgrade_systems(dt, combat)
-        if combat:
+        if combat and "watch" in self.camp_items:   # (the Pocket Watch: now and then, time stops)
+            self.pocket_watch(dt)
+        if combat and self.time_stop > 0:   # time stopped: the monsters (and everything they're up to) wait
+            self.time_stop = max(0.0, self.time_stop - dt)
+        elif combat:
             for e in self.enemies:
                 self.ward(e)
             for e in [e for e in self.enemies if e.kind == "slimeling"]:
@@ -3845,7 +4136,7 @@ class World:
                 self.steam = None
         if self.lv("dynamite"):
             self.dynamite_timer += dt
-            if self.dynamite_timer >= dynamite_interval(self.lv("dynamite")):
+            if self.dynamite_timer >= dynamite_interval(self.lv("dynamite")) / self.tick():
                 self.dynamite_timer = 0.0
                 self.throw_dynamite()
         for bomb in list(self.bombs):
@@ -3923,10 +4214,11 @@ class World:
         w.gold = d["gold"]
         w.depth = d["depth"]
         w.expedition = d.get("expedition", 0)
-        w.camp = [k for k in d.get("camp", []) if k in HIRES]   # (older camps' buildings are gone)
+        w.camp = [k for k in (RENAMED_ROLES.get(k, k) for k in d.get("camp", [])) if k in HIRES]
+        # (older camps' buildings are gone)
         w.lifetime.update(d.get("lifetime", {}))
         w.camp_ready = d.get("camp_ready", False)
-        w.visit_hire = d.get("visit_hire") if w.camp_ready else None
+        w.visit_hire = RENAMED_ROLES.get(d.get("visit_hire"), d.get("visit_hire")) if w.camp_ready else None
         w.camp_items = [k for k in d.get("camp_items", []) if k in ITEMS]
         w.achievements = [k for k in d.get("achievements", []) if k in ACHIEVEMENTS]
         w.feats.update(d.get("feats", {}))
@@ -3962,7 +4254,8 @@ class World:
             w.descend(award=False)
         w.miners = []
         w.sync_miners()
-        saved_crew = d.get("crew", [])   # older saves have no crew: keep random looks
+        saved_crew = [dict(c, role=RENAMED_ROLES.get(c.get("role", "miner"), c.get("role", "miner")))
+                      for c in d.get("crew", [])]   # older saves have no crew: keep random looks
         for role in ROLES:   # match by role: specialists can sit anywhere in the list
             ours = [m for m in w.miners if m.role == role]
             theirs = [c for c in saved_crew if c.get("role", "miner") == role]
