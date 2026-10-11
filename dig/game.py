@@ -27,7 +27,7 @@ class Game:
         self.slots = [save_path] if save_path else list(SAVE_SLOTS)
         self.save_path = self.latest_slot() or self.slots[0]   # (Continue: the save played most recently)
         pygame.init()
-        pygame.display.set_caption("The Only Way Is Down")
+        pygame.display.set_caption("One Way Down")
         set_app_icon()   # (before the window opens, so the title bar and taskbar both pick it up)
         self.audio = Audio()   # volume settings, music and sound effects
         self.screen = pygame.display.set_mode((W, H))

@@ -1,4 +1,4 @@
-"""The Only Way Is Down - an isometric incremental mining game.
+"""One Way Down - an isometric incremental mining game.
 
 Run with:  uv run main.py
 
@@ -17,7 +17,7 @@ from dig.config import PROJECT_ROOT
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="The Only Way Is Down",
+    parser = argparse.ArgumentParser(description="One Way Down",
                                      epilog="With no options, opens the menu on your save slots.")
     start = parser.add_mutually_exclusive_group()
     start.add_argument("--depth", type=int, metavar="N", help="start a fresh test game at depth N")

@@ -1,4 +1,4 @@
-"""The game's window and taskbar icon: a pickaxe over a gold arrow pointing down (the only way is down).
+"""The game's window and taskbar icon: a pickaxe over a gold arrow pointing down (one way: down).
 
 Drawn at ICON_DRAW px with pygame shapes, then smooth-scaled to the size asked for, so it stays crisp small.
 (Options it was picked from: mockups/icons/make_icon_options.py.)

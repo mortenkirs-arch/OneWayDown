@@ -384,7 +384,7 @@ class PlayScene(Scene):
             return "He's bouncing over to belly-flop on your crew!"
         if boss.kind == "zombieking":
             if boss.enraged:
-                return "ENRAGED - he winds up and slams much faster!"
+                return "ENRAGED - he charges at the crew and slams much faster!"
             return "Rallied zombies are tough - kill them away from him, or lure him off"
         if boss.kind == "broodmother":
             if any(e.kind == "eggsac" for e in w.enemies):

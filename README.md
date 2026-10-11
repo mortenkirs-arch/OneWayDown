@@ -1,4 +1,4 @@
-# The Only Way Is Down
+# One Way Down
 
 An isometric incremental mining game built with pygame (pygame-ce).
 
@@ -210,7 +210,7 @@ carries on with whichever was played last, **Load Game** picks one, and **New Ga
 to start in (replacing a save takes a second click). Progress auto-saves every 10 seconds and on exit.
 
 The window opens at the largest of 1600x900, 1440x810 or 1280x720 that fits your screen
-(set `THE_ONLY_WAY_IS_DOWN_RES=1280x720` to force a size). Depth milestones live in `UNLOCK_DEPTH`
+(set `ONE_WAY_DOWN_RES=1280x720` to force a size). Depth milestones live in `UNLOCK_DEPTH`
 in `dig/upgrades.py`.
 
 ## Project layout
@@ -243,7 +243,7 @@ level via `world.lv("key")` wherever it takes effect.
 
 Copyright (C) 2026 Morten
 
-The Only Way Is Down is free software: you can redistribute it and/or modify it under the terms of the
+One Way Down is free software: you can redistribute it and/or modify it under the terms of the
 GNU General Public License as published by the Free Software Foundation, either version 3 of the License,
 or (at your option) any later version.
 

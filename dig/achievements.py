@@ -19,7 +19,8 @@ from .upgrades import UPGRADES, is_maxed
 
 # Upgrades that put another body on the dig (Protect Mr. President allows Hire Miner up to level 1, and none of these)
 HIRE_UPGRADES = ("driller", "guard", "medic", "demolition", "foreman")
-SPEED_DEMON_SECS = 30 * 60   # Speed Demon: an expedition beaten in under this long
+SPEED_DEMON_SECS = 30 * 60   # Speed Demon: an expedition beaten in under this long...
+BLINK_SECS = 15 * 60         # ...and Blink and You'll Miss It, in under this
 QUICK_KILL_SECS = 10.0       # Ten-Second Takedown: a boss beaten within this long of it rising
 
 
@@ -149,6 +150,8 @@ ACHIEVEMENTS = {
                      desc="Beat an expedition without losing a single crew member"),
     "speed_demon": dict(name="Speed Demon", icon="clock", tier="hard",
                         desc=f"Beat an expedition in under {SPEED_DEMON_SECS // 60} minutes"),
+    "blink": dict(name="Blink and You'll Miss It", icon="clock", tier="legendary",
+                  desc=f"Beat an expedition in under {BLINK_SECS // 60} minutes"),
     "quick_kill": dict(name="Ten-Second Takedown", icon="bolt", tier="hard",
                        desc=f"Defeat a boss within {QUICK_KILL_SECS:.0f} seconds of it rising"),
     "untouchable": dict(name="Untouchable", icon="shield", tier="hard",

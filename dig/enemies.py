@@ -111,7 +111,7 @@ ENEMY_TYPES = {
                   tint=(160, 190, 230), gore=(220, 230, 255)),
 
     # ----- bosses: one every BOSS_EVERY metres, in this order, then round again ----------------
-    "zombieking": dict(name="Zombie King", hp=2200, speed=0.45, dps=0, bounty=360, min_depth=0, weight=0,
+    "zombieking": dict(name="Zombie King", hp=1650, speed=0.45, dps=0, bounty=360, min_depth=0, weight=0,
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
                        look="zombie", scale=2.2, slam=0.32, minion=dict(kind="zombie", count=2, every=14.0),
                        tint=(150, 130, 210), gore=(120, 190, 80)),
@@ -139,7 +139,7 @@ ENEMY_TYPES = {
                        reach=0.6, entrance="none", grab="side", arrival="", slam=0.06, slam_radius=0.9, scale=1.4,
                        pct_scale=0.2, tint=(160, 230, 130), gore=(150, 220, 70)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
-                        reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
+                        reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.025,
                         scale=1.2, slam=0.28, minion=dict(kind="bat", count=2, every=12.0),
                         tint=(228, 228, 238), gore=(160, 30, 45)),
     "lich": dict(name="Archlich", hp=2600, speed=0.4, dps=0, bounty=420, min_depth=0, weight=0,
@@ -198,14 +198,16 @@ RALLY_RADIUS = 2.5           # Zombie King: zombies this close to him are rallie
 RALLY_SPEED = 1.6            # ...moving this much faster...
 RALLY_TOUGH = 0.5            # ...and taking only this share of damage
 ENRAGE_AT = 0.5              # below this share of his health he rages:
-ENRAGE_PACE = 0.55           # wind-ups and cool-downs shrink to this share
+ENRAGE_PACE = 0.55           # wind-ups and cool-downs shrink to this share...
+ENRAGE_SPEED = 2.0           # ...and he lumbers after the crew this many times as fast
 WEB_SECS = 9.0               # Broodmother: webs left by her slam last this long...
 WEB_SLOW = 0.35              # ...and crew crossing them move at this share of their speed
 BAT_FORM_EVERY = 14.0        # Vampire Lord: seconds between turning into a swarm of bats
 BAT_FORM_SPEED = 3.2         # tiles/s the swarm flies (nothing can hit it)
 BITE_SECS = 3.5              # how long he feeds on the crew member he lands on...
 BITE_SHARE = 0.08           # ...draining this share of a typical crew member's health a second...
-BITE_HEAL = 0.012            # ...and healing this share of his max health a second
+BITE_HEAL = 0.010            # ...and healing this share of his max health a second
+SLAM_FEED_MOST = 4           # his slams heal him (lifesteal) for at most this many of the crew they catch
 BITE_BREAK = 0.04            # taking this share of his max health while biting makes him let go
 CURSE_EVERY = 9.0            # Archlich: seconds between curses
 CURSE_SECS = 4.5             # a curse bursts this long after it lands, unless you click the crew member
@@ -666,7 +668,8 @@ class Enemy:
             return
         ux, uy = dx / dist, dy / dist
         self.heading = (ux, uy)
-        step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)
+        rage = ENRAGE_SPEED if self.enraged else 1.0
+        step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * rage * dt)
         self.x = min(GRID - 0.05, max(0.05, self.x + ux * step))
         self.y = min(GRID - 0.05, max(0.05, self.y + uy * step))
 

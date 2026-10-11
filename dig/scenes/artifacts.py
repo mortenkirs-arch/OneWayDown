@@ -1,7 +1,8 @@
 """Artifacts page: every artifact found so far, and silhouettes of the ones still out there."""
 import pygame
 
-from ..artifacts import ARTIFACTS, COMMON
+from ..artifacts import ARTIFACTS, COMMON, CREW_ARTIFACTS
+from ..camp import HIRES
 from ..config import GOLD, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
 from ..enemies import BOSS_EVERY, BOSSES, ENEMY_TYPES
 from ..icons import draw_icon
@@ -10,8 +11,9 @@ from ..util import shade
 from .base import Scene
 
 LEFT, RIGHT = 24, W - 24
-GAP = 12
-CARD_H = 74
+GAP = 10
+CARD_H = 66
+COLS = 5
 TROPHIES = [k for k, a in ARTIFACTS.items() if "boss" in a]
 
 
@@ -60,14 +62,17 @@ class ArtifactScene(Scene):
         draw_text(s, f, f"{len(w.artifacts)} of {len(ARTIFACTS)} found  -  paused", 26, MUTED,
                   (title.right + 18, title.centery + 2), "midleft")
 
-        top = 96
+        top = 88
         draw_text(s, f, "Buried in the dig  -  watch for blocks with a violet glint", 24, GOLD, (LEFT, top))
-        commons = self.card_rects(COMMON, top + 30, 4)
-        top = commons[-1][1].bottom + 22
+        commons = self.card_rects(COMMON, top + 28, COLS)
+        top = commons[-1][1].bottom + 14
         draw_text(s, f, f"Boss trophies  -  a boss guards every {BOSS_EVERY}th metre", 24, GOLD, (LEFT, top))
-        trophies = self.card_rects(TROPHIES, top + 30, 4)
+        trophies = self.card_rects(TROPHIES, top + 28, COLS)
+        top = trophies[-1][1].bottom + 14
+        draw_text(s, f, "Camp crew  -  each buried in the dig once its hire is with you", 24, GOLD, (LEFT, top))
+        crew = self.card_rects(CREW_ARTIFACTS, top + 28, COLS)
         hovered = None
-        for key, rect in commons + trophies:
+        for key, rect in commons + trophies + crew:
             self.draw_card(s, key, rect)
             if rect.collidepoint(mouse) and key in w.artifacts:
                 hovered = key
@@ -87,22 +92,26 @@ class ArtifactScene(Scene):
         ic = (rect.x + 38, rect.centery)
         if found:
             draw_icon(s, art["icon"], ic, 20, art["color"])
-            draw_text(s, f, art["name"], 24, art["color"], (rect.x + 72, rect.y + 16), "midleft")
+            size = next((n for n in (22, 20, 18) if f[n].size(art["name"])[0] <= rect.w - 80), 18)   # (long names shrink)
+            draw_text(s, f, art["name"], size, art["color"], (rect.x + 72, rect.y + 14), "midleft")
             lines = wrap(f, art["bonus"], 20, rect.w - 84)
             for i, line in enumerate(lines[:2]):
-                draw_text(s, f, line, 20, TEXT, (rect.x + 72, rect.y + 40 + i * 18), "midleft")
+                draw_text(s, f, line, 20, TEXT, (rect.x + 72, rect.y + 35 + i * 18), "midleft")
             if key in w.new_artifacts:
                 tag = draw_text(s, f, "NEW", 18, GOLD, (rect.right - 12, rect.y + 14), "midright")
                 pygame.draw.rect(s, GOLD, tag.inflate(8, 4), 1, border_radius=4)
         else:
             pygame.draw.circle(s, shade(PANEL_EDGE, 0.8), ic, 20, 2)
             draw_text(s, f, "?", 30, shade(PANEL_EDGE, 1.3), ic, "center")
-            draw_text(s, f, "???", 24, MUTED, (rect.x + 72, rect.y + 16), "midleft")
+            draw_text(s, f, "???", 22, MUTED, (rect.x + 72, rect.y + 14), "midleft")
             if "boss" in art:
                 boss = art["boss"]
                 depth = (BOSSES.index(boss) + 1) * BOSS_EVERY
-                hint = f"Defeat the {ENEMY_TYPES[boss]['name']} (first at {depth}m)"
+                name = ENEMY_TYPES[boss]["name"]
+                hint = f"Defeat {name if name.startswith('The ') else 'the ' + name} (first at {depth}m)"
+            elif "crew" in art and art["crew"] not in w.camp:
+                hint = f"Hire the {HIRES[art['crew']]['title']} at Base Camp"
             else:
                 hint = "Still buried somewhere below"
             for i, line in enumerate(wrap(f, hint, 20, rect.w - 84)[:2]):
-                draw_text(s, f, line, 20, MUTED, (rect.x + 72, rect.y + 40 + i * 18), "midleft")
+                draw_text(s, f, line, 20, MUTED, (rect.x + 72, rect.y + 35 + i * 18), "midleft")

@@ -32,12 +32,13 @@ BONE_CHANCE = 0.08          # share of plain rock blocks (never ore) with old bo
 
 HP_GROWTH = 1.12
 VALUE_GROWTH = 1.115
-DEEP_ROCK_FROM = 60         # the deep: past this depth (within each expedition) the rock gets steadily harder...
-DEEP_ROCK = 1.17            # ...this much more again every metre (on top of HP_GROWTH), without paying any more...
+DEEP_ROCK_FROM = 40         # the deep: past this depth (within each expedition) the rock gets steadily harder...
+DEEP_ROCK = 1.095           # ...this much more again every metre (on top of HP_GROWTH), without paying any more...
 DEEP_CRACK = DEEP_ROCK ** -1.6   # ...and anything that breaks rock by a share of it (charges, Vein Follower) manages
                             # only this much as much, metre on metre (falling off a little faster than the rock hardens)...
-DEEP_ROCK_TO = 90           # ...until here: past it the rock only gets the usual harder, so the last few metres to
-                            # 100 don't drag (deep enough to be an endgame, short enough to want another run)
+DEEP_ROCK_TO = 80           # ...until here: past it the rock only gets the usual harder. A long, gentle ramp, so the
+                            # going gets steadily slower down the expedition (the bosses and the deep's monsters past
+                            # 80m slow it enough on their own) - never a sprint into a wall
 
 
 def hp_scale(depth):

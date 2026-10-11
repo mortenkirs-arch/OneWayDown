@@ -5,13 +5,13 @@ import pygame
 
 # The window is the largest of these that fits the desktop. Text stays the same size; the board
 # scales up with the window so there's more room around the (fixed-size) characters.
-# Override with e.g. THE_ONLY_WAY_IS_DOWN_RES=1280x720.
+# Override with e.g. ONE_WAY_DOWN_RES=1280x720.
 RESOLUTIONS = [(1600, 900), (1440, 810), (1280, 720)]
 BASE_W = 1280                 # the layout was designed at 1280x720
 
 
 def _pick_resolution():
-    forced = os.environ.get("THE_ONLY_WAY_IS_DOWN_RES")
+    forced = os.environ.get("ONE_WAY_DOWN_RES") or os.environ.get("THE_ONLY_WAY_IS_DOWN_RES")   # (its old name too)
     if forced:
         w, h = forced.lower().split("x")
         return int(w), int(h)

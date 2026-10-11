@@ -3,7 +3,7 @@ import math
 import random
 import time
 
-from .achievements import (ACHIEVEMENTS, CHECKED, HIRE_UPGRADES, QUICK_KILL_SECS, SPEED_DEMON_SECS, new_feats,
+from .achievements import (ACHIEVEMENTS, BLINK_SECS, CHECKED, HIRE_UPGRADES, QUICK_KILL_SECS, SPEED_DEMON_SECS, new_feats,
                            new_run)
 from .artifacts import (ARTIFACT_CHANCE, ARTIFACT_MIN_DEPTH, ARTIFACTS, COMMON, FIRST_ARTIFACT_BY, STAT_KIND,
                         TROPHY_OF)
@@ -16,7 +16,7 @@ from .dynamite import EXPLOSION_SECS, Bomb
 from .effects import (CRIT_BURST_SECS, QUAKE_RADIUS, QUAKE_SPEED, CoinFly, Floater, Particle,
                       Smoke)
 from .enemies import (ELITE_HP, boss_minion_cap, boss_minion_mult,
-                      BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE,
+                      BAT_FORM_EVERY, BAT_FORM_SPEED, BITE_BREAK, BITE_HEAL, BITE_SECS, BITE_SHARE, SLAM_FEED_MOST,
                       BONE_THROW_SHARE, BONE_THROW_SECS, CHUNK_APART, CHUNK_CROWD, CHUNK_FLING, BONE_VOLLEY, BONE_VOLLEY_HURT, CHUNK_SPLIT_HP,
                       PILE_HP, PILE_SECS, REFORM_HP, SLIME_SPLIT_AT, SLIME_SPLIT_HP, STALK_PATIENCE, STRIDE_RANGE,
                       STRIDE_SPEED, THROW_ANIM_SECS, THROW_RELEASE, VOLLEY_GAP,
@@ -165,8 +165,7 @@ SKIRMISH_KEEP_AWAY = 2.6     # diggers keep at least this far from the boss (cle
 MAX_FLYING_COINS = 40
 MILESTONE_EVERY = 5          # every 5th metre is a milestone with a bigger clear bonus (see Surveyor's Contract)
 STREAK_CAP = 10              # Hot Streak: up to this many hits in a row count
-CRIT_TEXT_GAP = 0.5          # crits: a new "CRIT!" label at most this often (crits between add to its count)...
-CRIT_QUAKE_REACH = 1.3       # ...a miner's Seismic Strikes wave only reaches the blocks it shakes (a slam's goes further)...
+CRIT_QUAKE_REACH = 1.3       # crits: a miner's Seismic Strikes wave only reaches the blocks it shakes (a slam's goes further)...
 CRIT_QUAKES_SHOWN = 3        # ...and only this many of those waves show at once
 COMBO_WINDOW = 0.9           # Combo Clicks: seconds you can pause between clicks before it drops
 COMBO_CAP = 20               # ...and the most clicks that count
@@ -303,8 +302,6 @@ class World:
         self.coins = []                                         # earned coins flying to the HUD counter
         self.crit_bursts = []                                   # [x, y, age] critical-strike impact flashes
         self.quakes = []                                        # [x, y, age, cells dusted, reach] Seismic Strike waves
-        self.crit_label = [None, -9.0, 0]                       # the "CRIT!" on show: [floater, when, crits it counts]
-        self.click_crit_label = [None, -9.0, 0]                 # ...and the one for your own (Steady Hands) crits
         self.gold_bump = 0.0                                    # HUD counter pulse when coins land
         self.notice = None                                      # [text, seconds left] milestone banner
         self.combo = 0                                          # Combo Clicks: clicks in a row...
@@ -840,8 +837,8 @@ class World:
                 continue
             hit += 1
             self.hurt(m, dmg)
-            if e.spec.get("lifesteal"):   # the Vampire Lord feeds on every crew member it hits
-                e.hp = min(e.max_hp, e.hp + e.max_hp * e.spec["lifesteal"])
+            if e.spec.get("lifesteal") and hit <= SLAM_FEED_MOST:   # the Vampire Lord feeds on the crew it hits
+                e.hp = min(e.max_hp, e.hp + e.max_hp * e.spec["lifesteal"])          # (a few of them, at most)
             px, py = self.entity_screen(m, 50)
             self.floaters.append(Floater(f"-{dmg:.0f}", px, py, BAD, life=1.0, size=24))
             if m.hp <= 0:
@@ -1800,7 +1797,9 @@ class World:
 
     # ----- artifacts ------------------------------------------------------
     def undiscovered(self):
-        return [k for k in COMMON if k not in self.artifacts]
+        """Artifacts still buried somewhere below: the common ones, and those of the camp's hires you have."""
+        return [k for k in COMMON if k not in self.artifacts] + \
+            [k for k, a in ARTIFACTS.items() if a.get("crew") in self.camp and k not in self.artifacts]
 
     def bury_artifact(self, layer, depth):
         """Now and then a new layer hides an artifact in one of its blocks (a glint gives it away). The layer at
@@ -2241,7 +2240,8 @@ class World:
                 self.floaters.append(Floater("Fought it off!", vx, vy, GOOD, life=1.3, size=26))
             else:
                 victim.stats["saved"] += 1
-                text = f"Saved by {credit.name}!" if credit and credit.role == "guard" else "Saved!"
+                # (your click landing the blow is your rescue, whoever helped - they still get the kill and its xp)
+                text = f"Saved by {credit.name}!" if credit and credit.role == "guard" and by is credit else "Saved!"
                 self.floaters.append(Floater(text, vx, vy, GOOD, life=1.3, size=28))
         if self.lv("volatile") and not enemy.boss:
             self.volatile_blast(enemy)
@@ -2339,7 +2339,7 @@ class World:
         if miner and miner.role == "ghost":
             dmg *= GHOST_POWER
         elif miner and miner.role == "hero":   # the Hero Miner: a legend with a pick
-            dmg *= HERO_POWER
+            dmg *= HERO_POWER * self.art_mult("hero")
         if miner and "fringe" in self.camp_items and self.under_banner(miner):   # (the Gold Fringe)
             dmg *= 1 + FRINGE_POWER
         if is_ore(block):
@@ -2413,30 +2413,17 @@ class World:
     def crit_effects(self, cell, miner):
         """The look of a critical strike: the miner's overhead slam, an impact starburst, and with Seismic Strikes
         a small wave rippling out to the blocks it shakes. A late crew crits dozens of times a second, so it's kept
-        light: one "CRIT!" label at a time (counting the crits it stands for), a few waves at once, no screen jolt."""
+        light: no label (a crew critting every few frames would bury the screen in text), a few waves at once, no screen
+        jolt."""
         px, py = self.cell_screen(cell)
         if miner:
             miner.crit = CRIT_ANIM_SECS
         self.crit_bursts.append([px, py, 0.0])
-        self.crit_text(self.crit_label, "CRIT", px, py - 78, (255, 150, 90), 32)   # (clear of the slam)
         for _ in range(6):
             color = random.choice([(255, 230, 150), (255, 160, 70), (255, 255, 255)])
             self.particles.append(Particle(px, py, color, big=True))
         if self.lv("quake") and sum(1 for q in self.quakes if q[4] == CRIT_QUAKE_REACH) < CRIT_QUAKES_SHOWN:
             self.quakes.append([cell[0] + 0.5, cell[1] + 0.5, 0.0, set(), CRIT_QUAKE_REACH])
-
-    def crit_text(self, label, word, x, y, color, size):
-        """A crit's floating label - one at a time: crits landing while it's still fresh add to its count instead
-        ("CRIT x7"), so a crew critting every few frames doesn't bury the screen in text."""
-        floater, when, count = label
-        if floater is not None and floater.life > 0 and self.clock - when < CRIT_TEXT_GAP:
-            label[2] = count + 1
-            floater.text = f"{word} x{label[2]}"
-            floater.life = max(floater.life, 0.6)
-            return
-        floater = Floater(f"{word}!", x, y, color, life=0.9, size=size)
-        self.floaters.append(floater)
-        label[:] = [floater, self.clock, 1]
 
     def player_hit(self, cell, sparks=6, ring_color=(255, 255, 255), manual=False):
         """A click on a block - yours (manual) or the Auto-Tapper's."""
@@ -2452,7 +2439,6 @@ class World:
                 self.golden_jackpot(cell, block)
         if random.random() < 0.05 * self.lv("steady"):
             dmg *= 3
-            self.crit_text(self.click_crit_label, "CRIT", px, py - 30, (220, 160, 255), 22)
         if manual and self.lv("golden"):   # Golden Touch: your own clicks earn as you dig
             self.earn(block.value * value_mult(self.lv("value")) * 0.05 * self.lv("golden"))
             for _ in range(3):
@@ -2967,6 +2953,8 @@ class World:
             self.achieve("flawless")
         if self.clock - r["start"] < SPEED_DEMON_SECS:
             self.achieve("speed_demon")
+        if self.clock - r["start"] < BLINK_SECS:
+            self.achieve("blink")
 
     def take_camp_item(self, key):
         """Take one of the camp's items (instead of a new hire, this visit): yours from now on, for good."""
@@ -3030,7 +3018,7 @@ class World:
     def update_hero(self, hero, dt, speed):
         """The Hero Miner drops their pick to rescue anyone close by a monster has hold of. True while on a rescue."""
         grabbing = [e for e in self.enemies if e.targetable and e.state == "attacking" and not e.boss
-                    and math.hypot(e.x - hero.x, e.y - hero.y) <= HERO_RESCUE_RANGE]
+                    and math.hypot(e.x - hero.x, e.y - hero.y) <= HERO_RESCUE_RANGE + self.art_add("hero_reach")]
         if not grabbing:
             if hero.task == "rescuing":
                 hero.task, hero.target, hero.goal = "idle", None, None
@@ -3043,7 +3031,7 @@ class World:
             if hero.swing <= 0:
                 hero.swing = HERO_SWING
                 hero.anim = 1.0
-                share = HERO_STRIKE * level_mult(hero.level)
+                share = HERO_STRIKE * level_mult(hero.level) * self.art_mult("hero")
                 self.give_xp(hero, share * XP_PER_MONSTER * GUARD_XP_SHARE)
                 self.hit_enemy(foe, foe.max_hp * share * foe.pct_scale, floor=False, ring=GOLD, by=hero, heavy=True)
         return True
@@ -3067,7 +3055,7 @@ class World:
                 self.particles.append(Particle(px + 8 * smith.facing, py, random.choice([(255, 200, 90), (255, 140, 50)])))
             if smith.task_timer <= 0:
                 m = smith.goal
-                m.forged, m.blast = FORGE_SECS, FORGE_BLAST * level_mult(smith.level)
+                m.forged, m.blast = FORGE_SECS * self.art_mult("rig"), FORGE_BLAST * level_mult(smith.level) * self.art_mult("rig")
                 px, py = self.entity_screen(m, 56)
                 self.floaters.append(Floater("Explosive pick!", px, py, (255, 170, 80), life=1.1, size=20))
                 self.give_xp(smith, XP_PER_BLOCK * 0.5)
@@ -3226,7 +3214,7 @@ class World:
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
                     self.glazed[(cell[0] + dx, cell[1] + dy)] = (self.depth, self.clock + GLAZE_SECS)
-        power = slam_mult(self.lv("slam")) * level_mult(golem.level)
+        power = slam_mult(self.lv("slam")) * level_mult(golem.level) * self.art_mult("mitts")
         dmg = self.click_hit_damage() * power
         for e in list(self.enemies):
             if e.targetable and not e.boss and max(abs(e.x - (cell[0] + 0.5)), abs(e.y - (cell[1] + 0.5))) <= 1.5:
@@ -3246,7 +3234,7 @@ class World:
             level = block.hp + 1e-9 if depth <= DEEP_ROCK_FROM else block.max_hp * crack
             if not self.damage(cell, max(dmg, level), sparks=10, by=golem):
                 return
-        share = MITTS_CRACK * level_mult(golem.level) * crack
+        share = MITTS_CRACK * level_mult(golem.level) * crack * self.art_mult("mitts")
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 around = self.current.get((cell[0] + dx, cell[1] + dy))
@@ -3272,9 +3260,9 @@ class World:
                 return
             archer.facing = 1 if (foe.x - archer.x) - (foe.y - archer.y) >= 0 else -1
             archer.swing -= dt
-            archer.anim = min(1.0, 1 - archer.swing / (ARCHER_DRAW / self.tick()))   # (drawing the bow back)
+            archer.anim = min(1.0, 1 - archer.swing / (ARCHER_DRAW * self.art_mult("draw") / self.tick()))   # (drawing the bow back)
             if archer.swing <= 0:
-                archer.swing, archer.anim = ARCHER_DRAW / self.tick(), 0.0
+                archer.swing, archer.anim = ARCHER_DRAW * self.art_mult("draw") / self.tick(), 0.0
                 self.arrows.append([self.entity_screen(archer, 24), foe, 0.0, archer])
             return
         archer.anim = 0.0
@@ -3452,7 +3440,7 @@ class World:
         right now (Fortune upgrades and all), a few more the deeper the dig - so the take keeps step with the depth
         (about a fifth on top of the crew's earnings all the way down), whatever's been broken lately."""
         block = self.layer_value / (GRID * GRID) * value_mult(self.lv("value"))
-        return block * (TAX_BLOCKS + self.depth / TAX_DEEPER) * level_mult(tax.level)
+        return block * (TAX_BLOCKS + self.depth / TAX_DEEPER) * level_mult(tax.level) * self.art_mult("tax")
 
     def collect_tax(self, tax, payer):
         paid = self.earn(self.tax_due(tax))   # (Midas Touch and the depth bonus count, as for any gold)

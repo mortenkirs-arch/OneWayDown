@@ -1,4 +1,4 @@
-"""The main menu's title: "THE ONLY WAY IS" above a big DOWN carved from ore-studded stone, with a skeleton
+"""The main menu's title: "ONE WAY" above a big DOWN carved from ore-studded stone, with a skeleton
 leaning on the N. The stone is drawn once and cached; the ore glints and the skeleton sways each frame."""
 import math
 import random
@@ -10,7 +10,7 @@ from .iso import origin_at
 from .sprites import DRAWERS
 from .util import shade
 
-SMALL_LINE = "THE ONLY WAY IS"
+SMALL_LINE = "ONE WAY"
 SMALL_COLOR, SMALL_SHADOW = (255, 205, 70), (20, 14, 26)
 STONE = (124, 122, 132)
 RIM, GLOW = (30, 24, 28), (255, 200, 80)

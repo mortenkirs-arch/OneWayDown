@@ -1,7 +1,9 @@
 """Artifacts: rare finds buried in the dig, each a permanent bonus.
 
 Common artifacts turn up in ordinary blocks (a glinting block now and then). Trophies are only ever
-dropped by the boss named in `boss` (see BOSSES in enemies.py), the first time it is beaten.
+dropped by the boss named in `boss` (see BOSSES in enemies.py), the first time it is beaten. Crew artifacts are
+buried like the common ones, but only once the Base Camp hire named in `crew` is with you - one for each, making
+them better at what they do.
 
 Each artifact is data:
   name, icon, color   how it looks (icon is a kind from icons.draw_icon)
@@ -18,6 +20,13 @@ STAT_KIND = {
     "click_dmg": "mult", "monster_dmg": "mult", "gold": "mult", "bounty": "mult", "clear": "mult",
     "ore": "mult", "xp": "mult", "enemy_hp": "mult", "grab_dmg": "mult", "enemy_speed": "mult",
     "slam_dmg": "mult",
+    # (one Base Camp hire each:)
+    "hero": "mult",         # Rocco digs, and strikes on a rescue, this much harder...
+    "hero_reach": "add",    # ...and rescues from this many tiles further
+    "rig": "mult",          # Grizzle's rigged picks blast this much harder, and stay rigged this much longer
+    "tax": "mult",          # Mr. Pennyworth's dues
+    "mitts": "mult",        # Mitts' slams
+    "draw": "mult",         # Wren's time between arrows
     "femur": "add",         # Tyrant's Femur: seconds between bones thrown at a monster grabbing a crewmate (0 = none)
     # (Base Camp only:)
     "start_gold": "add",    # gold each expedition starts with
@@ -65,6 +74,25 @@ ARTIFACTS = {
                   lore="Pinned on a miner who came back up. Twice.",
                   bonus="Crew gain experience 50% faster", effects={"xp": 1.5}),
 
+    # ----- crew artifacts: buried once their hire is with you ---------------
+    "oathhelm": dict(name="Rocco's Old Helm", icon="helmet", color=(250, 205, 70), crew="hero",
+                     lore="Rocco's great-great-grandmother wore it down the very first shaft. It still knows the way.",
+                     bonus="Rocco hits 50% harder, reaches further",
+                     effects={"hero": 1.5, "hero_reach": 1.0}),
+    "blastcap": dict(name="Lucky Blasting Cap", icon="tnt", color=(255, 150, 60), crew="engineer",
+                     lore="Never once gone off when it should have. Never once failed to when it shouldn't.",
+                     bonus="Grizzle's rigged picks blast 50% harder, and stay rigged 50% longer",
+                     effects={"rig": 1.5}),
+    "goldquill": dict(name="The Golden Quill", icon="scroll", color=(240, 200, 80), crew="taxman",
+                      lore="It writes in gold ink. Mr. Pennyworth has never asked where the ink comes from.",
+                      bonus="Mr. Pennyworth collects twice the dues", effects={"tax": 2.0}),
+    "riverheart": dict(name="Riverheart Stone", icon="gem", color=(110, 200, 230), crew="claygolem",
+                       lore="A smooth blue stone from the riverbed Mitts was dug from. Pressed into his chest, it beats.",
+                       bonus="Mitts slams 50% harder", effects={"mitts": 1.5}),
+    "bowstring": dict(name="Silver Bowstring", icon="target", color=(200, 225, 245), crew="archer",
+                      lore="Spun from moonlight, said the elf who sold it. Wren paid in rabbits.",
+                      bonus="Wren shoots arrows 2/3 faster", effects={"draw": 0.6}),
+
     # ----- trophies: dropped by bosses ------------------------------------
     "kingcrown": dict(name="Zombie King's Crown", icon="crown", color=(255, 205, 70), boss="zombieking",
                       lore="Heavy is the head. Heavier still, the rest of him.",
@@ -98,7 +126,8 @@ ARTIFACTS = {
                       lore="It drinks the light around it - and the crew's weariness with it.",
                       bonus="Miners swing 15% faster", effects={"swing": 0.85}),
 }
-COMMON = [k for k, a in ARTIFACTS.items() if "boss" not in a]
+COMMON = [k for k, a in ARTIFACTS.items() if "boss" not in a and "crew" not in a]
+CREW_ARTIFACTS = [k for k, a in ARTIFACTS.items() if "crew" in a]
 TROPHY_OF = {a["boss"]: k for k, a in ARTIFACTS.items() if "boss" in a}
 
 ARTIFACT_MIN_DEPTH = 3     # no artifacts in the first few metres
