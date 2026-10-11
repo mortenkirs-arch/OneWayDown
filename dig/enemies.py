@@ -60,6 +60,12 @@ Each boss also has a trick of its own, run by World.boss_special (see the BOSS T
                 at them (click a pool away), and every so often it inhales, dragging the crew in to bite them
                 (strike the open eye to choke it)
 
+...and a second trick (World.boss_second_trick, every so often): the Zombie King's hands burst up under the crew
+and hold them; the Broodmother lashes silk at the furthest and reels them in; the Fanged Behemoth's wingbeat blows
+the crew back; the Bone Tyrant cages one in ribs (click them free); the Slime King belly-flops onto a marked spot;
+the Vampire Lord mesmerises one (a click snaps them out); the Archlich raises skeletons; the Burrow Brothers open
+sinkholes; The Mountain brings down a rockslide; The Void Maw's eye fixes its gaze on one (strike the eye).
+
 Egg sacs (hatch=...) don't move: they hatch into `count` of `kind` after `after` seconds unless broken.
 entrance="none" means the enemy is simply there, with no spawn-in animation.
 """
@@ -130,7 +136,7 @@ ENEMY_TYPES = {
                       minion=dict(kind="slime", count=2, every=12.0),
                       tint=(160, 230, 130), gore=(120, 220, 90)),
     "slimechunk": dict(name="Slime Chunk", hp=160, speed=0.75, dps=0, bounty=18, min_depth=0, weight=0,
-                       reach=0.6, entrance="none", grab="side", arrival="", slam=0.15, slam_radius=0.9, scale=1.4,
+                       reach=0.6, entrance="none", grab="side", arrival="", slam=0.06, slam_radius=0.9, scale=1.4,
                        pct_scale=0.2, tint=(160, 230, 130), gore=(150, 220, 70)),
     "vampirelord": dict(name="Vampire Lord", hp=2800, speed=0.6, dps=0, bounty=400, min_depth=0, weight=0,
                         reach=0.9, entrance="dig", grab="side", arrival="awakens", boss=True, lifesteal=0.03,
@@ -225,6 +231,13 @@ SLIME_SPLIT_HP = 0.35        # ...into blobs with this share of the slime's max 
 CHUNK_SPLIT_HP = 0.8         # the Slime King's chunks share this much of his max health between them
 CHUNK_WINDUP = 1.1           # a chunk's wind-up...
 CHUNK_COOLDOWN = 3.0         # ...and its rest after slamming (a little random, so they don't slam together)
+CHUNK_FLING = (2.5, 4.5)     # the split flings the chunks this far out across the board (tiles)...
+CHUNK_FLING_SPEED = 7.0      # ...sliding there this fast, and lying there dazed this long once it lands...
+CHUNK_DAZE = 1.5
+CHUNK_APART = 1.2            # ...landing at least this far from each other...
+CHUNK_CROWD = 2.5            # ...and each goes for a crew member the others aren't after (another chunk already on
+                             # them counts as this many tiles further off)...
+CHUNK_SPACE = 0.8            # ...and edges away from any other chunk closer than this, so their slams don't pile up
 PILE_SECS = 5.0              # its first "death" leaves a bone pile: smash it within this long...
 PILE_HP = 0.2                # ...(the pile has this share of its max health)...
 REFORM_HP = 0.5              # ...or it pulls itself together with this share
@@ -570,6 +583,13 @@ class Enemy:
             if math.hypot(tx - self.x, ty - self.y) > 0.15:
                 self.step_to(tx, ty, dt)
             return
+        dummy = world.lure(self)   # (Wren's Target Dummy: close by, it's the first thing they go for)
+        if dummy:
+            if math.hypot(dummy.x - self.x, dummy.y - self.y) <= self.spec["reach"] + 0.15:
+                world.dummy_grabbed(dummy, self)
+            else:
+                self.step_to(dummy.x, dummy.y, dt)
+            return
         target = world.nearest_free_miner(self.x, self.y)
         if not target:
             return
@@ -651,8 +671,21 @@ class Enemy:
         self.y = min(GRID - 0.05, max(0.05, self.y + uy * step))
 
     def update_chunk(self, world, dt):
-        """A Slime King chunk: creep up to the nearest crew member, wind up and slam (smaller than the King's)."""
+        """A Slime King chunk: flung out across the board by the split, it creeps up to a crew member of its own
+        (not one the other chunks are after), winds up and slams (smaller than the King's)."""
         self.hunt_time += dt
+        fling = getattr(self, "fling_to", None)
+        if fling:   # still sliding out to where the split threw it
+            dx, dy = fling[0] - self.x, fling[1] - self.y
+            dist = math.hypot(dx, dy)
+            if dist <= CHUNK_FLING_SPEED * dt:
+                self.x, self.y, self.fling_to = fling[0], fling[1], None
+                self.daze = CHUNK_DAZE
+                world.chunk_landed(self)
+            else:
+                self.x += dx / dist * CHUNK_FLING_SPEED * dt
+                self.y += dy / dist * CHUNK_FLING_SPEED * dt
+            return
         if self.windup > 0:
             self.windup -= dt
             if self.windup <= 0:
@@ -660,8 +693,11 @@ class Enemy:
                 self.cooldown = CHUNK_COOLDOWN * random.uniform(0.8, 1.3)
                 world.chunk_slam(self)
             return
+        if getattr(self, "daze", 0) > 0:   # (flung across the board: a moment to pull itself together)
+            self.daze -= dt
+            return
         self.cooldown = max(0.0, self.cooldown - dt)
-        target = world.nearest_crew(self.x, self.y)
+        target = world.chunk_target(self)
         if not target:
             return
         dx, dy = target.x - self.x, target.y - self.y
@@ -673,8 +709,16 @@ class Enemy:
                 self.windup = self.windup_total = CHUNK_WINDUP
             return
         step = min(dist - self.spec["reach"] * 0.8, self.spec["speed"] * getattr(self, "speed_mult", 1.0) * dt)
-        self.x = min(GRID - 0.05, max(0.05, self.x + dx / dist * step))
-        self.y = min(GRID - 0.05, max(0.05, self.y + dy / dist * step))
+        mx, my = dx / dist * step, dy / dist * step
+        for other in world.enemies:   # (and edging away from any chunk it's bumping into)
+            if other is not self and other.kind == self.kind:
+                ox, oy = self.x - other.x, self.y - other.y
+                gap = math.hypot(ox, oy)
+                if 0.001 < gap < CHUNK_SPACE:
+                    push = (CHUNK_SPACE - gap) / CHUNK_SPACE * self.spec["speed"] * dt
+                    mx, my = mx + ox / gap * push, my + oy / gap * push
+        self.x = min(GRID - 0.05, max(0.05, self.x + mx))
+        self.y = min(GRID - 0.05, max(0.05, self.y + my))
 
     def hover_and_dive(self, world, dt, pace):
         """A flying boss: drift about over the board, and when ready mark a crew member's spot to dive onto."""

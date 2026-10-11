@@ -547,11 +547,13 @@ def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
     """Mitts the Clay Golem: a lumpy, lumbering body of river clay, a glowing rune on its chest, eyes like coals,
     and two huge fists - hanging at its sides, or raised overhead as it winds up a slam."""
     clay, dark, light = (186, 116, 74), (132, 80, 50), (214, 150, 104)
+    if getattr(m, "fired", False):   # out of the Kiln: deep terracotta, glazed to a shine
+        clay, dark, light = (168, 84, 52), (98, 44, 28), (236, 170, 120)
     if grabbed:
         fx += struggle_shake(t)
     leaping = getattr(m, "task", "") == "leaping"
     up = m.anim if leaping else 0.0
-    walk = 0.0
+    walk = math.sin(t * 6 + m.x * 3) * 2 if getattr(m, "strolling", False) and not leaping else 0.0
     hop = getattr(m, "hop", 0.0)
     sw = 34 - 14 * hop   # (the shadow shrinks as he goes up)
     pygame.draw.ellipse(surf, (16, 12, 20), (fx - sw / 2, fy - 5 + 2 * hop, sw, 10 - 4 * hop))
@@ -584,20 +586,20 @@ def draw_clay_golem(surf, fonts, m, fx, fy, t, grabbed):
     if m.hp < m.max_hp:
         _hp_bar(surf, fx, fy - 58, m.hp / m.max_hp, GOOD, 30)
     if not leaping and getattr(m, "clicks", None) is not None:   # a pip per click of yours towards his next leap
-        _mitts_pips(surf, fx, fy - (66 if m.hp < m.max_hp else 60), getattr(m, "clicks", 0), t)
+        _mitts_pips(surf, fx, fy - (66 if m.hp < m.max_hp else 60), getattr(m, "clicks", 0), t, grabbed)
 
 
-def _mitts_pips(surf, x, y, clicks, t):
+def _mitts_pips(surf, x, y, clicks, t, grabbed=False):
     """Mitts' click meter: MITTS_CLICKS little pips over his head, lit one per click (all of them pulsing once
-    he's ready to go and just waiting to be let loose)."""
-    full = clicks >= MITTS_CLICKS
+    he's ready to go and just waiting to be let loose) - greyed while something has hold of him: he isn't listening."""
+    full = clicks >= MITTS_CLICKS and not grabbed
     pulse = 0.5 + 0.5 * math.sin(t * 10)
     gap = 6
     for i in range(MITTS_CLICKS):
         px = int(x - (MITTS_CLICKS - 1) * gap / 2 + i * gap)
         pygame.draw.circle(surf, (24, 16, 14), (px, y), 4)   # (a dark rim: it has to read over lava and ore)
         if i < clicks:
-            col = (255, int(190 + 50 * pulse), 110) if full else (230, 160, 100)
+            col = (120, 112, 106) if grabbed else (255, int(190 + 50 * pulse), 110) if full else (230, 160, 100)
             pygame.draw.circle(surf, col, (px, y), 3)
         else:
             pygame.draw.circle(surf, (90, 60, 44), (px, y), 2)
@@ -1557,6 +1559,108 @@ def draw_pet_chest(surf, fx, fy, t, gape=0.0, facing=1, lift=0.0):
             pygame.draw.circle(surf, (30, 20, 20), (fx + d + facing, ey), 1)
     if gape <= 0.05:
         pygame.draw.rect(surf, CHEST_GOLD, (fx - 2, box.y - 1, 4, 3))   # the clasp
+
+
+def draw_mudling(surf, fx, fy, t, anim=0.0, left=10.0):
+    """A Clay Pit mudling: a knee-high blob of wet clay with coal-dot eyes and stubby arms, swinging at the rock -
+    slumping as it starts to crumble."""
+    fx, fy = int(fx), int(fy)
+    slump = max(0.0, 1 - left / 1.5)   # (its last second and a half: sagging back into mud)
+    h = int(16 * (1 - 0.6 * slump))
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 8, fy - 3, 16, 6))
+    body = pygame.Rect(0, 0, 14 + int(6 * slump), h)
+    body.midbottom = (fx, fy + 1)
+    pygame.draw.ellipse(surf, (132, 80, 50), body.inflate(2, 2))
+    pygame.draw.ellipse(surf, (186, 116, 74), body)
+    pygame.draw.ellipse(surf, (214, 150, 104), (body.x + 3, body.y + 2, 5, 3))
+    for d in (-2, 2):
+        pygame.draw.circle(surf, (40, 24, 16), (fx + d, body.y + h // 3 + 1), 1)
+    swing = anim * 6
+    for d in (-1, 1):   # stubby arms - up, then down on the rock
+        pygame.draw.line(surf, (132, 80, 50), (fx + d * 6, body.y + h // 2), (fx + d * 9, body.y + h // 2 - 4 + swing), 3)
+
+
+def draw_kiln(surf, fx, fy, t, lit=True):
+    """The Hands Tent's kiln: a squat brick dome with a stubby chimney and a mouth glowing with the fire inside."""
+    fx, fy = int(fx), int(fy)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 18, fy - 5, 36, 10))
+    dome = pygame.Rect(fx - 16, fy - 30, 32, 32)
+    pygame.draw.ellipse(surf, (110, 54, 40), dome)
+    pygame.draw.rect(surf, (110, 54, 40), (fx - 16, fy - 14, 32, 14))
+    for row in range(4):   # brick courses
+        y = fy - 6 - row * 6
+        pygame.draw.line(surf, (80, 38, 28), (fx - 15 + row * 2, y), (fx + 15 - row * 2, y), 1)
+    pygame.draw.rect(surf, (90, 44, 32), (fx + 6, fy - 38, 6, 12))   # the chimney
+    mouth = pygame.Rect(fx - 7, fy - 13, 14, 12)
+    pygame.draw.ellipse(surf, (40, 20, 16), mouth)
+    if lit:
+        glow = 0.6 + 0.4 * math.sin(t * 5)
+        pygame.draw.ellipse(surf, (255, int(140 + 60 * glow), 60), mouth.inflate(-4, -4))
+        if (t * 1.3) % 1 < 0.6:
+            pygame.draw.circle(surf, (120, 116, 120), (fx + 9 + int((t * 8) % 4), fy - 42 - int((t * 20) % 8)), 3)
+
+
+def draw_clay_pit(surf, fx, fy, t, alive=True):
+    """The Hands Tent's clay pit: a pool of wet river clay, bubbling - and (once it's yours) a mudling peeping out."""
+    fx, fy = int(fx), int(fy)
+    pit = pygame.Rect(fx - 20, fy - 8, 40, 14)
+    pygame.draw.ellipse(surf, (90, 56, 36), pit.inflate(4, 4))
+    pygame.draw.ellipse(surf, (150, 96, 62), pit)
+    for k in range(3):   # bubbles
+        q = (t * 0.8 + k * 0.33) % 1
+        bx = fx - 10 + k * 10
+        pygame.draw.circle(surf, (190, 130, 90), (bx, fy - 2 - int(q * 3)), max(1, int(3 * (1 - q))), 1)
+    if alive:
+        peek = max(0.0, math.sin(t * 0.9)) ** 2
+        if peek > 0.05:
+            draw_mudling(surf, fx + 8, fy - 1, t, 0.0, 10.0 * peek)
+
+
+def draw_target_dummy(surf, fx, fy, t):
+    """Wren's Target Dummy: a straw figure on a post with a crossbar for arms, a sackcloth head and a red-and-white
+    target painted on its chest (and a fuse poking out of the stuffing)."""
+    fx, fy = int(fx), int(fy)
+    sway = math.sin(t * 2 + fx * 0.05) * 1.5
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 10, fy - 3, 20, 7))
+    pygame.draw.line(surf, (96, 66, 40), (fx, fy), (fx + sway, fy - 40), 3)   # the post
+    pygame.draw.line(surf, (96, 66, 40), (fx - 13 + sway, fy - 30), (fx + 13 + sway, fy - 30), 3)   # arms
+    body = pygame.Rect(0, 0, 18, 22)
+    body.midbottom = (fx + sway, fy - 14)
+    pygame.draw.ellipse(surf, (110, 86, 50), body.inflate(2, 2))
+    pygame.draw.ellipse(surf, (214, 182, 112), body)
+    for r, col in ((7, (210, 50, 50)), (5, (245, 240, 230)), (3, (210, 50, 50))):
+        pygame.draw.circle(surf, col, (int(fx + sway), body.centery), r)
+    head = (int(fx + sway), fy - 41)
+    pygame.draw.circle(surf, (110, 86, 50), head, 7)
+    pygame.draw.circle(surf, (200, 172, 120), head, 6)
+    pygame.draw.line(surf, (110, 86, 50), (head[0] - 3, head[1] - 1), (head[0] - 1, head[1] + 1), 1)   # stitched eyes
+    pygame.draw.line(surf, (110, 86, 50), (head[0] + 1, head[1] - 1), (head[0] + 3, head[1] + 1), 1)
+    for k in range(3):   # straw poking out
+        pygame.draw.line(surf, (230, 200, 120), (body.right - 2, body.y + 6 + k * 4), (body.right + 3, body.y + 4 + k * 5), 1)
+    spark = (fx + sway - 9, body.y + 2)   # the fuse
+    pygame.draw.line(surf, (40, 30, 30), (fx + sway - 5, body.y + 5), spark, 1)
+    if (t * 6) % 1 < 0.5:
+        pygame.draw.circle(surf, (255, 210, 90), spark, 2)
+
+
+def draw_brazier(surf, fx, fy, t, lit=True):
+    """The Combat Tent's brazier: an iron bowl on three legs, a bundle of pitch-soaked arrows leaning on it, and
+    (once it's yours) a fire burning in it."""
+    fx, fy = int(fx), int(fy)
+    pygame.draw.ellipse(surf, (16, 12, 20), (fx - 14, fy - 4, 28, 9))
+    for d in (-9, 0, 9):   # legs
+        pygame.draw.line(surf, (50, 46, 50), (fx + d, fy), (fx + d * 0.6, fy - 16), 3)
+    bowl = pygame.Rect(fx - 13, fy - 24, 26, 12)
+    pygame.draw.ellipse(surf, (70, 64, 70), bowl)
+    pygame.draw.ellipse(surf, (40, 36, 42), bowl, 2)
+    for k in range(4):   # the arrows leaning against it
+        x = fx + 10 + k * 2
+        pygame.draw.line(surf, (150, 110, 70), (x, fy), (x + 6, fy - 30), 2)
+        pygame.draw.polygon(surf, (60, 50, 50), [(x + 5, fy - 32), (x + 8, fy - 31), (x + 7, fy - 28)])
+    if lit:
+        for k, (col, h) in enumerate((((255, 120, 40), 18), ((255, 190, 70), 12), ((255, 245, 190), 6))):
+            flick = math.sin(t * (9 + k * 3)) * 2
+            pygame.draw.polygon(surf, col, [(fx - 9 + k * 3, fy - 22), (fx + flick, fy - 22 - h), (fx + 9 - k * 3, fy - 22)])
 
 
 def draw_ledger_desk(surf, bx, by, t, lit=True):

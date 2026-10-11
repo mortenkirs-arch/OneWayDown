@@ -17,7 +17,7 @@ from ..effects import Particle
 from ..icons import draw_icon, draw_padlock
 from ..iso import draw_cube, iso, origin_at, point_in_poly
 from ..miners import CAMP_LOOKS, Miner
-from ..sprites import draw_ledger_desk, draw_miner, draw_pet_chest
+from ..sprites import draw_brazier, draw_clay_pit, draw_kiln, draw_ledger_desk, draw_miner, draw_pet_chest, draw_target_dummy
 from ..ui import Button, draw_glow, draw_panel, draw_text, wrap_text
 from ..upgrades import BRANCHES
 from ..util import fmt, shade
@@ -435,6 +435,14 @@ class CampScene(Scene):
         if key == "chompers":   # dozing by the tent - and now and then, a big yawn
             yawn = 0.0 if faded else max(0.0, math.sin(t * 0.6)) ** 6
             draw_pet_chest(s, x, y, t, yawn)
+        elif key == "dummy":
+            draw_target_dummy(s, x, y, t)
+        elif key == "brazier":
+            draw_brazier(s, x, y, t, lit=not faded)
+        elif key == "kiln":
+            draw_kiln(s, x, y, t, lit=not faded)
+        elif key == "claypit":
+            draw_clay_pit(s, x, y, t, alive=not faded)
         else:
             draw_ledger_desk(s, x, y, t, lit=not faded)
 

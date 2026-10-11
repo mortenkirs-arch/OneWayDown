@@ -83,8 +83,11 @@ class PlayScene(Scene):
                                                        event.pos[0], event.pos[1] - 30, MUTED, life=1.0, size=22))
                 return
             cursed = self.world.pick_cursed(event.pos)
-            if cursed:   # lifting a Archlich's curse comes first
-                self.world.lift_curse(cursed)
+            if cursed:   # lifting an Archlich's curse (or freeing someone caged or entranced) comes first
+                if cursed.curse > 0:
+                    self.world.lift_curse(cursed)
+                else:
+                    self.world.free_held(cursed)
                 return
             enemy = pick_enemy(self.world, event.pos, time.time())
             if enemy:   # enemies take priority over blocks
@@ -368,6 +371,17 @@ class PlayScene(Scene):
     def boss_tip(self, boss):
         """What to do about this boss right now."""
         w = self.world
+        held = {m.held["kind"] for m in w.miners if getattr(m, "held", None)}
+        if "cage" in held:
+            return "Click the caged crew member - three blows break the ribs!"
+        if "trance" in held:
+            return "Click the entranced crew member to snap them out of it!"
+        if getattr(boss, "gaze", None):
+            return f"Its eye has fixed on {boss.gaze[0].name} - strike the eye to break its gaze!"
+        if any(getattr(m, "pulled", None) for m in w.miners):
+            return "Silk lash - she's reeling someone in to her slam!"
+        if boss.kind == "slimeking" and boss.slam_at and boss.windup > 0:
+            return "He's bouncing over to belly-flop on your crew!"
         if boss.kind == "zombieking":
             if boss.enraged:
                 return "ENRAGED - he winds up and slams much faster!"
@@ -381,18 +395,18 @@ class PlayScene(Scene):
                 return "He's a swarm of bats - get ready for where he lands!"
             if boss.mode == "bite":
                 return f"He's feeding on {boss.victim.name} - hit him hard to make him let go!"
-            return "Click him!  Stay out of the red when he slams"
+            return "Click him!"
         if boss.kind == "lich":
             if any(m.curse > 0 for m in w.miners):
                 return "Click the cursed crew member to lift the curse!"
             shield = round(100 * (1 - boss.dmg_taken))
             if shield:
                 return f"His wisps shield him ({shield}% less damage) - kill them!"
-            return "Click him!  Stay out of the red when he slams"
+            return "Click him!  He raises the dead to fight for him"
         if boss.kind == "greatbat":
             if boss.slam_at:
-                return "It's diving - get out of the red!"
-            return "It dives on whoever it marks, and its screech stuns the crew nearby"
+                return "It's diving at your crew!"
+            return "It dives on whoever it marks; its screech stuns and its wings blow the crew back"
         if boss.kind == "bonetyrant":
             if boss.mode == "pile":
                 return "Smash the bones before they pull themselves together!"
@@ -410,7 +424,7 @@ class PlayScene(Scene):
             if w.void_pools:
                 return "Its pools eat at your crew - click them away!"
             return "Only its open eye feels a blow - and when it inhales, strike the eye"
-        return "Click it!  Stay out of the red when it slams"
+        return "Click it!"
 
     def draw_hud(self, surf, mouse):
         w = self.world

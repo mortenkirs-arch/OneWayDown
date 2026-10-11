@@ -81,6 +81,26 @@ ITEMS = {
                          "upgrade you buy just never makes it onto the page.",
                    does=["1 in 6 upgrades you buy turn out free", "...the gold comes straight back to you",
                          "Nobody asks where it went"]),
+    "dummy": dict(name="Target Dummy", tent="combat", pos=(2.3, 9.45),
+                  blurb="Straw, sackcloth and a painted target - and a fair bit of blasting powder in the stuffing. "
+                        "Wren plants one now and then, and monsters can't leave it alone.",
+                  does=["Wren plants a dummy every 20s", "Monsters close by go for it, not the crew",
+                        "It blows up when one grabs it...", "...hurting them, and breaking up the rock beneath"]),
+    "kiln": dict(name="Kiln", tent="hands", pos=(6.95, 4.95),
+                 blurb="A squat brick kiln, roaring day and night. Mitts sat in it for a week and came out glazed, "
+                       "hard as a bell - and in a mood to shove.",
+                 does=["No monster can get a grip on Mitts", "His landings shove monsters back...",
+                       "...and break the grip of any that had hold of the crew"]),
+    "claypit": dict(name="Clay Pit", tent="hands", pos=(8.5, 5.45),
+                    blurb="A bubbling pit of wet river clay. Every time Mitts slams, a little of it comes along for "
+                          "the ride - and gets up and starts digging.",
+                    does=["Every slam throws up a mudling (two at most)", "Mudlings dig at the nearest block...",
+                          "...hard, for about 10 seconds", "Then they crumble back into mud"]),
+    "brazier": dict(name="Fire Arrows", tent="combat", pos=(6.2, 7.3),
+                    blurb="A brazier by the tent and a bundle of pitch-soaked arrows. Wren lights every few before "
+                          "she looses them.",
+                    does=["Every 4th arrow is a fire arrow", "It bursts where it lands...",
+                          "...hitting the monsters round its target too"]),
 }
 
 

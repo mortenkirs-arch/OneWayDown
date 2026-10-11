@@ -16,7 +16,7 @@ from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_PEEK_SECS, BRO_SURF
 from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
-from .sprites import draw_bone, draw_pet_chest, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
+from .sprites import draw_bone, draw_mudling, draw_pet_chest, draw_target_dummy, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
 from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
                            SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
@@ -102,6 +102,10 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
         items.append((BOILER_POS[0] + BOILER_POS[1] - 0.4, 2, "boiler", None))
     if w.chomper:
         items.append((w.chomper["x"] + w.chomper["y"] - 0.5, 2, "chompers", w.chomper))
+    for d in w.dummies:   # (Wren's Target Dummies)
+        items.append((d.x + d.y - 0.5, 2, "dummy", d))
+    for mud in w.mudlings:   # (the Clay Pit's mudlings)
+        items.append((mud.x + mud.y - 0.5, 2, "mudling", mud))
     peeker = bro_peeker(w)
     if peeker:
         items.append((peeker.x + peeker.y - 0.5, 2, "enemy", peeker))
@@ -141,6 +145,12 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             draw_ghost(surf, fonts, data, r + quake_lift(w, data.x, data.y) + ghost_lift(w, data), t, w.lv("diamond"))
         elif kind == "bomb":
             draw_bomb(surf, data, w, t)
+        elif kind == "mudling":
+            sx, sy = iso(data.x, data.y, w.column_height(*w.cell_of(data.x, data.y)) + r)
+            draw_mudling(surf, sx, sy, t, data.anim, data.left)
+        elif kind == "dummy":
+            sx, sy = iso(data.x, data.y, w.column_height(*w.cell_of(data.x, data.y)) + r)
+            draw_target_dummy(surf, sx, sy, t)
         elif kind == "chompers":
             z = w.column_height(*w.cell_of(data["x"], data["y"])) + r
             sx, sy = iso(data["x"], data["y"], z)
@@ -160,12 +170,14 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
     draw_blast_zones(surf, w, t)
     draw_webs(surf, w)
     draw_slam_zones(surf, w, t)
+    draw_hazards(surf, w, t)
     draw_phantom(surf, w, t)
     draw_steam(surf, w, t)
     draw_boss_auras(surf, w, t)
     draw_shade_auras(surf, w, t)
     draw_bro_mound(surf, w, t)
     draw_curses(surf, w, t)
+    draw_boss_tricks(surf, w, t)
     draw_void_inhale(surf, w, t)
     draw_stuns(surf, w, t)
     draw_bone_throws(surf, w, t)
@@ -855,6 +867,69 @@ def draw_bone_throws(surf, world, t):
         x, y = arc(q)
         draw_bone(surf, x, y, age * 16, 13, 5)
     surf.blit(overlay, (0, 0))
+
+
+def draw_hazards(surf, world, t):
+    """Bosses' marked spots: a ring on the ground filling in as it nears going off - green where the dead will reach
+    up, brown where the ground will give way, red where a boulder will land."""
+    if not world.hazards:
+        return
+    from .world import HAZARD_WARN, HAZARDS
+    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    colours = {"grasp": (120, 220, 90), "sinkhole": (190, 130, 70), "rock": (255, 70, 50)}
+    for x, y, kind, left, _ in world.hazards:
+        full = _ground_ellipse(world, x, y, HAZARDS[kind]["radius"])
+        q = 1 - left / HAZARD_WARN
+        col = colours[kind]
+        pulse = 0.5 + 0.5 * math.sin(t * (10 + 20 * q))
+        pygame.draw.ellipse(overlay, (*col, int(40 + 50 * pulse)), full)
+        pygame.draw.ellipse(overlay, (*col, 130), full.inflate(-full.w * (1 - q), -full.h * (1 - q)))
+        pygame.draw.ellipse(overlay, (*col, 220), full, 2)
+    surf.blit(overlay, (0, 0))
+
+
+def draw_boss_tricks(surf, world, t):
+    """A strand of silk reeling a crew member in, The Void Maw's gaze, rib cages, and the entranced."""
+    for m in world.miners:
+        pulled = getattr(m, "pulled", None)
+        if pulled and pulled[0] in world.enemies:
+            bx, by = enemy_anchor(pulled[0], world.rise, t)
+            mx, my = world.entity_screen(m, 26)
+            pygame.draw.line(surf, (240, 240, 250), (bx, by), (mx, my), 2)
+        held = getattr(m, "held", None)
+        if not held or m.state == "down":
+            continue
+        fx, fy = world.entity_screen(m)
+        if held["kind"] == "cage":   # ribs curving up round them
+            for k in range(5):
+                x = fx - 16 + k * 8
+                pygame.draw.line(surf, (60, 50, 44), (x, fy + 2), (x + (8 - k * 4) * 0.4, fy - 50), 5)
+                pygame.draw.line(surf, (235, 228, 205), (x, fy + 2), (x + (8 - k * 4) * 0.4, fy - 50), 3)
+            pygame.draw.arc(surf, (235, 228, 205), (fx - 20, fy - 62, 40, 24), 0, math.pi, 3)
+            for k in range(held["clicks"]):   # (the blows still to land)
+                pygame.draw.circle(surf, (235, 228, 205), (fx - 8 + k * 8, fy - 70), 3)
+        else:   # entranced: little pink hearts circling their head
+            for k in range(3):
+                a = t * 3 + k * math.tau / 3
+                hx, hy = fx + math.cos(a) * 14, fy - 52 + math.sin(a) * 4
+                pygame.draw.circle(surf, (255, 120, 190), (int(hx - 2), int(hy)), 3)
+                pygame.draw.circle(surf, (255, 120, 190), (int(hx + 2), int(hy)), 3)
+                pygame.draw.polygon(surf, (255, 120, 190), [(hx - 5, hy + 1), (hx + 5, hy + 1), (hx, hy + 6)])
+    for boss in world.enemies:
+        gaze = getattr(boss, "gaze", None)
+        if not gaze or gaze[0].state == "down":
+            continue
+        from .boss_sprites import void_eye_screen
+        from .world import GAZE_SECS
+        eye = void_eye_screen(boss, world.rise)
+        if not eye:
+            continue
+        q = min(1.0, gaze[1] / GAZE_SECS)
+        mx, my = world.entity_screen(gaze[0], 30)
+        overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        pygame.draw.line(overlay, (190, 120, 255, int(80 + 150 * q)), eye[:2], (mx, my), 2 + int(6 * q))
+        pygame.draw.circle(overlay, (220, 160, 255, int(60 + 120 * q)), (int(mx), int(my)), 10 + int(10 * q), 2)
+        surf.blit(overlay, (0, 0))
 
 
 def draw_slam_zones(surf, world, t):
