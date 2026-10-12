@@ -15,7 +15,7 @@ from .enemies import (BONE_THROW_SECS, BOSS_SLAM_RADIUS, BRO_PEEK_SECS, BRO_SURF
                       SHADE_RADIUS, VOID_INHALE_RADIUS, VOID_INHALE_SECS)
 from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
-from .iso import cube_faces, draw_cube, iso, point_in_poly
+from .iso import cube_faces, draw_cube, iso, origin_at, point_in_poly
 from .sprites import draw_banner, draw_bone, draw_lightning_rod, draw_mudling, draw_pet_chest, draw_target_dummy, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
 from .world_layout import (BALLISTA_POS, BOILER_POS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
                            SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
@@ -33,6 +33,82 @@ def _get_slab_fade():
         for i in range(160):
             _slab_fade.fill((10, 8, 16, int(255 * i / 160)), (0, i, W, 1))
     return _slab_fade
+
+
+
+class EffectLayer:
+    """A see-through layer the size of the screen for an effect to draw on - with the pygame.draw functions, as
+    layer.ellipse(colour, rect, width) and so on - then blend(): only the part drawn on is blended onto the screen,
+    and cleared again. One is shared by every effect, every frame: a fresh screen-sized layer blended whole for each
+    effect was half of a boss fight's frame in a browser."""
+
+    def __init__(self):
+        self.surf, self.box = None, None
+
+    def begin(self, screen):
+        if self.surf is None or self.surf.get_size() != screen.get_size():
+            self.surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        elif self.box:   # (drawn on but never blended: start clean)
+            self.surf.fill((0, 0, 0, 0), self.box)
+        self.box = None
+        return self
+
+    def __getattr__(self, name):   # layer.circle(...): pygame.draw.circle on the layer, noting where it landed
+        draw = getattr(pygame.draw, name)
+
+        def drawn(*args, **kwargs):
+            rect = draw(self.surf, *args, **kwargs)
+            self.box = rect if self.box is None else self.box.union(rect)
+            return rect
+        return drawn
+
+    def blend(self, screen):
+        if self.box:
+            box = self.box.clip(self.surf.get_rect())
+            screen.blit(self.surf, box, box)
+            self.surf.fill((0, 0, 0, 0), box)
+        self.box = None
+
+
+_effect_layer = EffectLayer()
+
+
+def effect_layer(surf):
+    """The shared EffectLayer, ready for an effect to draw on (see EffectLayer)."""
+    return _effect_layer.begin(surf)
+
+ANIMATED_DECO = ("lava", "glow")   # biome details that move, so they're drawn fresh each frame over a block's sprite
+SPRITE_PAD = 24                    # room around a block's sprite for details poking out (crystal shards)
+SPRITE_CACHE_MAX = 800             # (two layers are 200 blocks: past this, start again)
+_block_sprites = {}
+_glow_layouts = {}
+
+
+def block_sprite(x, y, depth, color, fleck, deco, bones, dim):
+    """A block drawn once and kept: its cube, flecks and - unless they move - its biome details and bones, as
+    (image, offset from the cube's back corner, iso(x, y, z)). Redrawing ~200 cubes polygon by polygon every
+    frame was most of the frame, which a browser (Python in WebAssembly) feels most."""
+    key = (x, y, depth, color, fleck, deco, bones, dim)
+    sprite = _block_sprites.get(key)
+    if sprite:
+        return sprite
+    if len(_block_sprites) >= SPRITE_CACHE_MAX:
+        _block_sprites.clear()
+    surf = pygame.Surface((TILE_W + 2 * SPRITE_PAD, TILE_H + BLOCK_H + 2 * SPRITE_PAD), pygame.SRCALPHA)
+    ax, ay = SPRITE_PAD + TILE_W // 2, SPRITE_PAD   # where the cube's back corner lands in it
+    with origin_at((ax - (x - y) * TILE_W / 2, ay - (x + y) * TILE_H / 2)):
+        faces = draw_cube(surf, x, y, 0, color, fleck, seed=hash((x, y, depth)))
+        if deco not in ANIMATED_DECO:
+            if deco:
+                draw_block_deco(surf, deco, faces, x, y, depth, 0.0, dim)
+            if bones:
+                draw_bones(surf, faces, x, y, depth, dim)
+    crop = surf.get_bounding_rect()
+    image = surf.subsurface(crop).copy()
+    if pygame.display.get_surface():
+        image = image.convert_alpha()
+    sprite = _block_sprites[key] = (image, (crop.x - ax, crop.y - ay))
+    return sprite
 
 
 def pick_block(world, pos):
@@ -124,26 +200,35 @@ def draw_board(surf, world, fonts, hover=None, hover_enemy=None):
             color = block_color(b.kind, w.depth + layer)
             if layer == 1:
                 color = shade(color, 0.7)
-            faces = draw_cube(surf, x, y, z, color, spec.get("fleck"),
-                              seed=hash((x, y, w.depth + layer)))
             # biome details and bones on both layers (the one below dimmer), seeded by the block's own layer
             dim = NEXT_DIM if layer else 1.0
             deco = biome_at(w.depth + layer)["deco"]
-            if deco:
-                draw_block_deco(surf, deco, faces, x, y, w.depth + layer, t, dim)
-            if b.bones:
-                draw_bones(surf, faces, x, y, w.depth + layer, dim)
+            image, (ox, oy) = block_sprite(x, y, w.depth + layer, color, spec.get("fleck"), deco, b.bones, dim)
+            sx, sy = iso(x, y, z)
+            surf.blit(image, (round(sx + ox), round(sy + oy)))
+            if deco == "glow":   # (the static details, and bones under them, are in the sprite; these move)
+                draw_glow(surf, glow_lights(x, y, w.depth + layer), sx, sy, t, dim)
+            elif deco == "lava":
+                for speed, steps, ahead in lava_faces(x, y, w.depth + layer):
+                    paint_lava(surf, speed, steps, t + ahead, dim, sx, sy)
+            if b.bones and deco in ANIMATED_DECO:
+                draw_bones(surf, cube_faces(x, y, z), x, y, w.depth + layer, dim)
             if layer == 0:
-                draw_damage(surf, b, x, y, z)
-                if w.glazed and w.is_glazed((x, y)):   # (Glazed Fists)
-                    draw_glaze(surf, faces, t, x, y)
-                if b.artifact:
-                    draw_artifact_glint(surf, faces, t, x, y)
-                if w.golden and w.golden[0] == (x, y):
-                    draw_golden_block(surf, faces, w.golden[1], t)
-                if hover and hover[0] == (x, y):
-                    for name, poly in faces.items():
-                        pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
+                draw_damage(surf, b, x, y, sx, sy)
+                glazed = w.glazed and w.is_glazed((x, y))   # (Glazed Fists)
+                golden = w.golden and w.golden[0] == (x, y)
+                hovered = hover and hover[0] == (x, y)
+                if glazed or b.artifact or golden or hovered:   # (only these need the faces themselves)
+                    faces = cube_faces(x, y, z)
+                    if glazed:
+                        draw_glaze(surf, faces, t, x, y)
+                    if b.artifact:
+                        draw_artifact_glint(surf, faces, t, x, y)
+                    if golden:
+                        draw_golden_block(surf, faces, w.golden[1], t)
+                    if hovered:
+                        for name, poly in faces.items():
+                            pygame.draw.polygon(surf, (255, 255, 255), poly, 3 if name == hover[1] else 1)
         elif kind == "miner":   # rides the quake heave with the block underfoot (and goes down with the floor)
             draw_miner(surf, fonts, data, r + quake_lift(w, data.x, data.y) - entity_drop(w, data), t,
                        w.lv("diamond"), spirit=w.lv("spiritlantern") > 0)
@@ -243,33 +328,36 @@ def face_point(face):
 
 
 def draw_lava(surf, face, rng, t, side=False, dim=1.0):
+    """Lava in one face of a block (see lava_steps), drawn at time t."""
+    speed, steps = lava_steps(face, rng, side)
+    paint_lava(surf, speed, steps, t, dim)
+
+
+def lava_steps(face, rng, side=False):
     """Lava in one face of a block, placed anywhere on it. On the top: a crack wandering across, a crack forking
     out from a point, a small bubbling pool, or a scatter of short cracks. On a side: a seam running down from
-    the top edge, a short drip, or a glowing pocket in the rock."""
+    the top edge, a short drip, or a glowing pocket in the rock. Worked out from `rng` as (how fast it glows,
+    the steps to draw it), which paint_lava draws at any moment - so a block's lava can be worked out once."""
     on = face_point(face)
-    glow = 0.7 + 0.3 * math.sin(t * (2 + rng.random() * 2))
-    heat = max(dim, 0.85)
-    hot = shade((255, int(110 + 70 * glow), 40), heat)
-    crust, bright = shade((120, 30, 10), dim), shade((255, 230, 150), heat)
+    speed = 2 + rng.random() * 2
+    steps = []
 
-    def crack(u, v, a, steps, step, width=2):
+    def crack(u, v, a, n, step, width=2):
         pts = [(u, v)]
-        for _ in range(steps):
+        for _ in range(n):
             a += rng.uniform(-0.7, 0.7)
             u = min(0.92, max(0.08, u + math.cos(a) * step))
             v = min(0.92, max(0.08, v + math.sin(a) * step))
             pts.append((u, v))
         pts = [on(*q) for q in pts]
-        pygame.draw.lines(surf, crust, False, [(px, py + 1) for px, py in pts], width + 2)
-        pygame.draw.lines(surf, hot, False, pts, width)
+        steps.append(("crack", pts, width))
         return pts
 
     def pool(u, v, r):
         ring = [on(u + math.cos(k / 8 * math.tau) * r * rng.uniform(0.75, 1.2),
                    v + math.sin(k / 8 * math.tau) * r * rng.uniform(0.75, 1.2)) for k in range(8)]
-        pygame.draw.polygon(surf, crust, ring)
         cx, cy = sum(p[0] for p in ring) / 8, sum(p[1] for p in ring) / 8
-        pygame.draw.polygon(surf, hot, [(cx + (px - cx) * 0.7, cy + (py - cy) * 0.7) for px, py in ring])
+        steps.append(("pool", ring, [(cx + (px - cx) * 0.7, cy + (py - cy) * 0.7) for px, py in ring]))
         return cx, cy
 
     if side:
@@ -282,11 +370,10 @@ def draw_lava(surf, face, rng, t, side=False, dim=1.0):
                 crack(u, rng.uniform(0.3, 0.5), down + rng.choice((-1, 1)) * 0.8, 2, 0.12, 1)
         elif shape == "drip":   # a short crack with lava dribbling out of the bottom
             px, py = crack(rng.uniform(0.2, 0.8), 0.05, down, rng.randint(1, 2), 0.14)[-1]
-            drop = (t * 0.6 + rng.random()) % 1
-            pygame.draw.circle(surf, hot, (int(px), int(py + 2 + drop * 8)), 2)
+            steps.append(("drip", px, py, rng.random()))
         else:                   # a pocket of lava glowing in the rock
             pool(rng.uniform(0.3, 0.7), rng.uniform(0.35, 0.7), rng.uniform(0.09, 0.13))
-        return
+        return speed, steps
     shape = rng.choice(("wander", "wander", "fork", "pool", "scatter"))
     if shape == "wander":   # from near one edge across to somewhere else, maybe with a branch
         u, v = rng.choice([(0.1, rng.uniform(0.2, 0.8)), (rng.uniform(0.2, 0.8), 0.1)])
@@ -300,18 +387,44 @@ def draw_lava(surf, face, rng, t, side=False, dim=1.0):
         for k in range(rng.randint(2, 4)):
             a = base + k * math.tau / 3 + rng.uniform(-0.4, 0.4)
             crack(u, v, a, rng.randint(2, 3), rng.uniform(0.08, 0.13))
-        pygame.draw.circle(surf, bright, [int(c) for c in on(u, v)], 2)
+        steps.append(("spot", *on(u, v)))
     elif shape == "pool":   # a little pool of lava with a dark crust, bubbling
         u, v = rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7)
         cx, cy = pool(u, v, rng.uniform(0.1, 0.17))
-        bubble = (t * 1.5 + rng.random()) % 1   # a bubble swelling and popping
-        pygame.draw.circle(surf, bright, (int(cx + rng.uniform(-2, 2)), int(cy)), int(1 + 2 * bubble))
+        phase = rng.random()
+        steps.append(("bubble", cx + rng.uniform(-2, 2), cy, phase))
         if rng.random() < 0.6:   # a crack leaking out of it
             crack(u, v, rng.uniform(0, math.tau), 2, 0.12, 1)
     else:                   # a scatter of short, thin cracks
         for _ in range(rng.randint(2, 4)):
             crack(rng.uniform(0.15, 0.85), rng.uniform(0.15, 0.85), rng.uniform(0, math.tau), rng.randint(1, 2),
                   rng.uniform(0.07, 0.11), 1)
+    return speed, steps
+
+
+def paint_lava(surf, speed, steps, t, dim=1.0, dx=0.0, dy=0.0):
+    """Draw lava worked out by lava_steps at time t (glowing, dripping, bubbling), shifted by (dx, dy)."""
+    glow = 0.7 + 0.3 * math.sin(t * speed)
+    heat = max(dim, 0.85)
+    hot = shade((255, int(110 + 70 * glow), 40), heat)
+    crust, bright = shade((120, 30, 10), dim), shade((255, 230, 150), heat)
+    for step in steps:
+        kind = step[0]
+        if kind == "crack":
+            pts, width = [(px + dx, py + dy) for px, py in step[1]], step[2]
+            pygame.draw.lines(surf, crust, False, [(px, py + 1) for px, py in pts], width + 2)
+            pygame.draw.lines(surf, hot, False, pts, width)
+        elif kind == "pool":
+            pygame.draw.polygon(surf, crust, [(px + dx, py + dy) for px, py in step[1]])
+            pygame.draw.polygon(surf, hot, [(px + dx, py + dy) for px, py in step[2]])
+        elif kind == "drip":
+            drop = (t * 0.6 + step[3]) % 1
+            pygame.draw.circle(surf, hot, (int(step[1] + dx), int(step[2] + dy + 2 + drop * 8)), 2)
+        elif kind == "spot":
+            pygame.draw.circle(surf, bright, (int(step[1] + dx), int(step[2] + dy)), 2)
+        else:   # a bubble swelling and popping
+            bubble = (t * 1.5 + step[3]) % 1
+            pygame.draw.circle(surf, bright, (int(step[1] + dx), int(step[2] + dy)), int(1 + 2 * bubble))
 
 
 def draw_side_deco(surf, deco, face, rng, t, dim):
@@ -348,6 +461,74 @@ def draw_side_deco(surf, deco, face, rng, t, dim):
             px, py = on(rng.uniform(0.15, 0.85), rng.uniform(0.2, 0.85))
             col = shade((int(60 + 80 * pulse), int(110 + 90 * pulse), 255), dim)
             pygame.draw.circle(surf, col, (int(px), int(py)), 2)
+
+
+def glow_lights(x, y, depth):
+    """The Abyss's faint lights on a block, as [(dx, dy, phase)] from its back corner: the same rolls
+    draw_block_deco makes for "glow", worked out once instead of with fresh random generators every frame."""
+    key = (x, y, depth)
+    lights = _glow_layouts.get(key)
+    if lights is not None:
+        return lights
+    if len(_glow_layouts) >= SPRITE_CACHE_MAX:
+        _glow_layouts.clear()
+    faces = cube_faces(x, y, 0)
+    bx, by = faces["top"][0]
+    lights = _glow_layouts[key] = []
+    rng = random.Random(hash((x, y, depth, 7)))
+    if rng.random() > 0.38:
+        return lights
+    sides = [rng.random() < SIDE_SHARE for _ in range(2)]
+    for face, show in zip(("left", "right"), sides):
+        if show:   # (as draw_side_deco, whose clock runs x * 0.7 ahead)
+            srng = random.Random(hash((x, y, depth, face)))
+            phase, on = x * 1.4 + srng.random() * 6, face_point(faces[face])
+            for _ in range(2):
+                px, py = on(srng.uniform(0.15, 0.85), srng.uniform(0.2, 0.85))
+                lights.append((px - bx, py - by, phase))
+    top = faces["top"]
+    cx, cy = sum(p[0] for p in top) / 4, sum(p[1] for p in top) / 4
+    for _ in range(2):
+        gx, gy = cx + rng.uniform(-14, 14), cy + rng.uniform(-5, 5)
+        lights.append((gx - bx, gy - by, x + y * 1.7))
+    return lights
+
+
+_lava_layouts = {}
+
+
+def lava_faces(x, y, depth):
+    """A magma block's lava, worked out once: [(speed, steps, clock offset)] for each face showing some (sides
+    first, then the top - the rolls and order draw_block_deco makes for "lava"), from the block's back corner."""
+    key = (x, y, depth)
+    faces_lava = _lava_layouts.get(key)
+    if faces_lava is not None:
+        return faces_lava
+    if len(_lava_layouts) >= SPRITE_CACHE_MAX:
+        _lava_layouts.clear()
+    faces = cube_faces(x, y, 0)
+    bx, by = faces["top"][0]
+    faces_lava = _lava_layouts[key] = []
+    rng = random.Random(hash((x, y, depth, 7)))
+    if rng.random() > LAVA_SHARE:
+        return faces_lava
+    sides = [rng.random() < SIDE_SHARE for _ in range(2)]
+    corner = {face: [(px - bx, py - by) for px, py in poly] for face, poly in faces.items()}
+    for face, show in zip(("left", "right"), sides):
+        if show:
+            speed, steps = lava_steps(corner[face], random.Random(hash((x, y, depth, face))), side=True)
+            faces_lava.append((speed, steps, x * 0.7))
+    speed, steps = lava_steps(corner["top"], rng)
+    faces_lava.append((speed, steps, x * 1.3 + y))
+    return faces_lava
+
+
+def draw_glow(surf, lights, sx, sy, t, dim):
+    """A block's Abyss lights (see glow_lights), pulsing, with its back corner at (sx, sy)."""
+    for dx, dy, phase in lights:
+        pulse = 0.5 + 0.5 * math.sin(t * 2 + phase)
+        col = shade((int(60 + 80 * pulse), int(110 + 90 * pulse), 255), dim)
+        pygame.draw.circle(surf, col, (int(sx + dx), int(sy + dy)), 2)
 
 
 def draw_block_deco(surf, deco, faces, x, y, depth, t, dim=1.0):
@@ -690,7 +871,7 @@ def draw_webs(surf, world):
     """Broodmother: sticky webs on the ground her slams hit; they fade as they wear off."""
     if not world.webs:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for (x, y), left in world.webs.items():
         a = int(150 * min(1.0, left / 1.5))
         z = world.column_height(x, y) + world.rise
@@ -698,39 +879,39 @@ def draw_webs(surf, world):
         corners = [iso(x + u, y + v, z) for u, v in ((0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9))]
         mids = [iso(x + u, y + v, z) for u, v in ((0.5, 0.08), (0.92, 0.5), (0.5, 0.92), (0.08, 0.5))]
         for p in corners + mids:   # spokes
-            pygame.draw.line(overlay, (235, 235, 245, a), c, p, 1)
+            overlay.line((235, 235, 245, a), c, p, 1)
         for k in (0.35, 0.7):      # rings
             ring = [(c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k)
                     for pair in zip(corners, mids) for p in pair]
-            pygame.draw.polygon(overlay, (235, 235, 245, a), ring, 1)
-    surf.blit(overlay, (0, 0))
+            overlay.polygon((235, 235, 245, a), ring, 1)
+    overlay.blend(surf)
 
 
 def draw_boss_auras(surf, world, t):
     """Zombie King: a sickly green ring of command, and a glow under every zombie he has rallied.
     Archlich: violet threads from each wisp shielding him, and the shield itself."""
     boss = world.boss()
-    if not boss or boss.state == "emerging":
+    if not boss or boss.state == "emerging" or boss.kind not in ("zombieking", "lich"):
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     pulse = 0.5 + 0.5 * math.sin(t * 3)
     if boss.kind == "zombieking":
-        pygame.draw.ellipse(overlay, (120, 200, 80, int(40 + 30 * pulse)), _ground_ellipse(world, boss.x, boss.y,
+        overlay.ellipse((120, 200, 80, int(40 + 30 * pulse)), _ground_ellipse(world, boss.x, boss.y,
                                                                                        RALLY_RADIUS), 3)
         for e in world.enemies:
             if getattr(e, "rallied", False):
-                pygame.draw.ellipse(overlay, (140, 230, 90, 150), _ground_ellipse(world, e.x, e.y, 0.45, e.draw_z), 3)
+                overlay.ellipse((140, 230, 90, 150), _ground_ellipse(world, e.x, e.y, 0.45, e.draw_z), 3)
     elif boss.kind == "lich":
         bx, by = enemy_anchor(boss, world.rise, t)
         wisps = world.shield_wisps()
         for e in wisps:
             ex, ey = enemy_anchor(e, world.rise, t)
-            pygame.draw.line(overlay, (190, 140, 255, int(110 + 80 * pulse)), (ex, ey), (bx, by), 2)
+            overlay.line((190, 140, 255, int(110 + 80 * pulse)), (ex, ey), (bx, by), 2)
         if wisps:   # (centred on his body, a little above the click anchor)
             r = int(56 + 4 * pulse)
-            pygame.draw.circle(overlay, (170, 120, 255, 45), (int(bx), int(by - 30)), r)
-            pygame.draw.circle(overlay, (210, 170, 255, 170), (int(bx), int(by - 30)), r, 2)
-    surf.blit(overlay, (0, 0))
+            overlay.circle((170, 120, 255, 45), (int(bx), int(by - 30)), r)
+            overlay.circle((210, 170, 255, 170), (int(bx), int(by - 30)), r, 2)
+    overlay.blend(surf)
 
 
 def bro_peeker(world):
@@ -770,10 +951,10 @@ def draw_bro_mound(surf, world, t):
     if boss.swap_timer < 2.0:   # about to burst up: warn the crew
         q = 1 - boss.swap_timer / 2.0
         ring = _ground_ellipse(world, x, y, BRO_SURFACE_RADIUS)
-        overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
-        pygame.draw.ellipse(overlay, (255, 60, 40, int(50 + 70 * q)), ring)
-        pygame.draw.ellipse(overlay, (255, 150, 110, 220), ring, 3)
-        surf.blit(overlay, (0, 0))
+        overlay = effect_layer(surf)
+        overlay.ellipse((255, 60, 40, int(50 + 70 * q)), ring)
+        overlay.ellipse((255, 150, 110, 220), ring, 3)
+        overlay.blend(surf)
 
 
 def draw_shade_auras(surf, world, t):
@@ -782,18 +963,18 @@ def draw_shade_auras(surf, world, t):
     spots += [(p[0], p[1], True) for p in world.void_pools]   # (and The Void Maw's hungry pools of darkness)
     if not spots:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for x, y, hungry in spots:
         ring = _ground_ellipse(world, x, y, SHADE_RADIUS)
         pulse = 0.5 + 0.5 * math.sin(t * 2 + x)
-        pygame.draw.ellipse(overlay, (6, 4, 14, int(110 + 30 * pulse)), ring)
+        overlay.ellipse((6, 4, 14, int(110 + 30 * pulse)), ring)
         if hungry:   # a violet rim that writhes: it bites (and a click drives it back)
             fast = 0.5 + 0.5 * math.sin(t * 6 + x)
-            pygame.draw.ellipse(overlay, (170, 110, 255, int(120 + 100 * fast)), ring, 3)
-            pygame.draw.ellipse(overlay, (120, 60, 200, 70), ring.inflate(-ring.w * 0.45, -ring.h * 0.45), 2)
+            overlay.ellipse((170, 110, 255, int(120 + 100 * fast)), ring, 3)
+            overlay.ellipse((120, 60, 200, 70), ring.inflate(-ring.w * 0.45, -ring.h * 0.45), 2)
         else:
-            pygame.draw.ellipse(overlay, (90, 70, 140, 90), ring, 2)
-    surf.blit(overlay, (0, 0))
+            overlay.ellipse((90, 70, 140, 90), ring, 2)
+    overlay.blend(surf)
 
 
 def draw_void_inhale(surf, world, t):
@@ -801,21 +982,21 @@ def draw_void_inhale(surf, world, t):
     boss = world.boss()
     if not boss or boss.kind != "voidmaw" or boss.inhale is None:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     k = boss.inhale / VOID_INHALE_SECS
     for i in range(3):   # rings rushing inwards
         share = 1 - ((t * 1.6 + i / 3) % 1)
         ring = _ground_ellipse(world, boss.x, boss.y, VOID_INHALE_RADIUS * share)
-        pygame.draw.ellipse(overlay, (150, 100, 230, int(40 + 120 * (1 - share))), ring, 3)
-    pygame.draw.ellipse(overlay, (20, 10, 40, int(40 + 50 * k)), _ground_ellipse(world, boss.x, boss.y, 1.6))
+        overlay.ellipse((150, 100, 230, int(40 + 120 * (1 - share))), ring, 3)
+    overlay.ellipse((20, 10, 40, int(40 + 50 * k)), _ground_ellipse(world, boss.x, boss.y, 1.6))
     mx, my = world.entity_screen(boss, 40)
     for m in world.void_pulled(boss):
         x, y = world.entity_screen(m, 30)
         for j in range(4):   # dashes streaming from them into its mouth
             a = (t * 2.5 + j / 4) % 1
             px, py = x + (mx - x) * a, y + (my - y) * a
-            pygame.draw.circle(overlay, (190, 150, 255, int(200 * (1 - a))), (int(px), int(py)), 3)
-    surf.blit(overlay, (0, 0))
+            overlay.circle((190, 150, 255, int(200 * (1 - a))), (int(px), int(py)), 3)
+    overlay.blend(surf)
     from .boss_sprites import void_eye_screen
     eye = void_eye_screen(boss, world.rise)
     if eye:   # a target pulsing round the open eye: hit it now to choke the breath
@@ -831,22 +1012,22 @@ def draw_curses(surf, world, t):
     cursed = [m for m in world.miners if m.curse > 0 and m.state != "down"]
     if not cursed:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for m in cursed:
         urgency = 1 - m.curse / CURSE_SECS
         pulse = 0.5 + 0.5 * math.sin(t * (6 + 18 * urgency))
-        pygame.draw.ellipse(overlay, (170, 100, 255, int(30 + 60 * pulse * urgency)),
+        overlay.ellipse((170, 100, 255, int(30 + 60 * pulse * urgency)),
                             _ground_ellipse(world, m.x, m.y, CURSE_RADIUS, m.draw_z))
         x, y = world.entity_screen(m, 70 + m.height)
-        pygame.draw.circle(overlay, (60, 20, 90, 200), (int(x), int(y)), 13)
-        pygame.draw.arc(overlay, (230, 200, 255, 255), (x - 15, y - 15, 30, 30), math.pi / 2,
+        overlay.circle((60, 20, 90, 200), (int(x), int(y)), 13)
+        overlay.arc((230, 200, 255, 255), (x - 15, y - 15, 30, 30), math.pi / 2,
                         math.pi / 2 + math.tau * (m.curse / CURSE_SECS), 3)
         for k in range(3):   # a little three-pointed sigil
             a = t * 2 + k * math.tau / 3
-            pygame.draw.line(overlay, (220, 170, 255, 255), (x, y), (x + math.cos(a) * 8, y + math.sin(a) * 8), 2)
+            overlay.line((220, 170, 255, 255), (x, y), (x + math.cos(a) * 8, y + math.sin(a) * 8), 2)
         hx, hy = world.entity_screen(m, 30)   # a pulsing ring around the miner: click here
-        pygame.draw.circle(overlay, (220, 170, 255, int(120 + 120 * pulse)), (int(hx), int(hy)), 22, 2)
-    surf.blit(overlay, (0, 0))
+        overlay.circle((220, 170, 255, int(120 + 120 * pulse)), (int(hx), int(hy)), 22, 2)
+    overlay.blend(surf)
 
 
 def draw_stuns(surf, world, t):
@@ -864,7 +1045,9 @@ def draw_stuns(surf, world, t):
 def draw_bone_throws(surf, world, t):
     """Bones the Bone Tyrant hurls at the crew: a red mark on whoever it's coming for, a shadow racing across
     the ground, and a big bone spinning end over end on a high arc with a trail of dust behind it."""
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    if not world.bone_throws:
+        return
+    overlay = effect_layer(surf)
     for (sx, sy), target, age, (gx, gy) in world.bone_throws:
         q = min(1.0, age / BONE_THROW_SECS)
         tx, ty = world.entity_screen(target, 30)
@@ -872,19 +1055,19 @@ def draw_bone_throws(surf, world, t):
         pulse = 0.5 + 0.5 * math.sin(t * 16)
         mark = pygame.Rect(0, 0, 34 + 10 * (1 - q), 14 + 4 * (1 - q))
         mark.center = (fx, fy)
-        pygame.draw.ellipse(overlay, (255, 60, 40, int(90 + 90 * pulse)), mark, 3)
+        overlay.ellipse((255, 60, 40, int(90 + 90 * pulse)), mark, 3)
         shadow = (gx + (fx - gx) * q, gy + (fy - gy) * q)   # the bone's shadow on the ground
         sw = 10 + 12 * q
-        pygame.draw.ellipse(overlay, (10, 8, 12, 120), (shadow[0] - sw / 2, shadow[1] - sw / 5, sw, sw / 2.5))
+        overlay.ellipse((10, 8, 12, 120), (shadow[0] - sw / 2, shadow[1] - sw / 5, sw, sw / 2.5))
         arc = lambda k: (sx + (tx - sx) * k, sy + (ty - sy) * k - math.sin(k * math.pi) * 90)
         for back in (0.06, 0.12, 0.18):   # dust trail
             if q - back > 0:
                 px, py = arc(q - back)
-                pygame.draw.circle(overlay, (235, 228, 205, int(110 * (1 - back * 4))), (int(px), int(py)),
+                overlay.circle((235, 228, 205, int(110 * (1 - back * 4))), (int(px), int(py)),
                                    int(5 - back * 15))
         x, y = arc(q)
         draw_bone(surf, x, y, age * 16, 13, 5)
-    surf.blit(overlay, (0, 0))
+    overlay.blend(surf)
 
 
 def draw_hazards(surf, world, t):
@@ -893,17 +1076,17 @@ def draw_hazards(surf, world, t):
     if not world.hazards:
         return
     from .world import HAZARD_WARN, HAZARDS
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     colours = {"grasp": (120, 220, 90), "sinkhole": (190, 130, 70), "rock": (255, 70, 50)}
     for x, y, kind, left, _ in world.hazards:
         full = _ground_ellipse(world, x, y, HAZARDS[kind]["radius"])
         q = 1 - left / HAZARD_WARN
         col = colours[kind]
         pulse = 0.5 + 0.5 * math.sin(t * (10 + 20 * q))
-        pygame.draw.ellipse(overlay, (*col, int(40 + 50 * pulse)), full)
-        pygame.draw.ellipse(overlay, (*col, 130), full.inflate(-full.w * (1 - q), -full.h * (1 - q)))
-        pygame.draw.ellipse(overlay, (*col, 220), full, 2)
-    surf.blit(overlay, (0, 0))
+        overlay.ellipse((*col, int(40 + 50 * pulse)), full)
+        overlay.ellipse((*col, 130), full.inflate(-full.w * (1 - q), -full.h * (1 - q)))
+        overlay.ellipse((*col, 220), full, 2)
+    overlay.blend(surf)
 
 
 def draw_time_stop(surf, world, t):
@@ -981,10 +1164,10 @@ def draw_boss_tricks(surf, world, t):
             continue
         q = min(1.0, gaze[1] / GAZE_SECS)
         mx, my = world.entity_screen(gaze[0], 30)
-        overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
-        pygame.draw.line(overlay, (190, 120, 255, int(80 + 150 * q)), eye[:2], (mx, my), 2 + int(6 * q))
-        pygame.draw.circle(overlay, (220, 160, 255, int(60 + 120 * q)), (int(mx), int(my)), 10 + int(10 * q), 2)
-        surf.blit(overlay, (0, 0))
+        overlay = effect_layer(surf)
+        overlay.line((190, 120, 255, int(80 + 150 * q)), eye[:2], (mx, my), 2 + int(6 * q))
+        overlay.circle((220, 160, 255, int(60 + 120 * q)), (int(mx), int(my)), 10 + int(10 * q), 2)
+        overlay.blend(surf)
 
 
 def draw_slam_zones(surf, world, t):
@@ -992,7 +1175,7 @@ def draw_slam_zones(surf, world, t):
     winding = [e for e in world.enemies if (e.boss or e.spec.get("slam")) and e.windup > 0]   # (+ slime chunks)
     if not winding:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for e in winding:
         gx, gy = e.slam_at or (e.x, e.y)   # (a diving boss marks where it will land, not where it is)
         cx, cy = iso(gx, gy, world.column_height(*world.cell_of(gx, gy)) + world.rise)
@@ -1001,11 +1184,11 @@ def draw_slam_zones(surf, world, t):
         full.center = (cx, cy)
         q = 1 - e.windup / e.windup_total
         pulse = 0.5 + 0.5 * math.sin(t * (10 + 20 * q))
-        pygame.draw.ellipse(overlay, (255, 40, 30, int(40 + 50 * pulse)), full)
+        overlay.ellipse((255, 40, 30, int(40 + 50 * pulse)), full)
         inner = full.inflate(-full.w * (1 - q), -full.h * (1 - q))
-        pygame.draw.ellipse(overlay, (255, 80, 50, 120), inner)
-        pygame.draw.ellipse(overlay, (255, 150, 110, 230), full, 3)
-    surf.blit(overlay, (0, 0))
+        overlay.ellipse((255, 80, 50, 120), inner)
+        overlay.ellipse((255, 150, 110, 230), full, 3)
+    overlay.blend(surf)
 
 
 def draw_phantom(surf, world, t):
@@ -1101,7 +1284,7 @@ def draw_steam(surf, world, t):
         return
     q = world.steam / STEAM_SECS
     rng = random.Random(9)
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     reach = GRID * 1.6 * min(1.0, q * 1.6)   # how far the front has rolled, in tiles
     fade = 1 - max(0.0, (q - 0.45) / 0.55)
     for _ in range(140):
@@ -1110,8 +1293,8 @@ def draw_steam(surf, world, t):
         gx, gy = BOILER_POS[0] + math.cos(a) * d, BOILER_POS[1] + math.sin(a) * d
         px, py = iso(gx, gy, 2.5 + world.rise)
         r = int(16 + rng.uniform(0, 24) + 12 * q)
-        pygame.draw.circle(overlay, (235, 240, 248, int(rng.uniform(70, 130) * fade)), (int(px), int(py - 20 * q)), r)
-    surf.blit(overlay, (0, 0))
+        overlay.circle((235, 240, 248, int(rng.uniform(70, 130) * fade)), (int(px), int(py - 20 * q)), r)
+    overlay.blend(surf)
 
 
 def draw_ballista(surf, base, aim, timer, t):
@@ -1316,7 +1499,7 @@ def draw_quake_waves(surf, world):
     """Dusty rings spreading across the board from each Seismic Strikes crit."""
     if not world.quakes:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for qx, qy, age, _, reach in world.quakes:
         cx, cy = iso(qx, qy, 2 + world.rise)
         for lag, width in ((0.0, 5), (0.45, 3)):   # leading ring and a fainter one behind it
@@ -1326,8 +1509,8 @@ def draw_quake_waves(surf, world):
             fade = 1 - rad / reach
             rect = pygame.Rect(0, 0, rad * TILE_W * 1.42, rad * TILE_H * 1.42)   # a circle on the iso ground
             rect.center = (cx, cy)
-            pygame.draw.ellipse(overlay, (215, 180, 130, int(200 * fade)), rect, width)
-    surf.blit(overlay, (0, 0))
+            overlay.ellipse((215, 180, 130, int(200 * fade)), rect, width)
+    overlay.blend(surf)
 
 
 def draw_crit_bursts(surf, world):
@@ -1353,7 +1536,7 @@ def draw_blast_zones(surf, world, t):
     lit = [b for b in world.bombs if b.landed]
     if not lit:
         return
-    overlay = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+    overlay = effect_layer(surf)
     for b in lit:
         urgency = 1 - b.fuse_left()
         pulse = 0.5 + 0.5 * math.sin(t * (7 + 22 * urgency))
@@ -1365,9 +1548,9 @@ def draw_blast_zones(surf, world, t):
                 x, y = cx + dx, cy + dy
                 if 0 <= x < GRID and 0 <= y < GRID:
                     top = cube_faces(x, y, world.column_height(x, y) + world.rise)["top"]
-                    pygame.draw.polygon(overlay, fill, top)
-                    pygame.draw.polygon(overlay, edge, top, 1)
-    surf.blit(overlay, (0, 0))
+                    overlay.polygon(fill, top)
+                    overlay.polygon(edge, top, 1)
+    overlay.blend(surf)
 
 
 def draw_explosions(surf, world):
@@ -1412,18 +1595,32 @@ def draw_glaze(surf, faces, t, x, y):
     pygame.draw.polygon(surf, (150, 190, 240), top, 1)
 
 
-def draw_damage(surf, b, x, y, z):
+_crack_layouts = {}
+
+
+def crack_lines(x, y):
+    """The cracks a damaged block at (x, y) shows, worst first-to-last, as point offsets from its back corner:
+    worked out once per cell (a block shows the first few, more as it weakens)."""
+    lines = _crack_layouts.get((x, y))
+    if lines is None:
+        rng = random.Random(hash((x, y)))
+        ox, oy = iso(0, 0, 0)
+        lines = _crack_layouts[(x, y)] = []
+        for _ in range(7):
+            u, v = rng.uniform(0.25, 0.75), rng.uniform(0.25, 0.75)
+            pts = [(u, v)]
+            for _ in range(3):
+                u += rng.uniform(-0.18, 0.18)
+                v += rng.uniform(-0.18, 0.18)
+                pts.append((max(0.05, min(0.95, u)), max(0.05, min(0.95, v))))
+            lines.append([(px - ox, py - oy) for px, py in (iso(pu, pv, 0) for pu, pv in pts)])
+    return lines
+
+
+def draw_damage(surf, b, x, y, sx, sy):
+    """Cracks across a damaged block whose back corner is at (sx, sy)."""
     frac = 1 - b.hp / b.max_hp
     if frac <= 0:
         return
-    rng = random.Random(hash((x, y)))
-    cracks = int(frac * 6) + 1
-    for _ in range(cracks):
-        u, v = rng.uniform(0.25, 0.75), rng.uniform(0.25, 0.75)
-        p0 = iso(x + u, y + v, z)
-        pts = [p0]
-        for _ in range(3):
-            u += rng.uniform(-0.18, 0.18)
-            v += rng.uniform(-0.18, 0.18)
-            pts.append(iso(x + max(0.05, min(0.95, u)), y + max(0.05, min(0.95, v)), z))
-        pygame.draw.lines(surf, (30, 24, 28), False, pts, 2)
+    for line in crack_lines(x, y)[:int(frac * 6) + 1]:
+        pygame.draw.lines(surf, (30, 24, 28), False, [(sx + dx, sy + dy) for dx, dy in line], 2)
