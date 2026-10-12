@@ -1,5 +1,6 @@
 """Global constants: window, board geometry, persistence and colours."""
 import os
+import sys
 
 import pygame
 
@@ -11,6 +12,8 @@ BASE_W = 1280                 # the layout was designed at 1280x720
 
 
 def _pick_resolution():
+    if sys.platform == "emscripten":   # (in a browser: the page scales it to fit)
+        return 1280, 720
     forced = os.environ.get("ONE_WAY_DOWN_RES") or os.environ.get("THE_ONLY_WAY_IS_DOWN_RES")   # (its old name too)
     if forced:
         w, h = forced.lower().split("x")
@@ -40,11 +43,33 @@ BLOCK_H = round(34 * SCALE)                     # pixel height of one block
 BOARD_ORIGIN = (W // 2, round(200 * SCALE))     # screen position of the board's back corner at z=0
 GOLD_HUD_COIN = (52, 44)      # where the HUD's gold coin sits; earned coins fly here
 
+FROZEN = getattr(sys, "frozen", False)   # a packaged build (PyInstaller: see tools/build_release.py), not the source
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SAVE_PATH = os.path.join(PROJECT_ROOT, "savegame.json")
-SAVE_SLOTS = [SAVE_PATH] + [os.path.join(PROJECT_ROOT, f"savegame_{n}.json") for n in (2, 3)]   # (Load Game)
+RESOURCE_ROOT = getattr(sys, "_MEIPASS", PROJECT_ROOT)   # where assets/ is (packaged: where PyInstaller put it)
+
+
+def _data_dir():
+    """Where saves and settings live: from source, the project folder (as ever); packaged, the player's own folder
+    (%APPDATA%/OneWayDown and the like), so the game's folder can be read-only and updates never touch them."""
+    if not FROZEN:
+        return PROJECT_ROOT
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    path = os.path.join(base, "OneWayDown")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+DATA_DIR = _data_dir()
+SAVE_PATH = os.path.join(DATA_DIR, "savegame.json")
+SAVE_SLOTS = [SAVE_PATH] + [os.path.join(DATA_DIR, f"savegame_{n}.json") for n in (2, 3)]   # (Load Game)
 AUTOSAVE_SECS = 10
-MUSIC_DIR = os.path.join(PROJECT_ROOT, "assets", "music")   # (regenerate with: uv run tools/make_music.py)
+MUSIC_DIR = os.path.join(RESOURCE_ROOT, "assets", "music")   # (regenerate with: uv run tools/make_music.py)
+AUDIO_EXT = ".ogg" if sys.platform == "emscripten" else ".wav"   # (browsers want Ogg: tools/build_web.py converts)
 
 PANEL = (38, 32, 52)
 PANEL_EDGE = (78, 66, 104)

@@ -1046,7 +1046,7 @@ class CampScene(Scene):
             draw_glow(s, go.rect, t)
         go.draw(s, f, mouse)
         draw_text(s, f, "The same 100m again - no tougher - with your camp along", 18, MUTED,
-                  (p.centerx, go.rect.bottom + 8), "midtop")
+                  (p.centerx, go.rect.bottom + 4), "midtop")
 
     def draw_record(self, s):
         """Bottom left: the lifetime record."""

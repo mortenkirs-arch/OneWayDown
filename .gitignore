@@ -8,3 +8,6 @@ music_samples/
 settings.json
 sfx_samples/
 mockups/
+build/
+dist/
+desktop.ini

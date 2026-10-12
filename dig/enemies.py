@@ -113,6 +113,7 @@ ENEMY_TYPES = {
     # ----- bosses: one every BOSS_EVERY metres, in this order, then round again ----------------
     "zombieking": dict(name="Zombie King", hp=1650, speed=0.45, dps=0, bounty=360, min_depth=0, weight=0,
                        reach=0.9, entrance="dig", grab="side", arrival="rises", boss=True,
+                       pct_scale=0.055,   # (the first boss: Executioner's minimum bites a little deeper)
                        look="zombie", scale=2.2, slam=0.32, minion=dict(kind="zombie", count=2, every=14.0),
                        tint=(150, 130, 210), gore=(120, 190, 80)),
     "broodmother": dict(name="Broodmother", hp=2000, speed=0.8, dps=0, bounty=360, min_depth=0, weight=0,

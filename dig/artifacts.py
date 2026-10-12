@@ -1,4 +1,5 @@
-"""Artifacts: rare finds buried in the dig, each a permanent bonus.
+"""Artifacts: rare finds buried in the dig, each a bonus for the rest of the expedition (every expedition starts
+without any: the last one's are set into the camp's foundations - see World.next_expedition).
 
 Common artifacts turn up in ordinary blocks (a glinting block now and then). Trophies are only ever
 dropped by the boss named in `boss` (see BOSSES in enemies.py), the first time it is beaten. Crew artifacts are

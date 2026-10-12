@@ -1,5 +1,6 @@
 """Main menu."""
 import math
+import sys
 import time
 
 import pygame
@@ -32,6 +33,8 @@ class MenuScene(Scene):
                                color=(64, 84, 110)),
             "quit": Button((cx, 630 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
         }
+        if sys.platform == "emscripten":   # (in a browser there's nothing to quit to: you just close the tab)
+            del self.buttons["quit"]
 
     def enter(self):
         self.has_saves = self.game.latest_slot() is not None

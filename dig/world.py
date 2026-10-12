@@ -33,7 +33,7 @@ from .enemies import (ELITE_HP, boss_minion_cap, boss_minion_mult,
                       VOID_INHALE_SECS, VOID_POOL_DRAIN, VOID_POOL_EVERY,
                       VOID_POOL_SECS, VOID_POOLS)
 from .iso import iso
-from .world_layout import (BALLISTA_POS, BANNER_BOOST, BANNER_RADIUS, BANNER_REPLANT, BOILER_POS, BOLT_SECS, CHEST_FX_SECS,
+from .world_layout import (BALLISTA_POS, BANNER_BOOST, BANNER_RADIUS, BANNER_REPLANT, BOILER_POS, BOLT_SPEED, CHEST_FX_SECS,
                            FRINGE_POWER, FRINGE_RADIUS, FRINGE_VALUE, HEIRLOOM_DEEP, HEIRLOOM_EVERY,
                            BLAST_ARROW_BLOCKS, BLAST_ARROW_RADIUS, GLAZE_BONUS, GLAZE_SECS, WHEEL_LIFE, WHEEL_MAX,
                            CHOMP_EVERY, COLLAR_BITE, COLLAR_EVERY, COLLAR_SWALLOW, DIVINING_CHANCE, FEMUR_SECS,
@@ -222,6 +222,22 @@ class Mudling:
         self.left, self.swing, self.anim, self.target = secs, MUDLING_SWING, 0.0, None
 
 
+class Bolt:
+    """A Ballista bolt in flight: from the Ballista, straight through the monster it was loosed at and on past it,
+    skewering every monster it passes on the way."""
+
+    def __init__(self, x, y, ux, uy, length, z):
+        self.x0, self.y0, self.ux, self.uy = x, y, ux, uy   # where it was loosed from, and which way (grid)
+        self.length, self.z = length, z                     # how far it flies; the height it flies at
+        self.dist = 0.0                                     # how far it's got
+        self.hit = set()                                    # (the monsters it's gone through: once each)
+        self.label = None                                   # its "SKEWERED xN!", once it's gone through two
+
+    def at(self, d=None):
+        d = self.dist if d is None else d
+        return self.x0 + self.ux * d, self.y0 + self.uy * d
+
+
 class LightningRod:
     """Grizzle's Lightning Rod: a copper spike planted in the rock, arcing at whatever's near it until it burns out."""
 
@@ -317,7 +333,7 @@ class World:
         self.whet_timer = 4.0                                   # Whetstone: seconds until the next miner goes
         self.ballista_timer = 2.0                               # Ballista: seconds until the next bolt
         self.ballista_aim = 0.0                                 # direction the ballista is pointing (radians)
-        self.bolts = []                                         # [start (x, y), enemy, age] in flight
+        self.bolts = []                                         # Ballista bolts in flight (Bolt)
         self.rocks = []                                         # [thrower, start (x, y), boss, age] in flight
         self.femur_throws = []                                  # [thrower, start (x, y), monster, age]: Tyrant's Femur
         self.femur_timer = 0.0                                  # seconds until the crew can throw the next bone
@@ -1809,8 +1825,10 @@ class World:
 
     # ----- artifacts ------------------------------------------------------
     def undiscovered(self):
-        """Artifacts still buried somewhere below: the common ones, and those of the camp's hires you have."""
-        return [k for k in COMMON if k not in self.artifacts] + \
+        """Artifacts still buried somewhere below: the common ones, and those of the camp's hires you have. (Not the
+        Old Miner's Lantern while you've hired just the one miner: its extra hand mustn't spoil a lone-miner run.)"""
+        lone = self.levels["miners"] <= 1
+        return [k for k in COMMON if k not in self.artifacts and not (lone and k == "lantern")] + \
             [k for k, a in ARTIFACTS.items() if a.get("crew") in self.camp and k not in self.artifacts]
 
     def bury_artifact(self, layer, depth):
@@ -2212,7 +2230,6 @@ class World:
         px, py = enemy_anchor(enemy, self.rise, time.time())
         if enemy.elite and self.lv("trophy"):
             mult *= trophy_mult(self.lv("trophy"))
-            self.floaters.append(Floater("TROPHY!", px, py - 48, GOLD, life=1.4, size=32))
             self.rings.append([px, py, 0.0, 90, GOLD])
             for _ in range(24):
                 self.particles.append(Particle(px, py, random.choice([GOLD, (255, 235, 150), (255, 255, 255)]), big=True))
@@ -3804,7 +3821,7 @@ class World:
                 self.ballista_aim = math.atan2(ty - sy, tx - sx)
                 if self.ballista_timer <= 0:
                     self.ballista_timer = ballista_interval(self.lv("ballista")) / self.tick()
-                    self.bolts.append([(sx, sy), target, 0.0])
+                    self.loose_bolt(target)
         for throw in self.bone_throws:
             throw[2] += dt
             target = throw[1]
@@ -3839,21 +3856,7 @@ class World:
                 for _ in range(8):   # the bone shatters
                     self.particles.append(Particle(px, py, random.choice([(235, 228, 205), (170, 160, 135)])))
         self.femur_throws = [f for f in self.femur_throws if f[3] < FEMUR_SECS]
-        for bolt in self.bolts:
-            bolt[2] += dt
-            if bolt[2] >= BOLT_SECS:
-                enemy = bolt[1]
-                if enemy in self.enemies and enemy.targetable:
-                    skewered = self.bolt_line(enemy)
-                    for e in skewered:
-                        if e in self.enemies:
-                            self.hit_enemy(e, e.max_hp * ballista_share(self.lv("ballista")) * e.pct_scale,
-                                           floor=False, ring=(220, 190, 130))
-                    if len(skewered) > 1:
-                        px, py = enemy_anchor(enemy, self.rise, time.time())
-                        self.floaters.append(Floater(f"SKEWERED x{len(skewered)}!", px, py - 50, (230, 200, 140),
-                                                     life=1.0, size=24))
-        self.bolts = [b for b in self.bolts if b[2] < BOLT_SECS]
+        self.update_bolts(dt)
         for fx in self.chest_fx:
             fx[2] += dt
         self.chest_fx = [fx for fx in self.chest_fx if fx[2] < CHEST_FX_SECS]
@@ -3865,20 +3868,44 @@ class World:
             fx[1] += dt
         self.spike_fx = [fx for fx in self.spike_fx if fx[1] < SPIKE_FX_SECS]
 
-    def bolt_line(self, target):
-        """A Ballista bolt pierces: its target, and every monster in line with it out to PIERCE_PAST beyond."""
+    def loose_bolt(self, target):
+        """The Ballista looses a bolt at `target`: it flies straight through it and on PIERCE_PAST tiles beyond (or
+        to the edge of the dig)."""
         bx, by = BALLISTA_POS
         dx, dy = target.x - bx, target.y - by
-        length = math.hypot(dx, dy) or 1.0
-        ux, uy = dx / length, dy / length
-        line = [target]
-        for e in self.enemies:
-            if e is target or not e.targetable:
-                continue
-            along = (e.x - bx) * ux + (e.y - by) * uy
-            if 0 < along <= length + PIERCE_PAST and abs((e.x - bx) * uy - (e.y - by) * ux) <= PIERCE_WIDTH:
-                line.append(e)
-        return line
+        dist = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / dist, dy / dist
+        edge = min([(GRID - bx) / ux if ux > 0 else -bx / ux if ux < 0 else 1e9,
+                    (GRID - by) / uy if uy > 0 else -by / uy if uy < 0 else 1e9])
+        self.bolts.append(Bolt(bx, by, ux, uy, max(dist, min(dist + PIERCE_PAST, edge)),
+                               self.column_height(*self.cell_of(bx, by))))
+
+    def update_bolts(self, dt):
+        """Bolts in flight: each monster a bolt passes within PIERCE_WIDTH of - before its target, the target, and
+        after - takes the hit as it goes through."""
+        share = ballista_share(self.lv("ballista"))
+        for bolt in self.bolts:
+            d0 = bolt.dist
+            bolt.dist = min(bolt.length, d0 + BOLT_SPEED * dt)
+            for e in list(self.enemies):
+                if id(e) in bolt.hit or not e.targetable:
+                    continue
+                along = (e.x - bolt.x0) * bolt.ux + (e.y - bolt.y0) * bolt.uy
+                if not (d0 - 0.25 < along <= bolt.dist + 0.25):
+                    continue
+                if abs((e.x - bolt.x0) * bolt.uy - (e.y - bolt.y0) * bolt.ux) > PIERCE_WIDTH:
+                    continue
+                bolt.hit.add(id(e))
+                px, py = enemy_anchor(e, self.rise, time.time())
+                for _ in range(5):   # splinters
+                    self.particles.append(Particle(px, py, random.choice([(220, 190, 130), (150, 110, 70)])))
+                self.hit_enemy(e, e.max_hp * share * e.pct_scale, floor=False, ring=(220, 190, 130))
+                if len(bolt.hit) >= 2:   # (and on through the next)
+                    if bolt.label is None or bolt.label.life <= 0:
+                        bolt.label = Floater("", px, py - 50, (230, 200, 140), life=1.0, size=24)
+                        self.floaters.append(bolt.label)
+                    bolt.label.text, bolt.label.life = f"SKEWERED x{len(bolt.hit)}!", 1.0
+        self.bolts = [b for b in self.bolts if b.dist < b.length]
 
     def ballista_screen(self):
         """Where bolts leave the ballista on screen."""

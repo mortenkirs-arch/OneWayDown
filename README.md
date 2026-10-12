@@ -239,6 +239,38 @@ To add an upgrade, append an entry to `UPGRADES` in `dig/upgrades.py` (its `bran
 the sector of the star map, `pos` its angle and ring there) and read its
 level via `world.lv("key")` wherever it takes effect.
 
+## Releasing on itch.io
+
+Build a standalone copy (Python, pygame and the assets all bundled - players install nothing):
+
+```
+uv run --with pyinstaller --with pillow tools/build_release.py
+```
+
+That makes `dist/OneWayDown/` (run `OneWayDown.exe`) and `dist/OneWayDown-<version>-windows.zip`. Bump `version` in
+`pyproject.toml` before building a new release. A packaged copy keeps its saves and settings in the player's own
+folder (`%APPDATA%\OneWayDown` on Windows), never next to the game, so updates can't touch them; running from source
+still uses the project folder. Build on each platform you want to release for (PyInstaller can't cross-build).
+
+Upload with [butler](https://itch.io/docs/butler/) (itch.io's uploader: log in once with `butler login`):
+
+```
+butler push dist/OneWayDown yourname/one-way-down:windows --userversion 0.1.0
+```
+
+Pushing the folder (not the zip) lets later updates upload only what changed. On the itch.io page, set the upload's
+platform to Windows.
+
+The browser version (pygbag, Python compiled to WebAssembly) builds with:
+
+```
+uv run --no-project --with pygbag --with soundfile --with numpy tools/build_web.py
+```
+
+Upload `dist/OneWayDown-<version>-web.zip` to itch.io with "This file will be played in the browser". The loading
+screen (`tools/web/onewaydown.tmpl` and `logo.png`) and the audio converted to Ogg for browsers (`tools/web/audio/`) are
+kept in the repo: a sound is only reconverted when its `.wav` is newer, so commit any `.ogg` or logo the build changes.
+
 ## License
 
 Copyright (C) 2026 Morten
@@ -253,3 +285,7 @@ more details.
 
 The full terms are in [COPYING](COPYING). If you distribute a modified version of the game, or anything
 built from its code, it has to be under this same license, with its source code.
+
+The fonts are used under the SIL Open Font License: Lilita One by Juan Montoreano (see
+[assets/fonts/OFL-LilitaOne.txt](assets/fonts/OFL-LilitaOne.txt)) and Fredoka by The Fredoka Project Authors, at its
+SemiBold weight (see [assets/fonts/OFL-Fredoka.txt](assets/fonts/OFL-Fredoka.txt)).

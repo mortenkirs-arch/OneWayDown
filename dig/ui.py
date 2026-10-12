@@ -3,7 +3,9 @@ import math
 
 import pygame
 
-from .config import MUTED, PANEL, PANEL_EDGE, TEXT
+import os
+
+from .config import MUTED, PANEL, PANEL_EDGE, RESOURCE_ROOT, TEXT
 from .util import shade
 
 
@@ -83,24 +85,36 @@ class Button:
         self.text, self.action, self.size, self.color = text, action, size, color
         self.enabled = True
         self.gold = None   # optional price shown as "<text>  (coin) <gold>"
+        self.nudge = 0     # px the label sits right of centre (room for an icon drawn on the button's left)
 
     def draw(self, surf, fonts, mouse):
+        """A chunky bevelled button: a dark rim, a lit upper face over a shadowed lower one, a highlight along the
+        top edge, a drop shadow beneath - and the label (in the display font) stamped in with a shadow of its own."""
         hover = self.enabled and self.rect.collidepoint(mouse)
         base = self.color if self.enabled else (60, 56, 70)
         if hover:
-            base = shade(base, 1.25)
-        shadow = self.rect.move(0, 4)
-        pygame.draw.rect(surf, shade(base, 0.5), shadow, border_radius=10)
-        pygame.draw.rect(surf, base, self.rect, border_radius=10)
-        pygame.draw.rect(surf, shade(base, 1.4), self.rect, 2, border_radius=10)
+            base = shade(base, 1.2)
+        r = self.rect
+        pygame.draw.rect(surf, (10, 8, 14), r.move(0, 5).inflate(2, 2), border_radius=11)   # drop shadow
+        pygame.draw.rect(surf, shade(base, 0.35), r.inflate(4, 4), border_radius=12)         # dark rim
+        pygame.draw.rect(surf, shade(base, 0.72), r, border_radius=10)                        # the lower face...
+        top = pygame.Rect(r.x, r.y, r.w, int(r.h * 0.55))
+        pygame.draw.rect(surf, base, top, border_top_left_radius=10, border_top_right_radius=10)   # ...the upper
+        pygame.draw.line(surf, shade(base, 1.45), (r.x + 8, r.y + 2), (r.right - 9, r.y + 2), 2)   # (its highlight)
+        pygame.draw.rect(surf, shade(base, 1.25), r, 1, border_radius=10)
         color = TEXT if self.enabled else MUTED
-        label = fonts[self.size].render(self.text, True, color)
+        font = fonts.display(self.size)
+        label = font.render(self.text, True, color)
+        under = font.render(self.text, True, shade(base, 0.3))
         if self.gold is None:
-            surf.blit(label, label.get_rect(center=self.rect.center))
+            cx = r.centerx + self.nudge
+            surf.blit(under, under.get_rect(center=(cx, r.centery + 2)))
+            surf.blit(label, label.get_rect(center=(cx, r.centery)))
             return
         price = gold_label(fonts, self.gold, self.size, color)
         gap = self.size // 2
         x = self.rect.centerx - (label.get_width() + gap + price.get_width()) // 2
+        surf.blit(under, under.get_rect(midleft=(x, self.rect.centery + 2)))
         surf.blit(label, label.get_rect(midleft=(x, self.rect.centery)))
         surf.blit(price, price.get_rect(midleft=(x + label.get_width() + gap, self.rect.centery)))
 
@@ -112,13 +126,40 @@ class Button:
         return False
 
 
+FONTS_DIR = os.path.join(RESOURCE_ROOT, "assets", "fonts")   # (both under the SIL Open Font License: see there)
+DISPLAY_FONT = os.path.join(FONTS_DIR, "LilitaOne-Regular.ttf")
+DISPLAY_FROM = 32      # text this big (titles, headings, big pop-ups) - and every button - is in the display font...
+DISPLAY_SCALE = 0.78   # ...drawn at this share of the size asked for (it runs wide: this keeps labels where they fit)
+BODY_FONT = os.path.join(FONTS_DIR, "Fredoka-SemiBold.ttf")   # everything smaller: rounded, to go with it...
+BODY_SCALE = 0.76      # ...and drawn at this share of the size asked for (the room the old default font took)
+
+
 class Fonts(dict):
-    """Lazily-created default fonts keyed by pixel size: fonts[24]."""
+    """Lazily-created fonts keyed by pixel size: fonts[24]. Body text is Fredoka; from DISPLAY_FROM up it's the
+    display font (Lilita One), as is fonts.display(size) at any size (buttons). (Either missing: the plain default.)"""
+
+    def __init__(self):
+        super().__init__()
+        self.shown = {}
 
     def __missing__(self, size):
-        f = pygame.font.Font(None, size)
+        f = self.display(size) if size >= DISPLAY_FROM else _load(BODY_FONT, size, BODY_SCALE)
         self[size] = f
         return f
+
+    def display(self, size):
+        f = self.shown.get(size)
+        if f is None:
+            f = self.shown[size] = _load(DISPLAY_FONT, size, DISPLAY_SCALE)
+        return f
+
+
+def _load(path, size, scale):
+    """A font at `size` (drawn at `scale` of it), or the plain default if it can't be loaded."""
+    try:
+        return pygame.font.Font(path, max(8, round(size * scale)))
+    except (OSError, FileNotFoundError):
+        return pygame.font.Font(None, size)
 
 
 def draw_text(surf, fonts, text, size, color, pos, anchor="topleft"):

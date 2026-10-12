@@ -6,6 +6,7 @@ import time
 
 import pygame
 
+from .. import storage
 from ..biomes import biome_at
 from ..config import BAD, GOLD, GOOD, H, MUTED, PANEL, PANEL_EDGE, TEXT, W
 from ..ui import Button, draw_gold, draw_text
@@ -26,12 +27,14 @@ MODES = [   # (casual?, name, colour, lines of what it means)
 def slot_summary(path):
     """What's in a save file, for its card: depth, gold, time played and when it was saved. None if it's empty
     (or unreadable)."""
+    text = storage.read(path)
+    if text is None:
+        return None
     try:
-        with open(path) as f:
-            data = json.load(f)
+        data = json.loads(text)
         return dict(depth=data["depth"], gold=data["gold"], clock=data.get("clock", 0.0),
-                    casual=data.get("casual", False), saved=os.path.getmtime(path))
-    except (OSError, ValueError, KeyError, TypeError):
+                    casual=data.get("casual", False), saved=storage.saved_at(path))
+    except (ValueError, KeyError, TypeError):
         return None
 
 

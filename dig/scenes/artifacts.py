@@ -64,15 +64,12 @@ class ArtifactScene(Scene):
 
         top = 88
         draw_text(s, f, "Buried in the dig  -  watch for blocks with a violet glint", 24, GOLD, (LEFT, top))
-        commons = self.card_rects(COMMON, top + 28, COLS)
+        commons = self.card_rects(COMMON + CREW_ARTIFACTS, top + 28, COLS)   # (the crew's: once their hire is in)
         top = commons[-1][1].bottom + 14
         draw_text(s, f, f"Boss trophies  -  a boss guards every {BOSS_EVERY}th metre", 24, GOLD, (LEFT, top))
         trophies = self.card_rects(TROPHIES, top + 28, COLS)
-        top = trophies[-1][1].bottom + 14
-        draw_text(s, f, "Camp crew  -  each buried in the dig once its hire is with you", 24, GOLD, (LEFT, top))
-        crew = self.card_rects(CREW_ARTIFACTS, top + 28, COLS)
         hovered = None
-        for key, rect in commons + trophies + crew:
+        for key, rect in commons + trophies:
             self.draw_card(s, key, rect)
             if rect.collidepoint(mouse) and key in w.artifacts:
                 hovered = key
@@ -94,9 +91,9 @@ class ArtifactScene(Scene):
             draw_icon(s, art["icon"], ic, 20, art["color"])
             size = next((n for n in (22, 20, 18) if f[n].size(art["name"])[0] <= rect.w - 80), 18)   # (long names shrink)
             draw_text(s, f, art["name"], size, art["color"], (rect.x + 72, rect.y + 14), "midleft")
-            lines = wrap(f, art["bonus"], 20, rect.w - 84)
+            lines = wrap(f, art["bonus"], 18, rect.w - 80)
             for i, line in enumerate(lines[:2]):
-                draw_text(s, f, line, 20, TEXT, (rect.x + 72, rect.y + 35 + i * 18), "midleft")
+                draw_text(s, f, line, 18, TEXT, (rect.x + 72, rect.y + 35 + i * 17), "midleft")
             if key in w.new_artifacts:
                 tag = draw_text(s, f, "NEW", 18, GOLD, (rect.right - 12, rect.y + 14), "midright")
                 pygame.draw.rect(s, GOLD, tag.inflate(8, 4), 1, border_radius=4)
@@ -113,5 +110,5 @@ class ArtifactScene(Scene):
                 hint = f"Hire the {HIRES[art['crew']]['title']} at Base Camp"
             else:
                 hint = "Still buried somewhere below"
-            for i, line in enumerate(wrap(f, hint, 20, rect.w - 84)[:2]):
-                draw_text(s, f, line, 20, MUTED, (rect.x + 72, rect.y + 35 + i * 18), "midleft")
+            for i, line in enumerate(wrap(f, hint, 18, rect.w - 80)[:2]):
+                draw_text(s, f, line, 18, MUTED, (rect.x + 72, rect.y + 35 + i * 17), "midleft")

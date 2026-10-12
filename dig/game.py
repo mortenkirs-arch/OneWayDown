@@ -10,13 +10,43 @@ import pygame
 from .biomes import BIOMES, biome_at
 from .appicon import set_app_icon
 from .audio import Audio
-from .config import AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
+from . import storage
+from .config import AUDIO_EXT, AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
 from .scenes import AchievementScene, ArtifactScene, CampScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
 from .ui import Fonts
 from .world import World
 
 MUSIC_FADE_OUT_MS = 700    # changing tracks: the old one fades out over this...
 MUSIC_FADE_IN_MS = 1500    # ...then the new one fades in over this
+
+
+WEB = sys.platform == "emscripten"   # a browser build (pygbag)
+
+
+def music_channel():
+    """In a browser, the music plays on a mixer channel kept for it (sound effects never take it)."""
+    pygame.mixer.set_reserved(1)
+    return pygame.mixer.Channel(0)
+
+
+def music_busy():
+    return music_channel().get_busy() if WEB else pygame.mixer.music.get_busy()
+
+
+def music_fadeout(ms):
+    if WEB:
+        music_channel().fadeout(ms)
+    else:
+        pygame.mixer.music.fadeout(ms)
+
+
+def web_log(text):
+    """A line in the browser's console (in a pygbag build; elsewhere, just printed)."""
+    try:
+        import platform
+        platform.window.console.log(text)
+    except Exception:
+        print(text)
 
 
 class Game:
@@ -26,6 +56,8 @@ class Game:
         the latest save and opening the menu."""
         self.slots = [save_path] if save_path else list(SAVE_SLOTS)
         self.save_path = self.latest_slot() or self.slots[0]   # (Continue: the save played most recently)
+        if WEB:   # (in a browser the sound is mixed between frames: a bigger buffer rides out a slow one, no crackle)
+            pygame.mixer.pre_init(44100, -16, 2, 4096)
         pygame.init()
         pygame.display.set_caption("One Way Down")
         set_app_icon()   # (before the window opens, so the title bar and taskbar both pick it up)
@@ -58,6 +90,7 @@ class Game:
         }
         self.scene = self.scenes["play" if world else "menu"]
         self.music = None   # which track is playing (None = silence)
+        self.music_sounds = {}   # (in a browser: the tracks, loaded as sounds - see start_music)
         self.music_start_at = 0.0   # when a track waiting for the last one to fade out should start
         self.update_music()
 
@@ -74,7 +107,7 @@ class Game:
         the boss theme instead while a boss is on the board (if there is one: assets/music/boss.wav)."""
         if self.scene is self.scenes["menu"] or getattr(self.scene, "return_to", None) == "menu":
             return "menu"
-        if self.world and self.world.boss() and os.path.exists(os.path.join(MUSIC_DIR, "boss.wav")):
+        if self.world and self.world.boss() and os.path.exists(os.path.join(MUSIC_DIR, "boss" + AUDIO_EXT)):
             return "boss"
         return "game"
 
@@ -85,16 +118,24 @@ class Game:
         if want == self.music or not pygame.mixer.get_init():
             return
         self.music = want
-        if pygame.mixer.music.get_busy():   # let the old track fade before the new one starts
-            pygame.mixer.music.fadeout(MUSIC_FADE_OUT_MS)
+        if music_busy():   # let the old track fade before the new one starts
+            music_fadeout(MUSIC_FADE_OUT_MS)
             self.music_start_at = time.time() + MUSIC_FADE_OUT_MS / 1000
         else:
             self.music_start_at = 0.0
             self.start_music()
 
     def start_music(self):
+        path = os.path.join(MUSIC_DIR, self.music + AUDIO_EXT)
         try:
-            pygame.mixer.music.load(os.path.join(MUSIC_DIR, self.music + ".wav"))
+            if WEB:   # (in a browser, changing pygame's music track hangs the page: the tracks are sounds instead)
+                if self.music not in self.music_sounds:
+                    self.music_sounds[self.music] = pygame.mixer.Sound(path)
+                channel = music_channel()
+                channel.set_volume(self.audio.level("music"))
+                channel.play(self.music_sounds[self.music], loops=-1, fade_ms=MUSIC_FADE_IN_MS)
+                return
+            pygame.mixer.music.load(path)
             pygame.mixer.music.set_volume(self.audio.level("music"))
             pygame.mixer.music.play(loops=-1, fade_ms=MUSIC_FADE_IN_MS)   # a seamless loop, repeated for ever
         except pygame.error:   # (missing file, or the device went away)
@@ -103,8 +144,8 @@ class Game:
     # ----- save slots -----------------------------------------------------
     def latest_slot(self):
         """The save written most recently, or None if there are none yet."""
-        saved = [p for p in self.slots if os.path.exists(p)]
-        return max(saved, key=os.path.getmtime) if saved else None
+        saved = [p for p in self.slots if storage.exists(p)]
+        return max(saved, key=storage.saved_at) if saved else None
 
     def open_slots(self, mode):
         """The save slots screen: "load" a save, pick one for a "new" game, or pick the new game's "mode"."""
@@ -186,36 +227,61 @@ class Game:
 
     # ----- persistence ----------------------------------------------------
     def load(self):
-        if not os.path.exists(self.save_path):
+        text = storage.read(self.save_path)
+        if text is None:
             return
         try:
-            with open(self.save_path) as f:
-                data = json.load(f)
-            self.world = World.from_dict(data)
-        except (OSError, ValueError, KeyError, TypeError):
+            self.world = World.from_dict(json.loads(text))
+        except (ValueError, KeyError, TypeError):
             self.world = None
 
     def save(self):
         if not self.world:
             return
-        os.makedirs(os.path.dirname(os.path.abspath(self.save_path)), exist_ok=True)   # (e.g. saves/ for tests)
-        tmp = self.save_path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.world.to_dict(), f)
-        os.replace(tmp, self.save_path)
+        storage.write(self.save_path, json.dumps(self.world.to_dict()))
         self.last_save = time.time()
 
     # ----- main loop ------------------------------------------------------
     def run(self):
         while True:
-            dt = min(0.05, self.clock.tick(FPS) / 1000)
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.quit()
-                self.scene.handle(event)
-            self.update(dt)
-            self.draw()
-            pygame.display.flip()
+            self.frame()
+
+    async def run_async(self):
+        """The main loop in a browser (pygbag): each frame hands control back to the page, or nothing would draw.
+        Opened with #debug on the address, slow frames and any error are reported in the browser's console."""
+        import asyncio
+        debug = "debug" in sys.argv
+        while True:
+            try:
+                started = time.perf_counter()
+                self.frame(debug)
+                if debug and time.perf_counter() - started > 0.25:
+                    web_log(f"slow frame: {time.perf_counter() - started:.2f}s in {type(self.scene).__name__} "
+                            f"({self.frame_parts})")
+            except Exception:
+                import traceback
+                web_log(traceback.format_exc())
+                raise
+            await asyncio.sleep(0)
+
+    def frame(self, timed=False):
+        clock = time.perf_counter
+        t0 = clock()
+        dt = min(0.05, self.clock.tick(FPS) / 1000)
+        t1 = clock()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.quit()
+            self.scene.handle(event)
+        t2 = clock()
+        self.update(dt)
+        t3 = clock()
+        self.draw()
+        t4 = clock()
+        pygame.display.flip()
+        if timed:
+            self.frame_parts = (f"tick {t1 - t0:.2f}, events {t2 - t1:.2f}, update {t3 - t2:.2f}, "
+                                f"draw {t4 - t3:.2f}, flip {clock() - t4:.2f}")
 
     def update(self, dt):
         if self.music_start_at and time.time() >= self.music_start_at:   # the old track has faded: start the new

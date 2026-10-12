@@ -11,14 +11,17 @@ each time, and quietly skipped if the file isn't there or there's no audio devic
 """
 import json
 import os
+import sys
+import time
 import random
 
 import pygame
 
-from .config import PROJECT_ROOT
+from . import storage
+from .config import AUDIO_EXT, DATA_DIR, RESOURCE_ROOT
 
-SETTINGS_PATH = os.path.join(PROJECT_ROOT, "settings.json")
-SFX_DIR = os.path.join(PROJECT_ROOT, "assets", "sfx")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+SFX_DIR = os.path.join(RESOURCE_ROOT, "assets", "sfx")
 DEFAULTS = {"master": 0.8, "music": 0.6, "sfx": 0.8}
 CHANNELS = [("master", "Master volume"), ("music", "Music"), ("sfx", "Sound effects")]
 # How loud each effect sits under the effects volume. Kept low for frequent sounds, so spam-clicking doesn't
@@ -35,29 +38,28 @@ SFX_GAIN = {
 }
 
 
+WEB = sys.platform == "emscripten"
+WEB_SOUND_GAP = 0.05   # in a browser, the same sound starts at most this often (seconds)
+
 class Audio:
     def __init__(self, path=SETTINGS_PATH):
         self.path = path
         self.volume = dict(DEFAULTS)
         self.sounds = {}
         self.playing = {}   # the channel each sound last played on (so it can be cut short)
+        self.last_played = {}   # (in a browser: when each sound last started)
         self.load()
 
     # ----- settings -------------------------------------------------------
     def load(self):
         try:
-            with open(self.path) as f:
-                saved = json.load(f)
+            saved = json.loads(storage.read(self.path) or "{}")
             self.volume.update({k: min(1.0, max(0.0, float(v))) for k, v in saved.items() if k in DEFAULTS})
-        except (OSError, ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError, AttributeError):
             pass   # no settings yet (or unreadable): the defaults
 
     def save(self):
-        try:
-            with open(self.path, "w") as f:
-                json.dump(self.volume, f, indent=2)
-        except OSError:
-            pass
+        storage.write(self.path, json.dumps(self.volume, indent=2))
 
     def set(self, channel, value):
         self.volume[channel] = min(1.0, max(0.0, value))
@@ -75,7 +77,10 @@ class Audio:
     def apply(self):
         """Push the current volumes to what's playing."""
         if self.ready():
-            pygame.mixer.music.set_volume(self.level("music"))
+            if sys.platform == "emscripten":   # (in a browser the music is on a channel of its own: see game.py)
+                pygame.mixer.Channel(0).set_volume(self.level("music"))
+            else:
+                pygame.mixer.music.set_volume(self.level("music"))
 
     def play(self, name, vol=1.0):
         """Play sound effect `name` at the effects volume: assets/sfx/<name>.wav, or - if there are several
@@ -88,9 +93,15 @@ class Audio:
             takes = self.sounds[name] = self._load(name)
         if not takes:
             return
-        sound = random.choice(takes)
-        sound.set_volume(min(1.0, self.level("sfx") * SFX_GAIN.get(name, 1.0) * vol))
-        self.playing[name] = sound.play()
+        if WEB:   # (in a browser, a burst of the same sound - a dozen picks at once - just muddies the mix)
+            now = time.time()
+            if now - self.last_played.get(name, 0.0) < WEB_SOUND_GAP:
+                return
+            self.last_played[name] = now
+        channel = random.choice(takes).play()
+        if channel is not None:   # (the volume on its channel: setting it on the sound would jump any copy still playing)
+            channel.set_volume(min(1.0, self.level("sfx") * SFX_GAIN.get(name, 1.0) * vol))
+        self.playing[name] = channel
 
     def stop(self, name, fade_ms=80):
         """Cut `name` short with a quick fade, if it's still playing (e.g. a wind-up that ended early)."""
@@ -100,10 +111,10 @@ class Audio:
 
     @staticmethod
     def _load(name):
-        paths = [os.path.join(SFX_DIR, name + ".wav")]
+        paths = [os.path.join(SFX_DIR, name + AUDIO_EXT)]
         k = 1
-        while os.path.exists(os.path.join(SFX_DIR, f"{name}_{k}.wav")):
-            paths.append(os.path.join(SFX_DIR, f"{name}_{k}.wav"))
+        while os.path.exists(os.path.join(SFX_DIR, f"{name}_{k}{AUDIO_EXT}")):
+            paths.append(os.path.join(SFX_DIR, f"{name}_{k}{AUDIO_EXT}"))
             k += 1
         takes = []
         for path in paths:

@@ -10,10 +10,13 @@ savegame.json is never touched; a boss guarding that depth rises straight away):
     uv run main.py --save saves/depth_39.json   carry on a test game (plays just that file, not the slots)
 """
 import argparse
+import asyncio   # (for the browser build: pygbag works out what to load from this file's imports)
 import os
 import sys
 
-from dig.config import PROJECT_ROOT
+import pygame   # noqa: F401 (likewise: without it here, pygbag leaves pygame out of the browser build)
+
+from dig.config import DATA_DIR
 
 
 def parse_args():
@@ -56,12 +59,21 @@ def main():
     from dig.game import Game
     from dig.testsaves import test_world
     if depth is not None:   # a test game: fresh each time, in its own save file
-        path = args.save or os.path.join(PROJECT_ROOT, TEST_SAVE_DIR, f"depth_{depth}.json")
-        print(f"Test game at {depth}m, saving to {os.path.relpath(path, PROJECT_ROOT)}")
+        path = args.save or os.path.join(DATA_DIR, TEST_SAVE_DIR, f"depth_{depth}.json")
+        print(f"Test game at {depth}m, saving to {os.path.relpath(path, DATA_DIR)}")
         Game(save_path=path, world=test_world(depth, gold=args.gold)).run()
     else:
         Game(save_path=args.save).run()
 
 
+async def main_web():
+    """In a browser (pygbag): the game's menu, run the browser's way (see Game.run_async)."""
+    from dig.game import Game
+    await Game().run_async()
+
+
 if __name__ == "__main__":
-    main()
+    if sys.platform == "emscripten":
+        asyncio.run(main_web())
+    else:
+        main()

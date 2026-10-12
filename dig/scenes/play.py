@@ -445,6 +445,7 @@ class PlayScene(Scene):
         locked = not w.expedition and not w.camp_ready   # (no camp until The Void Maw has fallen once)
         camp.text = "Camp - 100m" if locked else "Base Camp (B)"
         camp.color = (64, 60, 72) if locked else (120, 86, 50)
+        camp.nudge = 12 if locked else 0   # (clear of the padlock)
         for b in self.buttons:
             b.draw(surf, f, mouse)
         if locked:   # a padlock on it: there's something down there to unlock
@@ -456,10 +457,7 @@ class PlayScene(Scene):
             draw_text(surf, f, str(affordable), 22, TEXT, badge, "center")
 
         down = sum(1 for m in w.miners if m.state == "down")
-        specialists = sum(1 for m in w.miners if m.role != "miner")
         crew_text = f"Crew: {len(w.miners) - down}/{len(w.miners)}" + (f"  ({down} dead)" if down else "")
-        if specialists:
-            crew_text += f"  incl. {specialists} specialist{'s' if specialists != 1 else ''}"
         stats = [(crew_text, BAD if down else TEXT),
                  (f"Pick dmg: {fmt(w.miner_hit_damage())}", TEXT),
                  (f"Click dmg: {fmt(w.click_hit_damage())}  (blocks)", TEXT),

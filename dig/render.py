@@ -17,7 +17,7 @@ from .effects import CRIT_BURST_SECS, QUAKE_SPEED
 from .icons import draw_icon
 from .iso import cube_faces, draw_cube, iso, point_in_poly
 from .sprites import draw_banner, draw_bone, draw_lightning_rod, draw_mudling, draw_pet_chest, draw_target_dummy, draw_bomb, draw_climber, draw_enemy, draw_ghost, draw_miner, draw_rope, enemy_anchor
-from .world_layout import (BALLISTA_POS, BOILER_POS, BOLT_SECS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
+from .world_layout import (BALLISTA_POS, BOILER_POS, CHEST_FX_SECS, CHOMP_SHOW, FEMUR_SECS, ROCK_SECS,
                            SPIKE_FX_SECS, STEAM_SECS, WHETSTONE_POS)
 from .ui import COIN, COIN_EDGE, COIN_SHINE, gold_label
 from .upgrades import PHANTOM_WINDUP
@@ -1137,15 +1137,26 @@ def draw_ballista(surf, base, aim, timer, t):
 
 
 def draw_bolts(surf, world, t):
-    for (sx, sy), enemy, age in world.bolts:
-        q = min(1.0, age / BOLT_SECS)
-        tx, ty = enemy_anchor(enemy, world.rise, t)
-        x, y = sx + (tx - sx) * q, sy + (ty - sy) * q - math.sin(q * math.pi) * 20
-        dx, dy = tx - sx, ty - sy
-        norm = math.hypot(dx, dy) or 1.0
-        tail = (x - dx / norm * 14, y - dy / norm * 14)
-        pygame.draw.line(surf, (140, 100, 60), tail, (x, y), 2)
-        pygame.draw.circle(surf, (210, 210, 220), (int(x), int(y)), 2)
+    """Ballista bolts, flying level from the Ballista through whatever's in their way: a heavy shaft with an iron
+    head and a streak of speed behind it."""
+    for bolt in world.bolts:
+        z = bolt.z + world.rise
+
+        def at(d):   # (where the bolt is, `d` tiles along its flight, on screen - at the Ballista's height)
+            x, y = iso(*bolt.at(d), z)
+            return x, y - 18
+        head = at(bolt.dist)
+        tail = at(max(0.0, bolt.dist - 0.5))
+        streak = at(max(0.0, bolt.dist - 1.4))
+        pygame.draw.line(surf, (235, 220, 190), streak, tail, 1)   # (the streak of its speed)
+        pygame.draw.line(surf, (110, 76, 44), tail, head, 4)
+        pygame.draw.line(surf, (170, 124, 80), tail, head, 2)
+        n = math.hypot(head[0] - tail[0], head[1] - tail[1]) or 1.0
+        ux, uy = (head[0] - tail[0]) / n, (head[1] - tail[1]) / n
+        pygame.draw.polygon(surf, (215, 215, 225), [(head[0] + ux * 6, head[1] + uy * 6), (head[0] - uy * 3, head[1] + ux * 3),
+                                                    (head[0] + uy * 3, head[1] - ux * 3)])
+        for d in (-1, 1):   # fletching
+            pygame.draw.line(surf, (230, 230, 220), tail, (tail[0] - ux * 4 + d * uy * 4, tail[1] - uy * 4 - d * ux * 4), 2)
 
 
 def draw_arrows(surf, world, t):

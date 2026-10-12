@@ -20,7 +20,7 @@ from .upgrades import UPGRADES, is_maxed
 # Upgrades that put another body on the dig (Protect Mr. President allows Hire Miner up to level 1, and none of these)
 HIRE_UPGRADES = ("driller", "guard", "medic", "demolition", "foreman")
 SPEED_DEMON_SECS = 30 * 60   # Speed Demon: an expedition beaten in under this long...
-BLINK_SECS = 15 * 60         # ...and Blink and You'll Miss It, in under this
+BLINK_SECS = 20 * 60         # ...and Blink and You'll Miss It, in under this
 QUICK_KILL_SECS = 10.0       # Ten-Second Takedown: a boss beaten within this long of it rising
 
 
@@ -95,8 +95,9 @@ ACHIEVEMENTS = {
                      check=lambda w: len(w.camp) >= len(HIRES)),
     "item_1": dict(name="Souvenir", icon="scroll", desc="Take one of the camp's items",
                    check=lambda w: len(w.camp_items) >= 1),
-    "items_all": dict(name="Fully Furnished", icon="chest", desc=f"Own all {len(ITEMS)} of the camp's items",
-                      check=lambda w: len(w.camp_items) >= len(ITEMS)),
+    "items_all": dict(name="The Full Camp", icon="chest", tier="legendary",
+                      desc=f"Complete Base Camp: fill all {len(HIRES)} tents and take all {len(ITEMS)} of the camp's items",
+                      check=lambda w: len(w.camp) >= len(HIRES) and len(w.camp_items) >= len(ITEMS)),
     # ----- the crew --------------------------------------------------------------------------------------------
     "crew_10": dict(name="Small Business", icon="team", desc="Have 10 crew on the dig at once",
                     check=lambda w: len(_crew(w)) >= 10),
