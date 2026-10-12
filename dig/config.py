@@ -70,6 +70,7 @@ SAVE_SLOTS = [SAVE_PATH] + [os.path.join(DATA_DIR, f"savegame_{n}.json") for n i
 AUTOSAVE_SECS = 10
 MUSIC_DIR = os.path.join(RESOURCE_ROOT, "assets", "music")   # (regenerate with: uv run tools/make_music.py)
 AUDIO_EXT = ".ogg" if sys.platform == "emscripten" else ".wav"   # (browsers want Ogg: tools/build_web.py converts)
+DONATE_URL = "https://blindhermit.itch.io/one-way-down/purchase"   # (the main menu's Donate: itch.io's tip page)
 
 PANEL = (38, 32, 52)
 PANEL_EDGE = (78, 66, 104)

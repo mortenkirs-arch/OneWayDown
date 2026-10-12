@@ -6,15 +6,17 @@ import time
 import pygame
 
 from ..blocks import BLOCKS
-from ..config import GOLD, H, TEXT, W
+from ..config import DONATE_URL, GOLD, H, MUTED, TEXT, W
 from ..iso import draw_cube, origin_at
 from ..ui import Button, draw_gold, draw_text
-from ..util import fmt, shade
+from ..util import fmt, open_url, shade
 from ..title import Title
 from .base import Scene
 
 
 MENU_DY = (H - 720) // 2   # keep the menu vertically centred on taller windows
+DONATE_W, DONATE_H, DONATE_MARGIN = 200, 52, 24   # the Donate button, in the bottom-right corner
+DONATE_NOTE = ["If you're enjoying it, a tip or a coffee", "is greatly appreciated - thank you!"]
 
 
 class MenuScene(Scene):
@@ -32,6 +34,8 @@ class MenuScene(Scene):
             "settings": Button((cx, 555 + dy, 320, 60), "Settings", lambda: game.open_settings("menu"),
                                color=(64, 84, 110)),
             "quit": Button((cx, 630 + dy, 320, 60), "Quit", game.quit, color=(120, 60, 70)),
+            "donate": Button((W - DONATE_MARGIN - DONATE_W, H - DONATE_MARGIN - DONATE_H, DONATE_W, DONATE_H),
+                             "Donate", lambda: open_url(DONATE_URL), size=26, color=(150, 96, 44)),
         }
         if sys.platform == "emscripten":   # (in a browser there's nothing to quit to: you just close the tab)
             del self.buttons["quit"]
@@ -76,3 +80,7 @@ class MenuScene(Scene):
         b["continue"].enabled = b["load"].enabled = self.has_saves
         for btn in b.values():
             btn.draw(surf, self.fonts, mouse)
+        right, y = W - DONATE_MARGIN, b["donate"].rect.y - 12   # (the note above Donate, bottom line first)
+        for line in reversed(DONATE_NOTE):
+            y = draw_text(surf, self.fonts, line, 18, MUTED, (right, y), "bottomright").top - 2
+        draw_text(surf, self.fonts, "This game is fully free!", 22, GOLD, (right, y), "bottomright")
