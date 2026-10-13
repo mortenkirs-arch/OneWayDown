@@ -23,7 +23,8 @@ redrawn from the game's own title on every build (git shows when it changes), an
 converted from a .wav only when there's no .ogg yet or the .wav is newer (so soundfile and numpy are only needed then).
 
 In a browser the game keeps its saves and settings in the browser's own storage (see dig/storage.py), and plays the
-.ogg audio made here (see config.AUDIO_EXT).
+.ogg audio made here (see config.AUDIO_EXT), through the browser's own mixer rather than pygame's
+(see dig/webaudio.py).
 """
 import os
 import shutil

@@ -10,7 +10,7 @@ import pygame
 from .biomes import BIOMES, biome_at
 from .appicon import set_app_icon
 from .audio import Audio
-from . import storage
+from . import storage, webaudio
 from .config import AUDIO_EXT, AUTOSAVE_SECS, FPS, GOLD, H, MUSIC_DIR, PANEL, SAVE_SLOTS, W
 from .scenes import AchievementScene, ArtifactScene, CampScene, CrewScene, MenuScene, PlayScene, SettingsScene, SlotScene, UpgradeScene
 from .ui import Fonts
@@ -21,23 +21,6 @@ MUSIC_FADE_IN_MS = 1500    # ...then the new one fades in over this
 
 
 WEB = sys.platform == "emscripten"   # a browser build (pygbag)
-
-
-def music_channel():
-    """In a browser, the music plays on a mixer channel kept for it (sound effects never take it)."""
-    pygame.mixer.set_reserved(1)
-    return pygame.mixer.Channel(0)
-
-
-def music_busy():
-    return music_channel().get_busy() if WEB else pygame.mixer.music.get_busy()
-
-
-def music_fadeout(ms):
-    if WEB:
-        music_channel().fadeout(ms)
-    else:
-        pygame.mixer.music.fadeout(ms)
 
 
 def web_log(text):
@@ -56,9 +39,9 @@ class Game:
         the latest save and opening the menu."""
         self.slots = [save_path] if save_path else list(SAVE_SLOTS)
         self.save_path = self.latest_slot() or self.slots[0]   # (Continue: the save played most recently)
-        if WEB:   # (in a browser the sound is mixed between frames: a bigger buffer rides out a slow one, no crackle)
-            pygame.mixer.pre_init(44100, -16, 2, 4096)
         pygame.init()
+        if WEB:   # (in a browser the browser itself plays the sound - see webaudio.py - so pygame's mixer isn't needed)
+            pygame.mixer.quit()
         pygame.display.set_caption("One Way Down")
         set_app_icon()   # (before the window opens, so the title bar and taskbar both pick it up)
         self.audio = Audio()   # volume settings, music and sound effects
@@ -90,7 +73,6 @@ class Game:
         }
         self.scene = self.scenes["play" if world else "menu"]
         self.music = None   # which track is playing (None = silence)
-        self.music_sounds = {}   # (in a browser: the tracks, loaded as sounds - see start_music)
         self.music_start_at = 0.0   # when a track waiting for the last one to fade out should start
         self.update_music()
 
@@ -115,11 +97,15 @@ class Game:
         """Move to the track the current screen wants: the old one fades out, then the new one fades in.
         Quietly does nothing without an audio device."""
         want = self.wanted_music()
-        if want == self.music or not pygame.mixer.get_init():
+        if want == self.music or not self.audio.ready():
             return
         self.music = want
-        if music_busy():   # let the old track fade before the new one starts
-            music_fadeout(MUSIC_FADE_OUT_MS)
+        if WEB:   # (the browser fades one track into the next itself)
+            webaudio.music(os.path.join(MUSIC_DIR, want + AUDIO_EXT), self.audio.level("music"),
+                           MUSIC_FADE_OUT_MS, MUSIC_FADE_IN_MS)
+            return
+        if pygame.mixer.music.get_busy():   # let the old track fade before the new one starts
+            pygame.mixer.music.fadeout(MUSIC_FADE_OUT_MS)
             self.music_start_at = time.time() + MUSIC_FADE_OUT_MS / 1000
         else:
             self.music_start_at = 0.0
@@ -128,13 +114,6 @@ class Game:
     def start_music(self):
         path = os.path.join(MUSIC_DIR, self.music + AUDIO_EXT)
         try:
-            if WEB:   # (in a browser, changing pygame's music track hangs the page: the tracks are sounds instead)
-                if self.music not in self.music_sounds:
-                    self.music_sounds[self.music] = pygame.mixer.Sound(path)
-                channel = music_channel()
-                channel.set_volume(self.audio.level("music"))
-                channel.play(self.music_sounds[self.music], loops=-1, fade_ms=MUSIC_FADE_IN_MS)
-                return
             pygame.mixer.music.load(path)
             pygame.mixer.music.set_volume(self.audio.level("music"))
             pygame.mixer.music.play(loops=-1, fade_ms=MUSIC_FADE_IN_MS)   # a seamless loop, repeated for ever

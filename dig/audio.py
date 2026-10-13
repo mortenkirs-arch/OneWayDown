@@ -17,7 +17,7 @@ import random
 
 import pygame
 
-from . import storage
+from . import storage, webaudio
 from .config import AUDIO_EXT, DATA_DIR, RESOURCE_ROOT
 
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
@@ -46,9 +46,13 @@ class Audio:
         self.path = path
         self.volume = dict(DEFAULTS)
         self.sounds = {}
-        self.playing = {}   # the channel each sound last played on (so it can be cut short)
+        self.playing = {}   # the channel each sound last played on (so it can be cut short; in a browser: its id)
         self.last_played = {}   # (in a browser: when each sound last started)
+        self.next_id = 0
         self.load()
+        if WEB:   # (decoded up front, so no sound waits for it the first time)
+            for name in sorted(os.listdir(SFX_DIR)) if os.path.isdir(SFX_DIR) else ():
+                webaudio.preload(os.path.join(SFX_DIR, name))
 
     # ----- settings -------------------------------------------------------
     def load(self):
@@ -72,15 +76,14 @@ class Audio:
     # ----- playback -------------------------------------------------------
     @staticmethod
     def ready():
-        return bool(pygame.mixer.get_init())
+        return webaudio.available() if WEB else bool(pygame.mixer.get_init())
 
     def apply(self):
         """Push the current volumes to what's playing."""
-        if self.ready():
-            if sys.platform == "emscripten":   # (in a browser the music is on a channel of its own: see game.py)
-                pygame.mixer.Channel(0).set_volume(self.level("music"))
-            else:
-                pygame.mixer.music.set_volume(self.level("music"))
+        if WEB:
+            webaudio.music_volume(self.level("music"))
+        elif self.ready():
+            pygame.mixer.music.set_volume(self.level("music"))
 
     def play(self, name, vol=1.0):
         """Play sound effect `name` at the effects volume: assets/sfx/<name>.wav, or - if there are several
@@ -98,15 +101,24 @@ class Audio:
             if now - self.last_played.get(name, 0.0) < WEB_SOUND_GAP:
                 return
             self.last_played[name] = now
+        volume = min(1.0, self.level("sfx") * SFX_GAIN.get(name, 1.0) * vol)
+        if WEB:   # (the browser plays it: see webaudio.py)
+            self.next_id += 1
+            webaudio.play(self.next_id, random.choice(takes), volume)
+            self.playing[name] = self.next_id
+            return
         channel = random.choice(takes).play()
         if channel is not None:   # (the volume on its channel: setting it on the sound would jump any copy still playing)
-            channel.set_volume(min(1.0, self.level("sfx") * SFX_GAIN.get(name, 1.0) * vol))
+            channel.set_volume(volume)
         self.playing[name] = channel
 
     def stop(self, name, fade_ms=80):
         """Cut `name` short with a quick fade, if it's still playing (e.g. a wind-up that ended early)."""
         channel = self.playing.pop(name, None)
-        if channel is not None and channel.get_busy():
+        if WEB:
+            if channel is not None:
+                webaudio.stop(channel, fade_ms)
+        elif channel is not None and channel.get_busy():
             channel.fadeout(fade_ms)
 
     @staticmethod
@@ -116,6 +128,8 @@ class Audio:
         while os.path.exists(os.path.join(SFX_DIR, f"{name}_{k}{AUDIO_EXT}")):
             paths.append(os.path.join(SFX_DIR, f"{name}_{k}{AUDIO_EXT}"))
             k += 1
+        if WEB:   # (in a browser a take is just its path: the browser plays it)
+            return [path for path in paths if os.path.exists(path)]
         takes = []
         for path in paths:
             if os.path.exists(path):

@@ -163,6 +163,107 @@ config = {
     fb_height : "{{cookiecutter.height}}"
 }
 
+// The game's sound, mixed by the browser (Web Audio) instead of by pygame. pygame mixes in Python between frames and
+// hands the browser a buffer at a time, so every sound waited a buffer's length to start; here each sound effect is
+// a source node of its own, started the moment the game asks, mixed on the browser's audio thread (so a slow frame
+// can't make it crackle either). The game calls this from dig/webaudio.py, naming files in its unpacked files (FS).
+window.owdAudio = (() => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    const ctx = new AC();
+    const out = ctx.createGain();
+    out.connect(ctx.destination);
+    const unlock = () => { if (ctx.state !== "running") ctx.resume(); };   // (browsers start it paused until a click)
+    for (const ev of ["pointerdown", "keydown", "touchend"]) window.addEventListener(ev, unlock, true);
+
+    const VOICES = 8;            // at most this many effects at once, like pygame's 8 channels on the desktop
+    const buffers = new Map();   // path -> its decoded sound (a promise: null if it can't be read)
+    const voices = new Map();    // id -> {src, gain} of an effect playing (or still decoding: src null)
+    let music = null;            // {gain, src} of the track playing
+
+    function decode(path) {
+        if (!buffers.has(path)) {
+            let p;
+            try {
+                const bytes = FS.readFile(path);
+                p = ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+            } catch (e) {
+                p = Promise.resolve(null);
+            }
+            buffers.set(path, p.catch(() => null));
+        }
+        return buffers.get(path);
+    }
+
+    function fadeOut(node, ms) {   // fade {gain, src} to silence over `ms`, then let it go
+        const t = ctx.currentTime, g = node.gain.gain;
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(g.value, t);
+        g.linearRampToValueAtTime(0, t + ms / 1000);
+        if (node.src) node.src.stop(t + ms / 1000);
+        setTimeout(() => node.gain.disconnect(), ms + 100);
+    }
+
+    return {
+        preload(path) { decode(path); },
+
+        play(id, path, volume) {   // a sound effect, at `volume` (0..1)
+            unlock();
+            if (voices.size >= VOICES) return;
+            const voice = {gain: ctx.createGain(), src: null};
+            voice.gain.gain.value = volume;
+            voice.gain.connect(out);
+            voices.set(id, voice);
+            decode(path).then(buf => {
+                if (voices.get(id) !== voice) return;   // (stopped before it was ready)
+                if (!buf) { voices.delete(id); return; }
+                const src = voice.src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.connect(voice.gain);
+                src.onended = () => { if (voices.get(id) === voice) voices.delete(id); voice.gain.disconnect(); };
+                src.start();
+            });
+        },
+
+        stop(id, ms) {   // cut an effect short with a quick fade
+            const voice = voices.get(id);
+            if (!voice) return;
+            voices.delete(id);
+            fadeOut(voice, ms);
+        },
+
+        music(path, volume, fadeOutMs, fadeInMs) {   // change track: the old fades out, then the new fades in
+            const wait = music ? fadeOutMs : 0;
+            if (music) fadeOut(music, fadeOutMs);
+            music = null;
+            if (!path) return;
+            const track = music = {gain: ctx.createGain(), src: null, volume};
+            track.gain.gain.value = 0;
+            track.gain.connect(out);
+            const from = ctx.currentTime + wait / 1000;
+            decode(path).then(buf => {
+                if (music !== track || !buf) return;
+                const src = track.src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.loop = true;   // a seamless loop, repeated for ever
+                src.connect(track.gain);
+                const at = Math.max(ctx.currentTime, from);
+                src.start(at);
+                track.gain.gain.setValueAtTime(0, at);
+                track.gain.gain.linearRampToValueAtTime(track.volume, at + fadeInMs / 1000);
+            });
+        },
+
+        musicVolume(volume) {
+            if (!music) return;
+            music.volume = volume;
+            const g = music.gain.gain, t = ctx.currentTime;
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(volume, t);
+        },
+    };
+})();
+
 // One Way Down's loading screen (instead of pygbag's green box): the logo on the night sky, a bar that fills while
 // Python and the game download, then "Click to start" (browsers only allow sound after a click).
 var loader_fill = 0, loader_timer = null;
